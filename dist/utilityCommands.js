@@ -183,6 +183,34 @@ async function runDoctor() {
                     console.log(chalk_1.default.gray(`    Missing config file`));
                 }
             }
+            // Check symlinks for profiles that share data with a master profile
+            if (profile.sharedWith) {
+                const masterDir = profile.sharedWith === 'claude'
+                    ? path.join(os.homedir(), '.claude')
+                    : config.getProfileDir(profile.sharedWith);
+                console.log(chalk_1.default.gray(`    Shared symlinks (→ ${profile.sharedWith}):`));
+                for (const dir of config_1.SHAREABLE_DIRS) {
+                    const linkPath = path.join(profileDir, dir);
+                    const expectedTarget = path.join(masterDir, dir);
+                    let ok = false;
+                    try {
+                        const stat = fs.lstatSync(linkPath);
+                        if (stat.isSymbolicLink()) {
+                            const actual = fs.realpathSync(linkPath);
+                            ok = actual === fs.realpathSync(expectedTarget);
+                        }
+                    }
+                    catch {
+                        ok = false;
+                    }
+                    if (ok) {
+                        console.log(chalk_1.default.green(`      ✓ ${dir}`));
+                    }
+                    else {
+                        console.log(chalk_1.default.red(`      ✗ ${dir}`));
+                    }
+                }
+            }
         }
     }
     // Summary
@@ -451,13 +479,29 @@ async function runClone(sourceName, targetName) {
         ]);
         apiKey = answer.apiKey.trim();
     }
+    // Ask about sharing inheritance if source profile has sharedWith set
+    let inheritSharedWith = undefined;
+    if (source.sharedWith) {
+        const { inheritShare } = await inquirer_1.default.prompt([
+            {
+                type: 'confirm',
+                name: 'inheritShare',
+                message: `Source profile shares data with ${source.sharedWith}. Should the clone also share with ${source.sharedWith}?`,
+                default: false
+            }
+        ]);
+        if (inheritShare) {
+            inheritSharedWith = source.sharedWith;
+        }
+    }
     // Create new profile
     const newProfile = {
         ...source,
         name: targetName,
         commandName: targetName,
         apiKey,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        sharedWith: inheritSharedWith
     };
     config.addProfile(newProfile);
     const provider = (0, providers_1.getProvider)(source.provider);
@@ -467,6 +511,10 @@ async function runClone(sourceName, targetName) {
     }
     if (cli) {
         config.createWrapperScript(targetName, cli);
+    }
+    // Set up shared dirs if clone inherits sharing
+    if (inheritSharedWith) {
+        config.setupSharedDirs(targetName, inheritSharedWith);
     }
     console.log(chalk_1.default.green(`\n✓ Created ${targetName} (${provider?.displayName})\n`));
 }

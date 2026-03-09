@@ -113,7 +113,12 @@ program
       const provider = getProvider(profile.provider);
       const cli = getCLI(profile.cliType || 'claude');
       const sharedTag = profile.sharedWith ? chalk.magenta(` [shared ↔ ${profile.sharedWith}]`) : '';
-      console.log(chalk.cyan('▸'), chalk.bold(profile.commandName) + sharedTag);
+      // Show which profiles share data with this profile (reverse dependency)
+      const sharingProfiles = profiles.filter(p => p.sharedWith === profile.commandName);
+      const reverseTag = sharingProfiles.length > 0
+        ? chalk.gray(` (← shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
+        : '';
+      console.log(chalk.cyan('▸'), chalk.bold(profile.commandName) + sharedTag + reverseTag);
       console.log(chalk.gray('  CLI:'), cli?.displayName || profile.cliType);
       console.log(chalk.gray('  Provider:'), provider?.displayName || profile.provider);
       console.log(chalk.gray('  Model:'), profile.model || 'default');
@@ -121,7 +126,13 @@ program
       console.log();
     });
 
-    console.log(chalk.gray('Default Claude account is in ~/.claude/ (use "claude" command)\n'));
+    // Show reverse dependency for the default claude account
+    const claudeSharingProfiles = profiles.filter(p => p.sharedWith === 'claude');
+    console.log(chalk.gray('Default Claude account is in ~/.claude/ (use "claude" command)'));
+    if (claudeSharingProfiles.length > 0) {
+      console.log(chalk.gray(`  (← shared by: ${claudeSharingProfiles.map(p => p.commandName).join(', ')})`));
+    }
+    console.log();
   });
 
 // Remove provider command
@@ -148,6 +159,27 @@ program
         console.log(chalk.yellow(`  This is a system default and should not be managed by sweetch.`));
         console.log(chalk.gray(`  To backup: sweetch backup-chats ${commandName}\n`));
         process.exit(1);
+      }
+
+      // Warn if other profiles share data with this profile
+      const dependents = profiles.filter(p => p.sharedWith === commandName);
+      if (dependents.length > 0) {
+        const depNames = dependents.map(p => p.commandName).join(', ');
+        console.log(chalk.yellow(`\n⚠️  The following profiles are sharing data with this one: ${depNames}`));
+        console.log(chalk.yellow('   Their symlinks will break.'));
+
+        const { confirmDependents } = await import('inquirer').then(m => m.default.prompt([
+          {
+            type: 'confirm',
+            name: 'confirmDependents',
+            message: 'Remove anyway?',
+            default: false
+          }
+        ]));
+        if (!confirmDependents) {
+          console.log(chalk.yellow('\nCancelled\n'));
+          return;
+        }
       }
 
       // Check for chat history and offer backup
@@ -595,6 +627,22 @@ program
       await runReset();
     } catch (error: any) {
       console.error(chalk.red('Error:'), error.message);
+      process.exit(1);
+    }
+  });
+
+// Update command - Self-update sweech
+program
+  .command('update')
+  .description('Update sweech to the latest version from GitHub')
+  .action(async () => {
+    try {
+      console.log(chalk.bold('\n🔄 Updating sweech...\n'));
+      const { execSync: execSyncUpdate } = require('child_process');
+      execSyncUpdate('npm install -g github:vykeai/sweech', { stdio: 'inherit' });
+      console.log(chalk.green('\n✓ sweech updated successfully\n'));
+    } catch (error: any) {
+      console.error(chalk.red('Update failed:'), error.message);
       process.exit(1);
     }
   });

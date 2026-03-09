@@ -90,8 +90,10 @@ function render(entries, state) {
         const selected = i === state.selectedIndex;
         const pointer = selected ? chalk_1.default.cyan('❯') : ' ';
         const name = selected ? chalk_1.default.cyan.bold(entry.name) : chalk_1.default.white(entry.name);
-        const label = chalk_1.default.gray(`(${entry.label})`);
-        lines.push(`${pointer} ${name} ${label}`);
+        const sharedIndicator = entry.sharedWith ? chalk_1.default.gray(' [shared]') : '';
+        const modelPart = entry.model ? chalk_1.default.gray(` · ${entry.model}`) : '';
+        const label = chalk_1.default.gray(`(${entry.label}`) + modelPart + chalk_1.default.gray(')');
+        lines.push(`${pointer} ${name}${sharedIndicator} ${label}`);
     });
     lines.push('');
     // Toggles
@@ -129,7 +131,9 @@ async function runLauncher() {
                 command: cliType,
                 configDir: config.getProfileDir(p.commandName),
                 label: (0, providers_1.getProvider)(p.provider)?.displayName || p.provider,
-                yoloFlag: cli?.yoloFlag || '--dangerously-skip-permissions'
+                yoloFlag: cli?.yoloFlag || '--dangerously-skip-permissions',
+                sharedWith: p.sharedWith,
+                model: p.model
             };
         })
     ];

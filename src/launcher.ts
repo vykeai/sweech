@@ -22,6 +22,8 @@ interface LaunchEntry {
   configDir: string | null;
   label: string;
   yoloFlag: string;
+  sharedWith?: string;
+  model?: string;
 }
 
 interface LaunchState {
@@ -71,8 +73,10 @@ function render(entries: LaunchEntry[], state: LaunchState): void {
     const selected = i === state.selectedIndex;
     const pointer = selected ? chalk.cyan('❯') : ' ';
     const name = selected ? chalk.cyan.bold(entry.name) : chalk.white(entry.name);
-    const label = chalk.gray(`(${entry.label})`);
-    lines.push(`${pointer} ${name} ${label}`);
+    const sharedIndicator = entry.sharedWith ? chalk.gray(' [shared]') : '';
+    const modelPart = entry.model ? chalk.gray(` · ${entry.model}`) : '';
+    const label = chalk.gray(`(${entry.label}`) + modelPart + chalk.gray(')');
+    lines.push(`${pointer} ${name}${sharedIndicator} ${label}`);
   });
 
   lines.push('');
@@ -119,7 +123,9 @@ export async function runLauncher(): Promise<void> {
         command: cliType,
         configDir: config.getProfileDir(p.commandName),
         label: getProvider(p.provider)?.displayName || p.provider,
-        yoloFlag: cli?.yoloFlag || '--dangerously-skip-permissions'
+        yoloFlag: cli?.yoloFlag || '--dangerously-skip-permissions',
+        sharedWith: p.sharedWith,
+        model: p.model
       };
     })
   ];

@@ -88,10 +88,21 @@ class ConfigManager {
         if (fs.existsSync(wrapperPath)) {
             fs.unlinkSync(wrapperPath);
         }
-        // Remove profile config directory
+        // Remove profile config directory (skip rmSync on symlinks - just unlink them)
         const profileDir = this.getProfileDir(commandName);
         if (fs.existsSync(profileDir)) {
-            fs.rmSync(profileDir, { recursive: true, force: true });
+            try {
+                const stat = fs.lstatSync(profileDir);
+                if (stat.isSymbolicLink()) {
+                    fs.unlinkSync(profileDir);
+                }
+                else {
+                    fs.rmSync(profileDir, { recursive: true, force: true });
+                }
+            }
+            catch {
+                fs.rmSync(profileDir, { recursive: true, force: true });
+            }
         }
     }
     createProfileConfig(commandName, provider, apiKey, cliType = 'claude', oauthToken, useNativeAuth = false) {

@@ -10,7 +10,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { ConfigManager, ProfileConfig } from './config';
+import { ConfigManager, ProfileConfig, SHAREABLE_DIRS } from './config';
 import { getCLI } from './clis';
 import { getProvider } from './providers';
 import { detectInstalledCLIs } from './cliDetection';
@@ -143,6 +143,34 @@ export async function runDoctor(): Promise<void> {
         }
         if (!configExists) {
           console.log(chalk.gray(`    Missing config file`));
+        }
+      }
+
+      // Check symlinks for profiles that share data with a master profile
+      if (profile.sharedWith) {
+        const masterDir = profile.sharedWith === 'claude'
+          ? path.join(os.homedir(), '.claude')
+          : config.getProfileDir(profile.sharedWith);
+
+        console.log(chalk.gray(`    Shared symlinks (→ ${profile.sharedWith}):`));
+        for (const dir of SHAREABLE_DIRS) {
+          const linkPath = path.join(profileDir, dir);
+          const expectedTarget = path.join(masterDir, dir);
+          let ok = false;
+          try {
+            const stat = fs.lstatSync(linkPath);
+            if (stat.isSymbolicLink()) {
+              const actual = fs.realpathSync(linkPath);
+              ok = actual === fs.realpathSync(expectedTarget);
+            }
+          } catch {
+            ok = false;
+          }
+          if (ok) {
+            console.log(chalk.green(`      ✓ ${dir}`));
+          } else {
+            console.log(chalk.red(`      ✗ ${dir}`));
+          }
         }
       }
     }
@@ -447,13 +475,30 @@ export async function runClone(sourceName: string, targetName: string): Promise<
     apiKey = answer.apiKey.trim();
   }
 
+  // Ask about sharing inheritance if source profile has sharedWith set
+  let inheritSharedWith: string | undefined = undefined;
+  if (source.sharedWith) {
+    const { inheritShare } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'inheritShare',
+        message: `Source profile shares data with ${source.sharedWith}. Should the clone also share with ${source.sharedWith}?`,
+        default: false
+      }
+    ]);
+    if (inheritShare) {
+      inheritSharedWith = source.sharedWith;
+    }
+  }
+
   // Create new profile
   const newProfile: ProfileConfig = {
     ...source,
     name: targetName,
     commandName: targetName,
     apiKey,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    sharedWith: inheritSharedWith
   };
 
   config.addProfile(newProfile);
@@ -465,6 +510,11 @@ export async function runClone(sourceName: string, targetName: string): Promise<
   }
   if (cli) {
     config.createWrapperScript(targetName, cli);
+  }
+
+  // Set up shared dirs if clone inherits sharing
+  if (inheritSharedWith) {
+    config.setupSharedDirs(targetName, inheritSharedWith);
   }
 
   console.log(chalk.green(`\n✓ Created ${targetName} (${provider?.displayName})\n`));
