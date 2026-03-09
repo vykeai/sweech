@@ -128,10 +128,14 @@ export async function runDoctor(): Promise<void> {
         (fs.statSync(wrapperPath).mode & parseInt('111', 8)) !== 0;
       const configExists = fs.existsSync(settingsPath);
 
+      const sharedTag = profile.sharedWith
+        ? chalk.magenta(` [shared ↔ ${profile.sharedWith}]`)
+        : '';
+
       if (wrapperExecutable && configExists) {
-        console.log(chalk.green(`  ✓ ${profile.commandName} → ${provider?.displayName}`));
+        console.log(chalk.green(`  ✓ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
       } else {
-        console.log(chalk.yellow(`  ⚠ ${profile.commandName} → ${provider?.displayName}`));
+        console.log(chalk.yellow(`  ⚠ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
         if (!wrapperExists) {
           console.log(chalk.gray(`    Missing wrapper script`));
         } else if (!wrapperExecutable) {

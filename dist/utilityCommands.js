@@ -165,11 +165,14 @@ async function runDoctor() {
             const wrapperExecutable = wrapperExists &&
                 (fs.statSync(wrapperPath).mode & parseInt('111', 8)) !== 0;
             const configExists = fs.existsSync(settingsPath);
+            const sharedTag = profile.sharedWith
+                ? chalk_1.default.magenta(` [shared ↔ ${profile.sharedWith}]`)
+                : '';
             if (wrapperExecutable && configExists) {
-                console.log(chalk_1.default.green(`  ✓ ${profile.commandName} → ${provider?.displayName}`));
+                console.log(chalk_1.default.green(`  ✓ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
             }
             else {
-                console.log(chalk_1.default.yellow(`  ⚠ ${profile.commandName} → ${provider?.displayName}`));
+                console.log(chalk_1.default.yellow(`  ⚠ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
                 if (!wrapperExists) {
                     console.log(chalk_1.default.gray(`    Missing wrapper script`));
                 }

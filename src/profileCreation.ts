@@ -49,7 +49,9 @@ export async function createProfile(
     // Store custom provider details if present
     ...(answers.customProviderPrompts && {
       customProvider: answers.customProviderPrompts
-    })
+    }),
+    // Store symlink relationship if shared mode
+    ...(answers.sharedWith && { sharedWith: answers.sharedWith })
   };
 
   // Save profile
@@ -64,10 +66,18 @@ export async function createProfile(
   );
   config.createWrapperScript(answers.commandName, cli);
 
+  // Set up shared dirs if symlink mode
+  if (answers.sharedWith) {
+    config.setupSharedDirs(answers.commandName, answers.sharedWith);
+  }
+
   // Display success message
   console.log(chalk.green('\n✓ Provider added successfully!\n'));
   console.log(chalk.cyan('Command:'), chalk.bold(answers.commandName));
   console.log(chalk.cyan('Provider:'), provider.displayName);
+  if (answers.sharedWith) {
+    console.log(chalk.cyan('Data:'), `Shared with ${chalk.bold(answers.sharedWith)} (memory, transcripts, plans, tasks, commands, plugins)`);
+  }
 
   if (useNativeAuth) {
     // Using native CLI OAuth - user needs to complete setup

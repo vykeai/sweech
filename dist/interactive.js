@@ -153,6 +153,46 @@ async function interactiveAddProvider(existingProfiles = []) {
         },
         {
             type: 'list',
+            name: 'dataMode',
+            message: 'Memory & data setup:',
+            choices: (answers) => {
+                const profiles = existingProfiles.map(p => p.commandName);
+                const masters = ['claude', ...profiles];
+                return [
+                    {
+                        name: chalk_1.default.bold('Fresh') + chalk_1.default.gray(' — fully isolated (own memory, transcripts, plans, commands, plugins)'),
+                        value: 'fresh'
+                    },
+                    {
+                        name: chalk_1.default.bold('Shared') + chalk_1.default.gray(' — symlink memory & data to another profile\n') +
+                            chalk_1.default.gray('    Same memory, transcripts, plans, tasks, commands, plugins.\n') +
+                            chalk_1.default.gray('    Auth & credentials stay separate. Good for: same person, two subscriptions.'),
+                        value: 'shared'
+                    }
+                ];
+            }
+        },
+        {
+            type: 'list',
+            name: 'sharedWith',
+            message: 'Share data with which profile?',
+            when: (answers) => answers.dataMode === 'shared',
+            choices: () => {
+                const options = [
+                    {
+                        name: `claude ${chalk_1.default.gray('(your default ~/.claude/)')}`,
+                        value: 'claude'
+                    },
+                    ...existingProfiles.map(p => ({
+                        name: `${p.commandName} ${chalk_1.default.gray(`(~/.${p.commandName}/)`)}`,
+                        value: p.commandName
+                    }))
+                ];
+                return options;
+            }
+        },
+        {
+            type: 'list',
             name: 'authMethod',
             message: 'How would you like to authenticate?',
             choices: (answers) => {
@@ -222,7 +262,8 @@ async function interactiveAddProvider(existingProfiles = []) {
         apiKey: answers.apiKey ? answers.apiKey.trim() : undefined,
         authMethod: answers.authMethod,
         customProviderConfig,
-        customProviderPrompts
+        customProviderPrompts,
+        sharedWith: answers.dataMode === 'shared' ? answers.sharedWith : undefined
     };
 }
 async function confirmRemoveProvider(commandName) {

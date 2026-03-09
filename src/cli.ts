@@ -112,7 +112,8 @@ program
     profiles.forEach(profile => {
       const provider = getProvider(profile.provider);
       const cli = getCLI(profile.cliType || 'claude');
-      console.log(chalk.cyan('▸'), chalk.bold(profile.commandName));
+      const sharedTag = profile.sharedWith ? chalk.magenta(` [shared ↔ ${profile.sharedWith}]`) : '';
+      console.log(chalk.cyan('▸'), chalk.bold(profile.commandName) + sharedTag);
       console.log(chalk.gray('  CLI:'), cli?.displayName || profile.cliType);
       console.log(chalk.gray('  Provider:'), provider?.displayName || profile.provider);
       console.log(chalk.gray('  Model:'), profile.model || 'default');

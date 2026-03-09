@@ -18,6 +18,7 @@ export interface AddProviderAnswers {
   authMethod?: string;
   customProviderConfig?: ProviderConfig; // For custom providers
   customProviderPrompts?: CustomProviderPrompts; // Store custom provider details
+  sharedWith?: string; // master profile commandName if symlink mode chosen
 }
 
 export async function interactiveAddProvider(existingProfiles: ProfileConfig[] = []): Promise<AddProviderAnswers> {
@@ -174,6 +175,47 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
     },
     {
       type: 'list',
+      name: 'dataMode',
+      message: 'Memory & data setup:',
+      choices: (answers: any) => {
+        const profiles = existingProfiles.map(p => p.commandName);
+        const masters = ['claude', ...profiles];
+
+        return [
+          {
+            name: chalk.bold('Fresh') + chalk.gray(' — fully isolated (own memory, transcripts, plans, commands, plugins)'),
+            value: 'fresh'
+          },
+          {
+            name: chalk.bold('Shared') + chalk.gray(' — symlink memory & data to another profile\n') +
+              chalk.gray('    Same memory, transcripts, plans, tasks, commands, plugins.\n') +
+              chalk.gray('    Auth & credentials stay separate. Good for: same person, two subscriptions.'),
+            value: 'shared'
+          }
+        ];
+      }
+    },
+    {
+      type: 'list',
+      name: 'sharedWith',
+      message: 'Share data with which profile?',
+      when: (answers: any) => answers.dataMode === 'shared',
+      choices: () => {
+        const options = [
+          {
+            name: `claude ${chalk.gray('(your default ~/.claude/)')}`,
+            value: 'claude'
+          },
+          ...existingProfiles.map(p => ({
+            name: `${p.commandName} ${chalk.gray(`(~/.${p.commandName}/)`)}`,
+            value: p.commandName
+          }))
+        ];
+        return options;
+      }
+    },
+    {
+      type: 'list',
       name: 'authMethod',
       message: 'How would you like to authenticate?',
       choices: (answers: any) => {
@@ -250,7 +292,8 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
     apiKey: answers.apiKey ? answers.apiKey.trim() : undefined,
     authMethod: answers.authMethod,
     customProviderConfig,
-    customProviderPrompts
+    customProviderPrompts,
+    sharedWith: answers.dataMode === 'shared' ? answers.sharedWith : undefined
   };
 }
 

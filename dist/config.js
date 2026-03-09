@@ -36,10 +36,14 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ConfigManager = void 0;
+exports.ConfigManager = exports.SHAREABLE_DIRS = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
+// Directories that are safe to share across profiles via symlinks.
+// These contain memories, transcripts, plans, tasks, commands, plugins.
+// NOT included: settings.json, cache, session-env, shell-snapshots, etc. (auth/runtime)
+exports.SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins'];
 class ConfigManager {
     constructor() {
         this.configDir = path.join(os.homedir(), '.sweech');
@@ -209,6 +213,36 @@ exec ${cli.command} "\${ARGS[@]}"
         // Profiles live at ~/.claude-<suffix>/ as siblings to ~/.claude/
         // e.g. claude-rai -> ~/.claude-rai/
         return path.join(os.homedir(), `.${commandName}`);
+    }
+    /**
+     * Symlink shareable dirs from a new profile to a master profile.
+     * Shared dirs: projects, plans, tasks, commands, plugins.
+     * Auth and runtime dirs (settings.json, cache, session-env, etc.) remain isolated.
+     */
+    setupSharedDirs(commandName, masterCommandName) {
+        const profileDir = this.getProfileDir(commandName);
+        // Master is either 'claude' (default ~/.claude/) or another sweech profile
+        const masterDir = masterCommandName === 'claude'
+            ? path.join(os.homedir(), '.claude')
+            : this.getProfileDir(masterCommandName);
+        for (const dir of exports.SHAREABLE_DIRS) {
+            const linkPath = path.join(profileDir, dir);
+            const targetPath = path.join(masterDir, dir);
+            // Ensure target exists in master
+            if (!fs.existsSync(targetPath)) {
+                fs.mkdirSync(targetPath, { recursive: true });
+            }
+            // Remove existing dir/symlink in profile if present
+            try {
+                const stat = fs.lstatSync(linkPath);
+                if (stat)
+                    fs.rmSync(linkPath, { recursive: true, force: true });
+            }
+            catch {
+                // doesn't exist yet, that's fine
+            }
+            fs.symlinkSync(targetPath, linkPath);
+        }
     }
     getConfigDir() {
         return this.configDir;

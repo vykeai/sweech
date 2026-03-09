@@ -41,16 +41,25 @@ async function createProfile(answers, provider, cli, config) {
         // Store custom provider details if present
         ...(answers.customProviderPrompts && {
             customProvider: answers.customProviderPrompts
-        })
+        }),
+        // Store symlink relationship if shared mode
+        ...(answers.sharedWith && { sharedWith: answers.sharedWith })
     };
     // Save profile
     config.addProfile(profile);
     config.createProfileConfig(answers.commandName, provider, answers.apiKey, cli.name, oauthToken, useNativeAuth);
     config.createWrapperScript(answers.commandName, cli);
+    // Set up shared dirs if symlink mode
+    if (answers.sharedWith) {
+        config.setupSharedDirs(answers.commandName, answers.sharedWith);
+    }
     // Display success message
     console.log(chalk_1.default.green('\n✓ Provider added successfully!\n'));
     console.log(chalk_1.default.cyan('Command:'), chalk_1.default.bold(answers.commandName));
     console.log(chalk_1.default.cyan('Provider:'), provider.displayName);
+    if (answers.sharedWith) {
+        console.log(chalk_1.default.cyan('Data:'), `Shared with ${chalk_1.default.bold(answers.sharedWith)} (memory, transcripts, plans, tasks, commands, plugins)`);
+    }
     if (useNativeAuth) {
         // Using native CLI OAuth - user needs to complete setup
         console.log(chalk_1.default.cyan('Auth:'), 'OAuth (via CLI)');

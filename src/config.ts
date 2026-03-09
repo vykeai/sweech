@@ -20,7 +20,13 @@ export interface ProfileConfig {
   model?: string;
   smallFastModel?: string;
   createdAt: string;
+  sharedWith?: string; // commandName of master profile (e.g. 'claude') if dirs are symlinked
 }
+
+// Directories that are safe to share across profiles via symlinks.
+// These contain memories, transcripts, plans, tasks, commands, plugins.
+// NOT included: settings.json, cache, session-env, shell-snapshots, etc. (auth/runtime)
+export const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins'] as const;
 
 export class ConfigManager {
   private configDir: string;
@@ -234,6 +240,39 @@ exec ${cli.command} "\${ARGS[@]}"
     // Profiles live at ~/.claude-<suffix>/ as siblings to ~/.claude/
     // e.g. claude-rai -> ~/.claude-rai/
     return path.join(os.homedir(), `.${commandName}`);
+  }
+
+  /**
+   * Symlink shareable dirs from a new profile to a master profile.
+   * Shared dirs: projects, plans, tasks, commands, plugins.
+   * Auth and runtime dirs (settings.json, cache, session-env, etc.) remain isolated.
+   */
+  public setupSharedDirs(commandName: string, masterCommandName: string): void {
+    const profileDir = this.getProfileDir(commandName);
+    // Master is either 'claude' (default ~/.claude/) or another sweech profile
+    const masterDir = masterCommandName === 'claude'
+      ? path.join(os.homedir(), '.claude')
+      : this.getProfileDir(masterCommandName);
+
+    for (const dir of SHAREABLE_DIRS) {
+      const linkPath = path.join(profileDir, dir);
+      const targetPath = path.join(masterDir, dir);
+
+      // Ensure target exists in master
+      if (!fs.existsSync(targetPath)) {
+        fs.mkdirSync(targetPath, { recursive: true });
+      }
+
+      // Remove existing dir/symlink in profile if present
+      try {
+        const stat = fs.lstatSync(linkPath);
+        if (stat) fs.rmSync(linkPath, { recursive: true, force: true });
+      } catch {
+        // doesn't exist yet, that's fine
+      }
+
+      fs.symlinkSync(targetPath, linkPath);
+    }
   }
 
   public getConfigDir(): string {
