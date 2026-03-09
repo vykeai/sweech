@@ -25,9 +25,12 @@ A **profile** is a complete configuration for one AI assistant instance:
   apiKey: "sk-...",                  // API key
   baseUrl: "https://...",            // Provider API endpoint
   model: "MiniMax-M2",               // Model name
-  createdAt: "2025-02-03T..."
+  createdAt: "2025-02-03T...",
+  sharedWith?: "claude"              // Optional: commandName of master profile
 }
 ```
+
+**Shared Data Mode** — When `sharedWith` is set, the profile's `projects`, `plans`, `tasks`, `commands`, and `plugins` directories are symlinked to the master profile's corresponding directories. Auth files (`settings.json`, credentials) always remain isolated per profile.
 
 ### CLI
 
@@ -74,12 +77,22 @@ Currently supported:
 ```
 ~/
 ├── .claude/              # Default account (never touched by sweech)
-├── .claude-qwen/         # Profile directory (sibling to .claude/)
+│   ├── projects/         # Memory & project context
+│   ├── plans/
+│   ├── tasks/
+│   ├── commands/
+│   └── plugins/
+├── .claude-qwen/         # Fresh profile (sibling to .claude/, fully isolated)
 │   └── settings.json     # CLI-specific settings
-├── .claude-rai/          # Another profile
-│   └── settings.json
+├── .claude-rai/          # Shared profile (sibling to .claude/)
+│   ├── settings.json     # Own auth (isolated)
+│   ├── projects -> ../.claude/projects   # Symlink to master
+│   ├── plans    -> ../.claude/plans      # Symlink to master
+│   ├── tasks    -> ../.claude/tasks      # Symlink to master
+│   ├── commands -> ../.claude/commands   # Symlink to master
+│   └── plugins  -> ../.claude/plugins    # Symlink to master
 └── .sweech/
-    ├── config.json       # List of all profiles
+    ├── config.json       # List of all profiles (includes sharedWith)
     ├── aliases.json      # Command aliases (work=claude-qwen)
     ├── usage.json        # Usage tracking data
     ├── last-launch.json  # Remembered launcher state
@@ -106,9 +119,19 @@ Master list of profiles:
     "baseUrl": "https://api.minimax.io/anthropic",
     "model": "MiniMax-M2",
     "createdAt": "2025-02-03T..."
+  },
+  {
+    "name": "claude-rai",
+    "commandName": "claude-rai",
+    "cliType": "claude",
+    "provider": "anthropic",
+    "createdAt": "2025-02-03T...",
+    "sharedWith": "claude"
   }
 ]
 ```
+
+The `sharedWith` field stores the `commandName` of the master profile. `"claude"` refers to the default `~/.claude/` directory.
 
 ### settings.json
 
@@ -179,17 +202,22 @@ $ claude-mini
 
 ```
 src/
-├── cli.ts            # Main CLI entry point (commander)
-├── launcher.ts       # Interactive TUI launcher (raw terminal)
-├── config.ts         # Config manager (read/write profiles)
-├── providers.ts      # Provider templates
-├── clis.ts          # CLI definitions (claude, codex) + yolo flags
-├── interactive.ts    # Interactive prompts (inquirer)
-├── backup.ts        # Backup/restore logic (encryption)
-├── usage.ts         # Usage tracking and statistics
-├── aliases.ts       # Command alias management
-├── completion.ts    # Shell completion generation
-└── systemCommands.ts # System command collision detection
+├── cli.ts              # Main CLI entry point (commander) — includes update command
+├── launcher.ts         # Interactive TUI launcher (raw terminal) — shared tag, model label
+├── config.ts           # Config manager — SHAREABLE_DIRS, setupSharedDirs, sharedWith
+├── providers.ts        # Provider templates
+├── clis.ts             # CLI definitions (claude, codex) + yolo flags
+├── interactive.ts      # Interactive prompts — dataMode + sharedWith prompts
+├── profileCreation.ts  # Profile creation flow (OAuth + setupSharedDirs)
+├── backup.ts           # Backup/restore logic (encryption)
+├── usage.ts            # Usage tracking and statistics
+├── aliases.ts          # Command alias management
+├── completion.ts       # Shell completion generation
+├── systemCommands.ts   # System command collision detection
+├── utilityCommands.ts  # doctor, path, test, edit, clone, rename — symlink check, clone sharing
+├── reset.ts            # Safe reset/uninstall
+├── init.ts             # Interactive onboarding
+└── oauth.ts            # OAuth token management
 ```
 
 ### Key Classes
@@ -203,9 +231,10 @@ src/
 **Methods:**
 - `getProfiles()` - List all profiles
 - `addProfile(profile)` - Add new profile
-- `removeProfile(name)` - Delete profile
+- `removeProfile(name)` - Delete profile (unlinks symlinked dirs instead of deleting)
 - `createProfileConfig()` - Generate settings.json
 - `createWrapperScript()` - Generate wrapper script (with usage tracking)
+- `setupSharedDirs(commandName, masterCommandName)` - Symlink SHAREABLE_DIRS from a new profile to a master profile
 
 **UsageTracker** (`usage.ts`)
 - Tracks provider usage with timestamps
@@ -227,6 +256,42 @@ src/
 - `addAlias(alias, command)` - Add new alias
 - `removeAlias(alias)` - Remove alias
 - `resolveAlias(name)` - Resolve alias to command
+
+## Shared Data System
+
+### SHAREABLE_DIRS
+
+Defined in `config.ts`:
+
+```typescript
+export const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins'] as const;
+```
+
+These directories contain memory, transcripts, plans, tasks, custom commands, and plugins — all safe to share across profiles.
+
+**NOT shared:** `settings.json`, `cache`, `session-env`, shell snapshots, credentials. These are auth and runtime data that must remain per-profile.
+
+### setupSharedDirs
+
+When `dataMode === 'shared'` during `sweech add` (or `sweech clone` with inheritance), `ConfigManager.setupSharedDirs(commandName, masterCommandName)` is called:
+
+1. Determine `masterDir` — either `~/.claude/` (if master is `'claude'`) or `~/.claude-<master>/`
+2. For each dir in `SHAREABLE_DIRS`:
+   - Ensure the target dir exists in master (create it if not)
+   - Remove any existing dir/symlink at the profile's link path
+   - Create a symlink: `~/.claude-<name>/<dir>` → `<masterDir>/<dir>`
+
+### Symlink-aware removeProfile
+
+`ConfigManager.removeProfile(commandName)` uses `lstatSync` to detect whether the profile directory is itself a symlink. If so, it uses `unlinkSync` instead of `rmSync` to preserve shared data in the master.
+
+### Doctor Symlink Check
+
+`runDoctor()` in `utilityCommands.ts` loops over `SHAREABLE_DIRS` for each profile that has `sharedWith` set. For each dir, it:
+
+1. Calls `lstatSync` on the link path to check it's a symlink
+2. Calls `realpathSync` on both the link and the expected target
+3. Reports ✓ if they resolve to the same canonical path, ✗ otherwise
 
 ## Feature Details
 

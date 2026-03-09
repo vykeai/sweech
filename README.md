@@ -4,7 +4,7 @@
 
 Sweech is the ultimate CLI tool for managing multiple AI coding assistants. Use Claude, Codex, Qwen, DeepSeek, OpenRouter, and local LLMs - all simultaneously with different command names.
 
-[![Tests](https://img.shields.io/badge/tests-352%20passing-brightgreen.svg)](https://github.com/czaku/sweech)
+[![Tests](https://img.shields.io/badge/tests-380%20passing-brightgreen.svg)](https://github.com/vykeai/sweech)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/czaku)
@@ -17,6 +17,16 @@ claude-deep         # DeepSeek via Claude Code - $0.28/M tokens (cheapest!)
 ```
 
 ## ✨ What's New
+
+### v0.2.1
+
+- 🔗 **Shared Data Mode** — When adding a profile, choose **Fresh** (fully isolated) or **Shared** (symlink memory & data to a master profile). Auth stays separate.
+- 📋 **List improvements** — Profiles with `sharedWith` show `[shared ↔ claude]` tag; master profiles show `(← shared by: ...)` reverse dependency.
+- ⚠️ **Remove warnings** — Warns when other profiles share data with the profile being removed ("Their symlinks will break"). Safely unlinks symlinks instead of deleting shared dirs.
+- 🏥 **Doctor symlink check** — Now verifies symlink validity for shared profiles, reporting ✓/✗ for each of the 5 shared dirs.
+- 📋 **Clone sharing** — If the source profile has `sharedWith` set, clone asks whether to inherit that sharing relationship.
+- 🔄 **`sweech update`** — New command. Self-updates sweech from `github:vykeai/sweech` via `npm install -g`.
+- 🎮 **Launcher improvements** — Shared profiles show `[shared]` indicator; model name shown in label when set.
 
 ### v0.2.0
 
@@ -45,7 +55,7 @@ claude-deep         # DeepSeek via Claude Code - $0.28/M tokens (cheapest!)
 **Step 1:** Install from GitHub
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/czaku/sweech/main/install-from-github.sh | bash
+curl -fsSL https://raw.githubusercontent.com/vykeai/sweech/main/install-from-github.sh | bash
 ```
 
 **Step 2:** Run interactive onboarding
@@ -79,8 +89,9 @@ Just type `sweech` with no arguments:
 ```
 🍭 Sweech
 
-❯ claude          (default account)
-  claude-rai      (Claude (Anthropic))
+❯ claude              (default account)
+  claude-rai [shared] (Claude (Anthropic))
+  claude-qwen         (Qwen · qwen-plus)
 
   [ ] yolo (y)    [ ] resume (r)
 
@@ -94,11 +105,66 @@ Just type `sweech` with no arguments:
 - **r** to toggle resume (`--continue` last conversation)
 - **Enter** to launch
 
-Your selection is remembered between sessions.
+Your selection is remembered between sessions. Profiles with shared data show `[shared]`; model name shown when set.
 
 ---
 
 ## 🌟 Key Features
+
+### 🔗 Shared Data Mode
+
+When running `sweech add`, after entering the command name you choose a data mode:
+
+```
+? Memory & data setup:
+❯ Fresh — fully isolated (own memory, transcripts, plans, commands, plugins)
+  Shared — symlink memory & data to another profile
+    Same memory, transcripts, plans, tasks, commands, plugins.
+    Auth & credentials stay separate.
+    Good for: same person, two subscriptions.
+```
+
+If you choose **Shared**, you then pick which profile to share with:
+
+```
+? Share data with which profile?
+❯ claude (your default ~/.claude/)
+  claude-rai (~/.claude-rai/)
+```
+
+**What gets shared:**
+- `projects/` — memory & project context
+- `plans/` — project plans
+- `tasks/` — task lists
+- `commands/` — custom slash commands
+- `plugins/` — plugins
+
+**What stays isolated (per-profile):**
+- `settings.json` — provider config, API keys
+- `cache/` — model cache
+- `session-env` — session environment
+- `credentials` — auth tokens
+
+**Viewing shared profiles:**
+
+```bash
+$ sweech list
+
+🍭 Configured Providers:
+
+▸ claude-rai [shared ↔ claude]
+  CLI: Claude Code
+  Provider: Claude (Anthropic)
+  Model: default
+
+▸ claude-work
+  CLI: Claude Code
+  Provider: Claude (Anthropic)
+  Model: default
+
+Default Claude account is in ~/.claude/ (use "claude" command)
+  (← shared by: claude-rai)
+```
 
 ### 🎨 Multiple CLI Support
 
@@ -127,16 +193,12 @@ $ sweech add
 ? Provider: Claude (Anthropic)
 ? How would you like to authenticate?
   ❯ OAuth (browser login - adds another account without logging out)
-    API Key (static token)
+    API Key (static token from platform.anthropic.com)
 ? Command name: claude-work
+? Memory & data setup: Fresh
 
 ✓ Provider added successfully!
 Command: claude-work
-
-⚠️  Authentication setup required:
-   Run: claude-work
-   This will start Claude Code's OAuth login flow
-   Follow the prompts to authenticate with your account
 ```
 
 Each profile gets its own isolated authentication:
@@ -261,10 +323,11 @@ $ fast      # Runs: codex-deepseek
 ### Core Commands
 
 ```bash
-sweech add                     # Add provider (interactive)
-sweech list                    # List all providers
-sweech remove <name>           # Remove provider
+sweech add                     # Add provider (interactive, with data mode choice)
+sweech list                    # List all providers (shows shared tags)
+sweech remove <name>           # Remove provider (warns if others share data with it)
 sweech info                    # Show configuration
+sweech update                  # Self-update sweech from GitHub
 ```
 
 ### Provider Management
@@ -272,7 +335,7 @@ sweech info                    # Show configuration
 ```bash
 sweech show <name>             # Show provider details
 sweech edit <name>             # Edit provider config
-sweech clone <src> <dest>      # Clone provider config
+sweech clone <src> <dest>      # Clone provider config (inherits shared data if applicable)
 sweech rename <old> <new>      # Rename provider
 sweech test <name>             # Test provider connection
 ```
@@ -291,7 +354,7 @@ sweech backup-chats <name>     # Export complete profile data
 sweech stats [name]            # Usage statistics
 sweech alias [action]          # Manage aliases
 sweech discover                # Browse available providers
-sweech doctor                  # Check installation health
+sweech doctor                  # Check installation health (includes symlink check for shared profiles)
 sweech path                    # Show bin directory path
 sweech completion <shell>      # Generate shell completion
 ```
@@ -306,6 +369,31 @@ sweech update-wrappers         # Regenerate wrapper scripts
 ---
 
 ## 🎯 Real-World Examples
+
+### Shared Memory, Two Subscriptions
+
+Same projects and memory across both accounts:
+
+```bash
+$ sweech add
+? Command name: claude-work
+? Memory & data setup: Shared
+? Share data with which profile: claude (your default ~/.claude/)
+
+# Now claude-work shares projects, plans, tasks, commands, plugins with claude
+# Auth stays separate — two subscription accounts, one memory
+```
+
+```bash
+$ sweech list
+
+▸ claude-work [shared ↔ claude]
+  CLI: Claude Code
+  Provider: Claude (Anthropic)
+
+Default Claude account is in ~/.claude/ (use "claude" command)
+  (← shared by: claude-work)
+```
 
 ### Cost Optimization
 
@@ -385,6 +473,20 @@ Sweech **never touches** your default CLI directories:
 
 The `claude` and `codex` commands work exactly as before!
 
+### Safe Remove with Symlinks
+
+When removing a profile, sweech checks whether other profiles share data with it:
+
+```bash
+$ sweech remove claude-main
+
+⚠️  The following profiles are sharing data with this one: claude-work, claude-rai
+   Their symlinks will break.
+? Remove anyway? (y/N)
+```
+
+Symlinked profile directories are unlinked (not deleted), so shared data in the master is never lost.
+
 ### Smart Reset
 
 ```bash
@@ -416,24 +518,30 @@ $ sweech reset
 ```bash
 $ sweech doctor
 
-🔍 Sweech Health Check:
+🏥 Sweech Health Check
 
-✓ Sweech installed: v0.1.0
-✓ Config directory: /Users/you/.sweech
-✓ Bin directory: /Users/you/.sweech/bin
-✓ Bin in PATH: Yes
+Environment:
+  ✓ Node.js: v22.1.0
+  ✓ sweech: v0.2.1
+
+PATH Configuration:
+  ✓ /Users/you/.sweech/bin is in PATH
 
 Installed CLIs:
-  ✓ Claude Code: v2.1.0
-  ✓ Codex: v1.5.0
+  ✓ Claude Code (2.x.x)
+  ✗ Codex: Not installed
 
-Profiles: 5
-  ✓ claude-qwen (Qwen)
-  ✓ lm-studio (Custom)
-  ✓ codex-deepseek (DeepSeek-OpenAI)
-  ✗ broken-profile (config missing)
+Profiles (2):
+  ✓ claude-rai → Claude (Anthropic) [shared ↔ claude]
+    Shared symlinks (→ claude):
+      ✓ projects
+      ✓ plans
+      ✓ tasks
+      ✓ commands
+      ✓ plugins
+  ✓ claude-qwen → Qwen (Alibaba)
 
-⚠️ 1 issue found. Run: sweech remove broken-profile
+✅ Everything looks good! 🎉
 ```
 
 ### Test Provider Connection
@@ -453,6 +561,18 @@ $ sweech test claude-qwen
 All checks passed! ✅
 ```
 
+### Self-Update
+
+```bash
+$ sweech update
+
+🔄 Updating sweech...
+
+# Runs: npm install -g github:vykeai/sweech
+
+✓ sweech updated successfully
+```
+
 ### Shell Completion
 
 ```bash
@@ -468,7 +588,7 @@ $ source ~/.zshrc
 
 # Now use tab completion
 $ sweech <TAB>
-add       backup    clone     doctor    edit      list      ...
+add       backup    clone     doctor    edit      list      update    ...
 ```
 
 ---
@@ -488,7 +608,7 @@ add       backup    clone     doctor    edit      list      ...
 ### One-Line Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/czaku/sweech/main/install-from-github.sh | bash
+curl -fsSL https://raw.githubusercontent.com/vykeai/sweech/main/install-from-github.sh | bash
 ```
 
 ### Manual Install
@@ -496,13 +616,13 @@ curl -fsSL https://raw.githubusercontent.com/czaku/sweech/main/install-from-gith
 **Option 1:** Install from GitHub
 
 ```bash
-npm install -g github:czaku/sweech
+npm install -g github:vykeai/sweech
 ```
 
 **Option 2:** Clone and build
 
 ```bash
-git clone https://github.com/czaku/sweech.git
+git clone https://github.com/vykeai/sweech.git
 ```
 
 ```bash
@@ -559,27 +679,34 @@ exec claude "$@"
 ```
 ~/
 ├── .claude/                  # Default account (untouched)
-├── .claude-qwen/             # Qwen profile (sibling)
+├── .claude-rai/              # Shared profile (sibling)
+│   ├── settings.json         # Isolated — own auth
+│   ├── projects -> ../.claude/projects   # Symlink to master
+│   ├── plans    -> ../.claude/plans      # Symlink to master
+│   ├── tasks    -> ../.claude/tasks      # Symlink to master
+│   ├── commands -> ../.claude/commands   # Symlink to master
+│   └── plugins  -> ../.claude/plugins    # Symlink to master
+├── .claude-qwen/             # Fresh profile (fully isolated)
 │   ├── settings.json
 │   ├── projects/
-│   └── Transcripts/
-├── .claude-rai/              # Another profile (sibling)
 │   └── ...
 └── .sweech/
-    ├── config.json           # Provider registry
+    ├── config.json           # Provider registry (includes sharedWith)
     ├── last-launch.json      # Remembered launcher state
     └── bin/
-        ├── claude-qwen       # Wrapper script
-        └── claude-rai        # Wrapper script
+        ├── claude-rai        # Wrapper script
+        └── claude-qwen       # Wrapper script
 ```
 
-**Each provider is completely isolated:**
+**Shared profiles** symlink their data directories to a master profile (either `~/.claude/` or another sweech profile). Auth files (`settings.json`, credentials) are always kept separate.
+
+**Each provider is completely isolated for auth:**
 
 - Own config directory at `~/.claude-<name>/` (sibling to `~/.claude/`)
-- Own settings, project memory, and chat history
+- Own settings, credentials
 - Own wrapper script
 
-Your default `~/.claude/` stays **completely untouched**!
+Your default `~/.claude/` stays **completely untouched** (unless a profile chooses to share with it).
 
 ---
 
@@ -606,7 +733,7 @@ Your default `~/.claude/` stays **completely untouched**!
 
 ## 🧪 Testing
 
-Comprehensive test suite with 346 tests:
+Comprehensive test suite with 380 tests:
 
 ```bash
 # Run all tests
@@ -620,14 +747,15 @@ npm run test:watch
 ```
 
 **Test Coverage:**
-- ✅ 346 tests passing
-- ✅ 15 test suites
+- ✅ 380 tests passing
+- ✅ 17 test suites
 - ✅ Provider filtering by CLI
 - ✅ Custom provider creation
 - ✅ Backup/restore encryption
 - ✅ Chat history export
 - ✅ Reset protection
 - ✅ All commands tested
+- ✅ Shared data mode (setupSharedDirs, symlink removal, list tags, doctor checks, clone inheritance)
 
 ---
 
@@ -655,7 +783,7 @@ Edit `src/providers.ts`:
 ### Add New CLI Support
 ### Report Issues
 
-Found a bug? [Open an issue](https://github.com/czaku/sweech/issues)
+Found a bug? [Open an issue](https://github.com/vykeai/sweech/issues)
 
 ---
 
@@ -752,8 +880,8 @@ If Sweech saves you money or time, please ⭐ star this repo!
 ## 📞 Support
 
 - 📖 **Documentation**: Read the guides above
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/czaku/sweech/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/czaku/sweech/discussions)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/vykeai/sweech/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/vykeai/sweech/discussions)
 - 📧 **Email**: (Coming soon)
 
 ---

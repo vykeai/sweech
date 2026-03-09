@@ -1,5 +1,81 @@
 # 🍭 Sweech Changelog
 
+## v0.2.1 (2026-03-09)
+
+### ✨ New Features
+
+#### 🔗 Shared Data Mode (`sweech add`)
+- After the command name prompt, users now choose between:
+  - **Fresh** — fully isolated profile (own memory, transcripts, plans, commands, plugins)
+  - **Shared** — symlink memory & data dirs to a master profile (auth stays separate)
+- If shared, users pick which profile to share with (`claude` default or any existing sweech profile)
+- Shared dirs: `projects`, `plans`, `tasks`, `commands`, `plugins`
+- NOT shared: `settings.json`, `cache`, `session-env`, credentials
+- `sharedWith` stored in config for tracking and dependency detection
+
+#### 📋 `sweech list` improvements
+- Profiles with `sharedWith` show `[shared ↔ claude]` tag in magenta
+- Master profiles show `(← shared by: claude-rai, claude-work)` reverse dependency tag
+- Default claude footer also shows which profiles share with it
+
+#### ⚠️ `sweech remove` improvements
+- Warns if other profiles share data with the profile being removed ("Their symlinks will break")
+- Asks for confirmation before proceeding
+- Safely unlinks symlinked profile directories instead of deleting them (prevents data loss)
+
+#### 🏥 `sweech doctor` improvements
+- Checks symlink validity for shared profiles
+- Reports ✓/✗ for each of the 5 shared dirs (`projects`, `plans`, `tasks`, `commands`, `plugins`)
+- Shows `[shared ↔ <master>]` tag next to profile name
+
+#### 📋 `sweech clone` improvements
+- If the source profile has `sharedWith` set, asks: "Should the clone also share with X?"
+- If confirmed, sets up symlinks and records `sharedWith` on the cloned profile
+
+#### 🔄 `sweech update` (new command)
+- Self-updates sweech from `github:vykeai/sweech`
+- Runs: `npm install -g github:vykeai/sweech`
+
+#### 🎮 Launcher improvements
+- Profiles with `sharedWith` show `[shared]` indicator in the TUI
+- Model name shown in label when set (e.g. `Claude (Anthropic) · qwen-plus`)
+
+### 🔬 Testing
+
+Added **28 new tests** (380 total, up from 352):
+
+- **`setupSharedDirs`** — creates symlinks for all `SHAREABLE_DIRS`, creates master dir if missing, works with both `claude` default and sweech profile as master
+- **`removeProfile` with symlinks** — uses `unlinkSync` not `rmSync` when profile dir is a symlink
+- **Shared profile list output** — `sharedWith` tag, reverse dependency tag, default claude footer
+- **Doctor symlink check** — valid symlinks pass, broken/non-symlink paths fail, all dirs are checked
+- **Clone with shared inheritance** — `sharedWith` propagates when user confirms, not propagated when declined
+- **Dependent warning logic** — correctly identifies profiles that will lose symlinks on removal
+
+### 📦 Commands Reference
+
+```bash
+sweech add                     # Add provider (now includes data mode: Fresh/Shared)
+sweech list                    # List providers (shows [shared ↔ X] and reverse tags)
+sweech remove <name>           # Remove provider (warns about dependent shared profiles)
+sweech doctor                  # Health check (now checks symlink validity)
+sweech clone <src> <dest>      # Clone (inherits sharedWith if user confirms)
+sweech update                  # NEW: Self-update from github:vykeai/sweech
+```
+
+---
+
+## v0.2.0 (2025-02-xx)
+
+### ✨ New Features in v0.2.0
+
+- 🎮 **Interactive Launcher** — `sweech` with no arguments opens a TUI to select profile, toggle yolo and resume with keyboard
+- 📁 **Sibling Directories** — Profiles live at `~/.claude-<name>/` as siblings to `~/.claude/`
+- 🔒 **Enforced Naming** — All commands must start with `claude-` (e.g., `claude-work`, `claude-rai`)
+- 💾 **Remembers Last Choice** — Launcher saves and restores previous selection, yolo, and resume state
+- 🧠 **Updated Models** — Default Anthropic models updated to claude-sonnet-4-6 / claude-haiku-4-5
+
+---
+
 ## v0.1.0 (2025-02-03)
 
 ### 🎉 Initial Beta Release

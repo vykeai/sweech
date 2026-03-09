@@ -183,6 +183,11 @@ describe('ConfigManager', () => {
       mockFs.unlinkSync.mockImplementation(() => {});
       mockFs.rmSync.mockImplementation(() => {});
 
+      // lstatSync: profile dir is a regular directory (not symlink)
+      (mockFs.lstatSync as jest.Mock).mockReturnValue({
+        isSymbolicLink: () => false
+      });
+
       configManager.removeProfile('claude-mini');
 
       // Check config file is updated (profile removed)
@@ -200,6 +205,143 @@ describe('ConfigManager', () => {
         path.join(mockHomeDir, '.claude-mini'),
         { recursive: true, force: true }
       );
+    });
+
+    test('uses unlinkSync (not rmSync) when profile dir is a symlink', () => {
+      const mockProfile: ProfileConfig = {
+        name: 'test',
+        commandName: 'claude-shared',
+        cliType: 'claude',
+        provider: 'minimax',
+        apiKey: 'sk-test',
+        sharedWith: 'claude',
+        createdAt: '2025-02-03T00:00:00.000Z'
+      };
+
+      mockFs.existsSync.mockReturnValue(true);
+      mockFs.readFileSync.mockReturnValue(JSON.stringify([mockProfile]));
+      mockFs.writeFileSync.mockImplementation(() => {});
+      mockFs.unlinkSync.mockImplementation(() => {});
+      mockFs.rmSync.mockImplementation(() => {});
+
+      // lstatSync: profile dir IS a symlink
+      (mockFs.lstatSync as jest.Mock).mockReturnValue({
+        isSymbolicLink: () => true
+      });
+
+      configManager.removeProfile('claude-shared');
+
+      const profileDir = path.join(mockHomeDir, '.claude-shared');
+
+      // Should use unlinkSync for the profile dir
+      expect(mockFs.unlinkSync).toHaveBeenCalledWith(profileDir);
+      // Should NOT use rmSync for the profile dir
+      const rmSyncCalls = (mockFs.rmSync as jest.Mock).mock.calls;
+      const rmSyncOnProfileDir = rmSyncCalls.some(
+        (args: any[]) => args[0] === profileDir
+      );
+      expect(rmSyncOnProfileDir).toBe(false);
+    });
+  });
+
+  describe('setupSharedDirs', () => {
+    const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins'];
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockOs.homedir.mockReturnValue(mockHomeDir);
+      mockFs.existsSync.mockReturnValue(false);
+      mockFs.mkdirSync.mockImplementation(() => undefined as any);
+      configManager = new ConfigManager();
+    });
+
+    test('creates symlinks for all SHAREABLE_DIRS when sharing with claude default', () => {
+      // Profile dir exists, master (claude default) dirs do not
+      mockFs.existsSync.mockReturnValue(false);
+      mockFs.mkdirSync.mockImplementation(() => undefined as any);
+      (mockFs.lstatSync as jest.Mock).mockImplementation(() => {
+        throw new Error('no such file');
+      });
+      const symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => {});
+
+      configManager.setupSharedDirs('claude-work', 'claude');
+
+      const profileDir = path.join(mockHomeDir, '.claude-work');
+      const masterDir = path.join(mockHomeDir, '.claude');
+
+      expect(symlinkSpy).toHaveBeenCalledTimes(SHAREABLE_DIRS.length);
+      SHAREABLE_DIRS.forEach(dir => {
+        const linkPath = path.join(profileDir, dir);
+        const targetPath = path.join(masterDir, dir);
+        expect(symlinkSpy).toHaveBeenCalledWith(targetPath, linkPath);
+      });
+
+      symlinkSpy.mockRestore();
+    });
+
+    test('creates target dir in master profile if it does not exist', () => {
+      // Target doesn't exist — existsSync returns false for target, true for profile dir
+      mockFs.existsSync.mockImplementation((p: any) => {
+        // Directories of the profile exist, but master sub-dirs do not
+        return String(p).includes('.sweech') || String(p).includes('.claude-work');
+      });
+      mockFs.mkdirSync.mockImplementation(() => undefined as any);
+      (mockFs.lstatSync as jest.Mock).mockImplementation(() => {
+        throw new Error('no such file');
+      });
+      const symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => {});
+
+      configManager.setupSharedDirs('claude-work', 'claude');
+
+      // mkdirSync should have been called for master sub-dirs
+      const masterDir = path.join(mockHomeDir, '.claude');
+      const mkdirCalls = (mockFs.mkdirSync as jest.Mock).mock.calls.map((c: any[]) => c[0]);
+      const masterDirCreations = mkdirCalls.filter((p: string) =>
+        SHAREABLE_DIRS.some(d => p === path.join(masterDir, d))
+      );
+      expect(masterDirCreations.length).toBeGreaterThan(0);
+
+      symlinkSpy.mockRestore();
+    });
+
+    test('creates symlinks for all SHAREABLE_DIRS when sharing with another sweech profile', () => {
+      mockFs.existsSync.mockReturnValue(false);
+      mockFs.mkdirSync.mockImplementation(() => undefined as any);
+      (mockFs.lstatSync as jest.Mock).mockImplementation(() => {
+        throw new Error('no such file');
+      });
+      const symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => {});
+
+      configManager.setupSharedDirs('claude-personal', 'claude-work');
+
+      const profileDir = path.join(mockHomeDir, '.claude-personal');
+      const masterDir = path.join(mockHomeDir, '.claude-work');
+
+      SHAREABLE_DIRS.forEach(dir => {
+        const linkPath = path.join(profileDir, dir);
+        const targetPath = path.join(masterDir, dir);
+        expect(symlinkSpy).toHaveBeenCalledWith(targetPath, linkPath);
+      });
+
+      symlinkSpy.mockRestore();
+    });
+
+    test('removes existing dir before creating symlink', () => {
+      // Simulate existing dirs at link paths
+      mockFs.existsSync.mockReturnValue(true);
+      (mockFs.lstatSync as jest.Mock).mockReturnValue({ isSymbolicLink: () => false });
+      mockFs.rmSync.mockImplementation(() => {});
+      const symlinkSpy = jest.spyOn(fs, 'symlinkSync').mockImplementation(() => {});
+      mockFs.mkdirSync.mockImplementation(() => undefined as any);
+
+      configManager.setupSharedDirs('claude-work', 'claude');
+
+      // rmSync should have been called to remove existing dirs
+      expect(mockFs.rmSync).toHaveBeenCalled();
+      // symlinkSync should still be called for all dirs
+      expect(symlinkSpy).toHaveBeenCalledTimes(SHAREABLE_DIRS.length);
+
+      symlinkSpy.mockRestore();
     });
   });
 
