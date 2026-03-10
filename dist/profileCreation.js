@@ -61,13 +61,9 @@ async function createProfile(answers, provider, cli, config) {
         console.log(chalk_1.default.cyan('Data:'), `Shared with ${chalk_1.default.bold(answers.sharedWith)} (memory, transcripts, plans, tasks, commands, plugins)`);
     }
     if (useNativeAuth) {
-        // Using native CLI OAuth - user needs to complete setup
         console.log(chalk_1.default.cyan('Auth:'), 'OAuth (via CLI)');
         console.log();
-        console.log(chalk_1.default.yellow('⚠️  Authentication setup required:'));
-        console.log(chalk_1.default.gray(`   Run: ${chalk_1.default.cyan(answers.commandName)}`));
-        console.log(chalk_1.default.gray('   This will start Claude Code\'s OAuth login flow'));
-        console.log(chalk_1.default.gray('   Follow the prompts to authenticate with your account'));
+        console.log(chalk_1.default.blue('ℹ'), chalk_1.default.gray(`Run ${chalk_1.default.cyan(answers.commandName)} to log in with your account`));
     }
     else {
         console.log(chalk_1.default.cyan('Model:'), provider.defaultModel);

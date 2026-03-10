@@ -54,7 +54,7 @@ function saveState(state: LaunchState): void {
 }
 
 function buildCommandPreview(entry: LaunchEntry, state: LaunchState): string {
-  let cmd = entry.command;
+  let cmd = entry.name;
   const args: string[] = [];
 
   if (state.yolo) args.push(entry.yoloFlag);

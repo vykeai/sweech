@@ -57,6 +57,8 @@ const reset_2 = require("./reset");
 const init_1 = require("./init");
 const profileCreation_1 = require("./profileCreation");
 const launcher_1 = require("./launcher");
+const subscriptions_1 = require("./subscriptions");
+const fedServer_1 = require("./fedServer");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 // Read version from package.json
@@ -104,11 +106,14 @@ program
         }
         // Create profile with OAuth or API key
         await (0, profileCreation_1.createProfile)(answers, provider, cli, config);
-        console.log(chalk_1.default.cyan('Config dir:'), config.getProfileDir(answers.commandName));
-        console.log(chalk_1.default.yellow('\n⚠️  Add to your PATH:'));
-        console.log(chalk_1.default.gray(`   export PATH="${config.getBinDir()}:$PATH"`));
-        console.log(chalk_1.default.gray(`   Add this to your ~/.zshrc or ~/.bashrc\n`));
-        console.log(chalk_1.default.green('Now run:'), chalk_1.default.bold(answers.commandName));
+        const binDir = config.getBinDir();
+        const pathIncludesBin = (process.env.PATH || '').split(':').includes(binDir);
+        if (!pathIncludesBin) {
+            console.log(chalk_1.default.blue('\nℹ'), chalk_1.default.gray(`Add to your PATH:`));
+            console.log(chalk_1.default.gray(`  export PATH="${binDir}:$PATH"`));
+            console.log(chalk_1.default.gray(`  Add this to your ~/.zshrc or ~/.bashrc`));
+        }
+        console.log(chalk_1.default.green('\nNow run:'), chalk_1.default.bold(answers.commandName));
         console.log();
         console.log(chalk_1.default.gray('💡 Tip: You can add multiple accounts for the same provider!'));
         console.log(chalk_1.default.gray('   Example: claude-mini, minimax-work, minimax-personal, etc.'));
@@ -126,17 +131,36 @@ program
     .action(() => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
-    if (profiles.length === 0) {
-        console.log(chalk_1.default.yellow('\n🍭 No providers configured yet. Run:'), chalk_1.default.bold('sweetch add'));
+    const { execFileSync } = require('child_process');
+    const os = require('os');
+    const fs = require('fs');
+    console.log(chalk_1.default.bold('\n🍭 Providers:\n'));
+    // Show detected default CLIs
+    for (const cli of Object.values(clis_1.SUPPORTED_CLIS)) {
+        let installed = false;
+        try {
+            execFileSync('which', [cli.command], { stdio: 'ignore' });
+            installed = true;
+        }
+        catch { }
+        if (!installed)
+            continue;
+        const configDir = path.join(os.homedir(), `.${cli.name}`);
+        const hasConfig = fs.existsSync(configDir);
+        const sharingProfiles = profiles.filter(p => p.sharedWith === cli.command);
+        const reverseTag = sharingProfiles.length > 0
+            ? chalk_1.default.gray(` (← shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
+            : '';
+        console.log(chalk_1.default.cyan('▸'), chalk_1.default.bold(cli.command) + chalk_1.default.gray(' [default]') + reverseTag);
+        console.log(chalk_1.default.gray('  CLI:'), cli.displayName);
+        console.log(chalk_1.default.gray('  Config:'), hasConfig ? `~/.${cli.name}/` : chalk_1.default.yellow('not configured'));
         console.log();
-        return;
     }
-    console.log(chalk_1.default.bold('\n🍭 Configured Providers:\n'));
+    // Show sweech-managed profiles
     profiles.forEach(profile => {
         const provider = (0, providers_1.getProvider)(profile.provider);
         const cli = (0, clis_1.getCLI)(profile.cliType || 'claude');
         const sharedTag = profile.sharedWith ? chalk_1.default.magenta(` [shared ↔ ${profile.sharedWith}]`) : '';
-        // Show which profiles share data with this profile (reverse dependency)
         const sharingProfiles = profiles.filter(p => p.sharedWith === profile.commandName);
         const reverseTag = sharingProfiles.length > 0
             ? chalk_1.default.gray(` (← shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
@@ -148,13 +172,9 @@ program
         console.log(chalk_1.default.gray('  Created:'), new Date(profile.createdAt).toLocaleDateString());
         console.log();
     });
-    // Show reverse dependency for the default claude account
-    const claudeSharingProfiles = profiles.filter(p => p.sharedWith === 'claude');
-    console.log(chalk_1.default.gray('Default Claude account is in ~/.claude/ (use "claude" command)'));
-    if (claudeSharingProfiles.length > 0) {
-        console.log(chalk_1.default.gray(`  (← shared by: ${claudeSharingProfiles.map(p => p.commandName).join(', ')})`));
+    if (profiles.length === 0) {
+        console.log(chalk_1.default.gray('No additional profiles configured. Run'), chalk_1.default.bold('sweech add'), chalk_1.default.gray('to create one.\n'));
     }
-    console.log();
 });
 // Remove provider command
 program
@@ -585,6 +605,91 @@ program
         console.error(chalk_1.default.red('Backup failed:'), error.message);
         process.exit(1);
     }
+});
+// ── sweech serve ───────────────────────────────────────────────────────────────
+program
+    .command('serve')
+    .description('Start the fed integration server (exposes /fed/info, /fed/runs, /fed/widget)')
+    .option('--port <number>', 'Port to listen on', '7854')
+    .action(async (opts) => {
+    const port = parseInt(opts.port, 10);
+    try {
+        await (0, fedServer_1.startSweechFedServer)(port);
+        console.log(chalk_1.default.green(`sweech federation server running on :${port}`));
+        console.log(chalk_1.default.dim(`  /fed/info   — metadata`));
+        console.log(chalk_1.default.dim(`  /fed/runs   — account list`));
+        console.log(chalk_1.default.dim(`  /fed/widget — claude-usage widget`));
+        // Keep alive
+        await new Promise(() => { });
+    }
+    catch (error) {
+        console.error(chalk_1.default.red('Failed to start server:'), error.message);
+        process.exit(1);
+    }
+});
+// ── sweech usage ───────────────────────────────────────────────────────────────
+const usageCmd = program
+    .command('usage')
+    .description('Show Claude Code usage windows (5h rolling + 7d) for all accounts')
+    .action(() => {
+    const config = new config_1.ConfigManager();
+    const profiles = config.getProfiles();
+    if (profiles.length === 0) {
+        console.log(chalk_1.default.dim('\nNo accounts configured. Run sweech add to get started.\n'));
+        return;
+    }
+    const accounts = (0, subscriptions_1.getAccountInfo)(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
+    console.log(chalk_1.default.bold('\n  sweech · claude code usage\n'));
+    for (const a of accounts) {
+        const planStr = a.meta.plan ? chalk_1.default.cyan(` [${a.meta.plan}]`) : '';
+        const emailStr = a.emailAddress ? chalk_1.default.dim(` · ${a.emailAddress}`) : '';
+        console.log(`  ${chalk_1.default.bold(a.name)}${planStr}${emailStr}`);
+        // 5-hour window
+        const cap5hStr = a.minutesUntilFirstCapacity !== undefined
+            ? chalk_1.default.dim(` · first capacity in ${a.minutesUntilFirstCapacity}m`)
+            : '';
+        console.log(`    5h window:  ${chalk_1.default.white(String(a.messages5h))} messages${cap5hStr}`);
+        // 7-day window
+        const weeklyStr = a.hoursUntilWeeklyReset !== undefined
+            ? chalk_1.default.dim(` · resets in ${a.hoursUntilWeeklyReset}h`)
+            : chalk_1.default.dim(' · set plan to compute (from subscriptionCreatedAt)');
+        console.log(`    7d window:  ${chalk_1.default.white(String(a.messages7d))} messages${weeklyStr}`);
+        const lastStr = a.lastActive
+            ? chalk_1.default.dim(`  last: ${new Date(a.lastActive).toLocaleString()}`)
+            : '';
+        if (lastStr)
+            console.log(`   ${lastStr}`);
+        console.log();
+    }
+});
+usageCmd
+    .command('set-plan <account> <plan>')
+    .description('Set the plan label for an account (e.g. "Max 5x", "Max 20x", "Pro")')
+    .action((account, plan) => {
+    const config = new config_1.ConfigManager();
+    const profiles = config.getProfiles();
+    const profile = profiles.find(p => p.name === account || p.commandName === account);
+    if (!profile) {
+        console.error(chalk_1.default.red(`Account '${account}' not found`));
+        console.log(chalk_1.default.dim('Available: ' + profiles.map(p => p.name).join(', ')));
+        process.exit(1);
+    }
+    (0, subscriptions_1.setMeta)(profile.commandName, { plan });
+    console.log(chalk_1.default.green(`✓ Plan set to "${plan}" for ${profile.name}`));
+});
+usageCmd
+    .command('set-limits <account> <5h> <7d>')
+    .description('Set known message limits for progress bars (e.g. "Max 5x" = 225 5h, 2000 7d)')
+    .action((account, limit5h, limit7d) => {
+    const config = new config_1.ConfigManager();
+    const profiles = config.getProfiles();
+    const profile = profiles.find(p => p.name === account || p.commandName === account);
+    if (!profile) {
+        console.error(chalk_1.default.red(`Account '${account}' not found`));
+        process.exit(1);
+    }
+    (0, subscriptions_1.setMeta)(profile.commandName, { limits: { window5h: parseInt(limit5h), window7d: parseInt(limit7d) } });
+    console.log(chalk_1.default.green(`✓ Limits set for ${profile.name}: 5h=${limit5h} 7d=${limit7d}`));
 });
 // Reset command - Uninstall sweetch
 program

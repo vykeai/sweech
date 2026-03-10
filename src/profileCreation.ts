@@ -80,13 +80,9 @@ export async function createProfile(
   }
 
   if (useNativeAuth) {
-    // Using native CLI OAuth - user needs to complete setup
     console.log(chalk.cyan('Auth:'), 'OAuth (via CLI)');
     console.log();
-    console.log(chalk.yellow('⚠️  Authentication setup required:'));
-    console.log(chalk.gray(`   Run: ${chalk.cyan(answers.commandName)}`));
-    console.log(chalk.gray('   This will start Claude Code\'s OAuth login flow'));
-    console.log(chalk.gray('   Follow the prompts to authenticate with your account'));
+    console.log(chalk.blue('ℹ'), chalk.gray(`Run ${chalk.cyan(answers.commandName)} to log in with your account`));
   } else {
     console.log(chalk.cyan('Model:'), provider.defaultModel);
     if (answers.authMethod === 'oauth') {

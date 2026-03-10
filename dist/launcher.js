@@ -74,7 +74,7 @@ function saveState(state) {
     catch { }
 }
 function buildCommandPreview(entry, state) {
-    let cmd = entry.command;
+    let cmd = entry.name;
     const args = [];
     if (state.yolo)
         args.push(entry.yoloFlag);
