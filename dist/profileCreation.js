@@ -58,7 +58,7 @@ async function createProfile(answers, provider, cli, config) {
     console.log(chalk_1.default.cyan('Command:'), chalk_1.default.bold(answers.commandName));
     console.log(chalk_1.default.cyan('Provider:'), provider.displayName);
     if (answers.sharedWith) {
-        console.log(chalk_1.default.cyan('Data:'), `Shared with ${chalk_1.default.bold(answers.sharedWith)} (memory, transcripts, plans, tasks, commands, plugins)`);
+        console.log(chalk_1.default.cyan('Data:'), `Shared with ${chalk_1.default.bold(answers.sharedWith)} (projects, plans, tasks, commands, plugins, hooks, agents, teams, todos, mcp.json, CLAUDE.md)`);
     }
     if (useNativeAuth) {
         console.log(chalk_1.default.cyan('Auth:'), 'OAuth (via CLI)');

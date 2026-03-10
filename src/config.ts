@@ -24,9 +24,11 @@ export interface ProfileConfig {
 }
 
 // Directories that are safe to share across profiles via symlinks.
-// These contain memories, transcripts, plans, tasks, commands, plugins.
-// NOT included: settings.json, cache, session-env, shell-snapshots, etc. (auth/runtime)
-export const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins'] as const;
+// NOT included: settings.json, cache, session-env, shell-snapshots, history.jsonl (auth/runtime)
+export const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos'] as const;
+
+// Files that are safe to share across profiles via symlinks.
+export const SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'] as const;
 
 export class ConfigManager {
   private configDir: string;
@@ -252,9 +254,8 @@ exec ${cli.command} "\${ARGS[@]}"
   }
 
   /**
-   * Symlink shareable dirs from a new profile to a master profile.
-   * Shared dirs: projects, plans, tasks, commands, plugins.
-   * Auth and runtime dirs (settings.json, cache, session-env, etc.) remain isolated.
+   * Symlink shareable dirs and files from a new profile to a master profile.
+   * Auth and runtime items (settings.json, cache, session-env, history.jsonl, etc.) remain isolated.
    */
   public setupSharedDirs(commandName: string, masterCommandName: string): void {
     const profileDir = this.getProfileDir(commandName);
@@ -273,6 +274,26 @@ exec ${cli.command} "\${ARGS[@]}"
       }
 
       // Remove existing dir/symlink in profile if present
+      try {
+        const stat = fs.lstatSync(linkPath);
+        if (stat) fs.rmSync(linkPath, { recursive: true, force: true });
+      } catch {
+        // doesn't exist yet, that's fine
+      }
+
+      fs.symlinkSync(targetPath, linkPath);
+    }
+
+    for (const file of SHAREABLE_FILES) {
+      const linkPath = path.join(profileDir, file);
+      const targetPath = path.join(masterDir, file);
+
+      // Ensure target file exists in master (touch it if not)
+      if (!fs.existsSync(targetPath)) {
+        fs.writeFileSync(targetPath, '');
+      }
+
+      // Remove existing file/symlink in profile if present
       try {
         const stat = fs.lstatSync(linkPath);
         if (stat) fs.rmSync(linkPath, { recursive: true, force: true });

@@ -36,14 +36,15 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ConfigManager = exports.SHAREABLE_DIRS = void 0;
+exports.ConfigManager = exports.SHAREABLE_FILES = exports.SHAREABLE_DIRS = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 // Directories that are safe to share across profiles via symlinks.
-// These contain memories, transcripts, plans, tasks, commands, plugins.
-// NOT included: settings.json, cache, session-env, shell-snapshots, etc. (auth/runtime)
-exports.SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins'];
+// NOT included: settings.json, cache, session-env, shell-snapshots, history.jsonl (auth/runtime)
+exports.SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos'];
+// Files that are safe to share across profiles via symlinks.
+exports.SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'];
 class ConfigManager {
     constructor() {
         this.configDir = path.join(os.homedir(), '.sweech');
@@ -226,9 +227,8 @@ exec ${cli.command} "\${ARGS[@]}"
         return path.join(os.homedir(), `.${commandName}`);
     }
     /**
-     * Symlink shareable dirs from a new profile to a master profile.
-     * Shared dirs: projects, plans, tasks, commands, plugins.
-     * Auth and runtime dirs (settings.json, cache, session-env, etc.) remain isolated.
+     * Symlink shareable dirs and files from a new profile to a master profile.
+     * Auth and runtime items (settings.json, cache, session-env, history.jsonl, etc.) remain isolated.
      */
     setupSharedDirs(commandName, masterCommandName) {
         const profileDir = this.getProfileDir(commandName);
@@ -244,6 +244,24 @@ exec ${cli.command} "\${ARGS[@]}"
                 fs.mkdirSync(targetPath, { recursive: true });
             }
             // Remove existing dir/symlink in profile if present
+            try {
+                const stat = fs.lstatSync(linkPath);
+                if (stat)
+                    fs.rmSync(linkPath, { recursive: true, force: true });
+            }
+            catch {
+                // doesn't exist yet, that's fine
+            }
+            fs.symlinkSync(targetPath, linkPath);
+        }
+        for (const file of exports.SHAREABLE_FILES) {
+            const linkPath = path.join(profileDir, file);
+            const targetPath = path.join(masterDir, file);
+            // Ensure target file exists in master (touch it if not)
+            if (!fs.existsSync(targetPath)) {
+                fs.writeFileSync(targetPath, '');
+            }
+            // Remove existing file/symlink in profile if present
             try {
                 const stat = fs.lstatSync(linkPath);
                 if (stat)

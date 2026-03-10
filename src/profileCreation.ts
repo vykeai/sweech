@@ -76,7 +76,7 @@ export async function createProfile(
   console.log(chalk.cyan('Command:'), chalk.bold(answers.commandName));
   console.log(chalk.cyan('Provider:'), provider.displayName);
   if (answers.sharedWith) {
-    console.log(chalk.cyan('Data:'), `Shared with ${chalk.bold(answers.sharedWith)} (memory, transcripts, plans, tasks, commands, plugins)`);
+    console.log(chalk.cyan('Data:'), `Shared with ${chalk.bold(answers.sharedWith)} (projects, plans, tasks, commands, plugins, hooks, agents, teams, todos, mcp.json, CLAUDE.md)`);
   }
 
   if (useNativeAuth) {

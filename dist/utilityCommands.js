@@ -189,9 +189,9 @@ async function runDoctor() {
                     ? path.join(os.homedir(), '.claude')
                     : config.getProfileDir(profile.sharedWith);
                 console.log(chalk_1.default.gray(`    Shared symlinks (→ ${profile.sharedWith}):`));
-                for (const dir of config_1.SHAREABLE_DIRS) {
-                    const linkPath = path.join(profileDir, dir);
-                    const expectedTarget = path.join(masterDir, dir);
+                for (const item of [...config_1.SHAREABLE_DIRS, ...config_1.SHAREABLE_FILES]) {
+                    const linkPath = path.join(profileDir, item);
+                    const expectedTarget = path.join(masterDir, item);
                     let ok = false;
                     try {
                         const stat = fs.lstatSync(linkPath);
@@ -204,10 +204,10 @@ async function runDoctor() {
                         ok = false;
                     }
                     if (ok) {
-                        console.log(chalk_1.default.green(`      ✓ ${dir}`));
+                        console.log(chalk_1.default.green(`      ✓ ${item}`));
                     }
                     else {
-                        console.log(chalk_1.default.red(`      ✗ ${dir}`));
+                        console.log(chalk_1.default.red(`      ✗ ${item}`));
                     }
                 }
             }

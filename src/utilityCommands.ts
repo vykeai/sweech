@@ -10,7 +10,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { ConfigManager, ProfileConfig, SHAREABLE_DIRS } from './config';
+import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES } from './config';
 import { getCLI } from './clis';
 import { getProvider } from './providers';
 import { detectInstalledCLIs } from './cliDetection';
@@ -153,9 +153,9 @@ export async function runDoctor(): Promise<void> {
           : config.getProfileDir(profile.sharedWith);
 
         console.log(chalk.gray(`    Shared symlinks (→ ${profile.sharedWith}):`));
-        for (const dir of SHAREABLE_DIRS) {
-          const linkPath = path.join(profileDir, dir);
-          const expectedTarget = path.join(masterDir, dir);
+        for (const item of [...SHAREABLE_DIRS, ...SHAREABLE_FILES]) {
+          const linkPath = path.join(profileDir, item);
+          const expectedTarget = path.join(masterDir, item);
           let ok = false;
           try {
             const stat = fs.lstatSync(linkPath);
@@ -167,9 +167,9 @@ export async function runDoctor(): Promise<void> {
             ok = false;
           }
           if (ok) {
-            console.log(chalk.green(`      ✓ ${dir}`));
+            console.log(chalk.green(`      ✓ ${item}`));
           } else {
-            console.log(chalk.red(`      ✗ ${dir}`));
+            console.log(chalk.red(`      ✗ ${item}`));
           }
         }
       }
