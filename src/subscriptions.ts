@@ -1,15 +1,17 @@
 /**
  * Claude Code subscription tracker.
  *
- * Data sources (all local, no API calls):
+ * Data sources:
  *   ~/.claude-{name}/history.jsonl   — per-message timestamps for 5h/7d windows
  *   ~/.claude-{name}/.claude.json    — account metadata, subscriptionCreatedAt
  *   ~/.sweech/subscriptions.json     — user-configured plan labels
+ *   macOS Keychain (live)            — OAuth token → API call → rate-limit headers
  */
 
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { getLiveUsage, type LiveRateLimitData } from './liveUsage'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -51,6 +53,9 @@ export interface AccountInfo {
   hoursUntilWeeklyReset?: number
   /** Minutes until the oldest message in 5h window exits (i.e. window expands) */
   minutesUntilFirstCapacity?: number
+
+  // Live data from API (requires Keychain token)
+  live?: LiveRateLimitData
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
@@ -209,12 +214,12 @@ function computeWeeklyReset(subscriptionCreatedAt: string): { weeklyResetAt: str
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export function getAccountInfo(
+export async function getAccountInfo(
   profiles: Array<{ name: string; commandName: string }>,
-): AccountInfo[] {
+): Promise<AccountInfo[]> {
   const allMeta = readMeta()
 
-  return profiles.map(p => {
+  return Promise.all(profiles.map(async p => {
     const configDir = getConfigDir(p.commandName)
     const meta = allMeta[p.commandName] ?? {}
     const claude = readClaudeJson(configDir)
@@ -225,6 +230,8 @@ export function getAccountInfo(
     const weeklyReset = sub?.subscriptionCreatedAt
       ? computeWeeklyReset(sub.subscriptionCreatedAt)
       : undefined
+
+    const live = await getLiveUsage(configDir).catch(() => undefined) ?? undefined
 
     return {
       name: p.name,
@@ -237,6 +244,7 @@ export function getAccountInfo(
       meta,
       ...windows,
       ...(weeklyReset ?? {}),
+      live,
     }
-  })
+  }))
 }

@@ -98,7 +98,7 @@ function createSweechFedServer(port) {
         }
         if (pathname === '/fed/runs') {
             const profiles = getProfiles();
-            const accounts = (0, subscriptions_1.getAccountInfo)(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
+            const accounts = await (0, subscriptions_1.getAccountInfo)(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
             sendJson(res, 200, accounts.map(a => ({
                 name: a.name,
                 slug: a.commandName,
@@ -112,7 +112,7 @@ function createSweechFedServer(port) {
         }
         if (pathname === '/fed/widget') {
             const profiles = getProfiles();
-            const accounts = (0, subscriptions_1.getAccountInfo)(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
+            const accounts = await (0, subscriptions_1.getAccountInfo)(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
             sendJson(res, 200, {
                 type: 'claude-usage',
                 title: 'sweech',
@@ -128,6 +128,7 @@ function createSweechFedServer(port) {
                         weeklyResetAt: a.weeklyResetAt,
                         hoursUntilWeeklyReset: a.hoursUntilWeeklyReset,
                         lastActive: a.lastActive,
+                        live: a.live,
                     })),
                 },
             });

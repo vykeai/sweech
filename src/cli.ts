@@ -664,7 +664,7 @@ program
 const usageCmd = program
   .command('usage')
   .description('Show Claude Code usage windows (5h rolling + 7d) for all accounts')
-  .action(() => {
+  .action(async () => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     if (profiles.length === 0) {
@@ -672,7 +672,7 @@ const usageCmd = program
       return;
     }
 
-    const accounts = getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
+    const accounts = await getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
     console.log(chalk.bold('\n  sweech · claude code usage\n'));
 
     for (const a of accounts) {
@@ -680,17 +680,23 @@ const usageCmd = program
       const emailStr = a.emailAddress ? chalk.dim(` · ${a.emailAddress}`) : '';
       console.log(`  ${chalk.bold(a.name)}${planStr}${emailStr}`);
 
-      // 5-hour window
+      // 5-hour window — prefer live utilization % if available
       const cap5hStr = a.minutesUntilFirstCapacity !== undefined
         ? chalk.dim(` · first capacity in ${a.minutesUntilFirstCapacity}m`)
         : '';
-      console.log(`    5h window:  ${chalk.white(String(a.messages5h))} messages${cap5hStr}`);
+      const live5hStr = a.live?.utilization5h !== undefined
+        ? chalk.dim(` (${Math.round(a.live.utilization5h * 100)}% live)`)
+        : '';
+      console.log(`    5h window:  ${chalk.white(String(a.messages5h))} messages${live5hStr}${cap5hStr}`);
 
       // 7-day window
       const weeklyStr = a.hoursUntilWeeklyReset !== undefined
         ? chalk.dim(` · resets in ${a.hoursUntilWeeklyReset}h`)
         : chalk.dim(' · set plan to compute (from subscriptionCreatedAt)');
-      console.log(`    7d window:  ${chalk.white(String(a.messages7d))} messages${weeklyStr}`);
+      const live7dStr = a.live?.utilization7d !== undefined
+        ? chalk.dim(` (${Math.round(a.live.utilization7d * 100)}% live)`)
+        : '';
+      console.log(`    7d window:  ${chalk.white(String(a.messages7d))} messages${live7dStr}${weeklyStr}`);
 
       const lastStr = a.lastActive
         ? chalk.dim(`  last: ${new Date(a.lastActive).toLocaleString()}`)
@@ -758,6 +764,25 @@ program
       console.error(chalk.red('Update failed:'), error.message);
       process.exit(1);
     }
+  });
+
+// Resync command - re-apply shared symlinks for a profile
+program
+  .command('resync <command-name>')
+  .description('Re-apply all shared symlinks for a profile (use after upgrading sweech)')
+  .action((commandName: string) => {
+    const config = new ConfigManager();
+    const profile = config.getProfiles().find(p => p.commandName === commandName);
+    if (!profile) {
+      console.error(chalk.red(`Profile '${commandName}' not found`));
+      process.exit(1);
+    }
+    if (!profile.sharedWith) {
+      console.error(chalk.red(`Profile '${commandName}' is not in shared mode`));
+      process.exit(1);
+    }
+    config.setupSharedDirs(commandName, profile.sharedWith);
+    console.log(chalk.green(`✓ Symlinks resynced for ${commandName} → ${profile.sharedWith}\n`));
   });
 
 // Default action: interactive launcher when no command given

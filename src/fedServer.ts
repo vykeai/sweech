@@ -67,7 +67,7 @@ export function createSweechFedServer(port: number): http.Server {
 
     if (pathname === '/fed/runs') {
       const profiles = getProfiles()
-      const accounts = getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })))
+      const accounts = await getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })))
       sendJson(res, 200, accounts.map(a => ({
         name: a.name,
         slug: a.commandName,
@@ -82,7 +82,7 @@ export function createSweechFedServer(port: number): http.Server {
 
     if (pathname === '/fed/widget') {
       const profiles = getProfiles()
-      const accounts = getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })))
+      const accounts = await getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })))
       sendJson(res, 200, {
         type: 'claude-usage',
         title: 'sweech',
@@ -98,6 +98,7 @@ export function createSweechFedServer(port: number): http.Server {
             weeklyResetAt: a.weeklyResetAt,
             hoursUntilWeeklyReset: a.hoursUntilWeeklyReset,
             lastActive: a.lastActive,
+            live: a.live,
           })),
         },
       })

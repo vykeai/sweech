@@ -2,10 +2,11 @@
 /**
  * Claude Code subscription tracker.
  *
- * Data sources (all local, no API calls):
+ * Data sources:
  *   ~/.claude-{name}/history.jsonl   — per-message timestamps for 5h/7d windows
  *   ~/.claude-{name}/.claude.json    — account metadata, subscriptionCreatedAt
  *   ~/.sweech/subscriptions.json     — user-configured plan labels
+ *   macOS Keychain (live)            — OAuth token → API call → rate-limit headers
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -47,6 +48,7 @@ exports.getAccountInfo = getAccountInfo;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
+const liveUsage_1 = require("./liveUsage");
 // ── Storage ───────────────────────────────────────────────────────────────────
 const SUBSCRIPTIONS_FILE = path.join(os.homedir(), '.sweech', 'subscriptions.json');
 function readMeta() {
@@ -160,9 +162,9 @@ function computeWeeklyReset(subscriptionCreatedAt) {
     };
 }
 // ── Main export ───────────────────────────────────────────────────────────────
-function getAccountInfo(profiles) {
+async function getAccountInfo(profiles) {
     const allMeta = readMeta();
-    return profiles.map(p => {
+    return Promise.all(profiles.map(async (p) => {
         const configDir = getConfigDir(p.commandName);
         const meta = allMeta[p.commandName] ?? {};
         const claude = readClaudeJson(configDir);
@@ -172,6 +174,7 @@ function getAccountInfo(profiles) {
         const weeklyReset = sub?.subscriptionCreatedAt
             ? computeWeeklyReset(sub.subscriptionCreatedAt)
             : undefined;
+        const live = await (0, liveUsage_1.getLiveUsage)(configDir).catch(() => undefined) ?? undefined;
         return {
             name: p.name,
             commandName: p.commandName,
@@ -183,6 +186,7 @@ function getAccountInfo(profiles) {
             meta,
             ...windows,
             ...(weeklyReset ?? {}),
+            live,
         };
-    });
+    }));
 }
