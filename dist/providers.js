@@ -75,6 +75,17 @@ exports.PROVIDERS = {
         compatibility: ['claude'],
         apiFormat: 'anthropic'
     },
+    dashscope: {
+        name: 'dashscope',
+        displayName: 'Alibaba Cloud Coding Plan (Anthropic)',
+        baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic',
+        defaultModel: 'qwen3-coder-next',
+        smallFastModel: 'qwen3-coder-plus',
+        description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via Anthropic-compat API (sk-sp-... key)',
+        pricing: 'Subscription plan',
+        compatibility: ['claude'],
+        apiFormat: 'anthropic'
+    },
     // ═══════════════════════════════════════════════════════════
     // OPENAI-COMPATIBLE PROVIDERS (for Codex CLI)
     // ═══════════════════════════════════════════════════════════
@@ -97,6 +108,17 @@ exports.PROVIDERS = {
         smallFastModel: 'qwen-turbo',
         description: 'Alibaba Qwen via OpenAI-compatible DashScope API',
         pricing: '$0.14-$2.49 per million tokens',
+        compatibility: ['codex'],
+        apiFormat: 'openai'
+    },
+    'dashscope-openai': {
+        name: 'dashscope-openai',
+        displayName: 'Alibaba Cloud Coding Plan (OpenAI)',
+        baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/v1',
+        defaultModel: 'qwen3-coder-next',
+        smallFastModel: 'qwen3-coder-plus',
+        description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via OpenAI-compat API (sk-sp-... key)',
+        pricing: 'Subscription plan',
         compatibility: ['codex'],
         apiFormat: 'openai'
     },
