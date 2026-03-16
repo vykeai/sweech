@@ -187,6 +187,15 @@ struct AccountsView: View {
                 Divider()
 
                 Button {
+                    service.setLaunchAtLogin(!service.launchAtLogin)
+                } label: {
+                    Label(
+                        service.launchAtLogin ? "Remove from Login Items" : "Launch at Login",
+                        systemImage: service.launchAtLogin ? "checkmark.circle.fill" : "circle"
+                    )
+                }
+
+                Button {
                     service.restartDaemon()
                 } label: {
                     Label("Restart Daemon", systemImage: "arrow.counterclockwise.circle")
@@ -373,84 +382,77 @@ struct UsageRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 3) {
+            // Single inline row: label · used% · [bar] · free% · reset
+            HStack(spacing: 6) {
                 // Window label
                 Text(label)
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(Sweech.Color.textMuted)
-                    .kerning(0.5)
+                    .frame(width: 20, alignment: .leading)
 
                 // Used %
                 Text("\(used)%")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(barColor)
                     .monospacedDigit()
+                    .frame(width: 32, alignment: .trailing)
 
-                Text("used")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
-
-                Text("·")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.3))
+                // Progress bar — fills available space
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Sweech.Color.surfaceHigh)
+                            .frame(height: 5)
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(
+                                LinearGradient(
+                                    colors: [barColor, barColor.opacity(0.6)],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
+                            .frame(width: max(0, geo.size.width * min(utilization, 1.0)), height: 5)
+                            .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: 0)
+                    }
+                }
+                .frame(height: 5)
 
                 // Free %
                 Text("\(remaining)%")
-                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(remainingColor)
                     .monospacedDigit()
-
-                Text("free")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
-
-                Spacer()
+                    .frame(width: 32, alignment: .leading)
 
                 // Reset time
                 if let resetIn {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 9, weight: .medium))
+                            .font(.system(size: 8, weight: .medium))
                         Text(resetIn)
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
                             .monospacedDigit()
                     }
                     .foregroundStyle(Sweech.Color.accent)
                 }
             }
+            .frame(height: 14)
 
-            // Progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Sweech.Color.surfaceHigh)
-                        .frame(height: 5)
-
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(
-                            LinearGradient(
-                                colors: [barColor, barColor.opacity(0.6)],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .frame(width: max(0, geo.size.width * min(utilization, 1.0)), height: 5)
-                        .shadow(color: barColor.opacity(0.4), radius: 4, x: 0, y: 0)
+            // Sub-row: messages + capacity note
+            if messages > 0 || capacityNote != nil {
+                HStack(spacing: 8) {
+                    if messages > 0 {
+                        Text("\(messages) msgs")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.4))
+                    }
+                    if let note = capacityNote {
+                        Text(note)
+                            .font(.system(size: 9))
+                            .foregroundStyle(Sweech.Color.accent.opacity(0.5))
+                    }
                 }
-            }
-            .frame(height: 5)
-
-            // Secondary: messages + capacity note
-            HStack(spacing: 8) {
-                Text(messages > 0 ? "\(used)% used · \(messages) msgs" : "\(used)% used")
-                    .font(.system(size: 9))
-                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
-
-                if let note = capacityNote {
-                    Text(note)
-                        .font(.system(size: 9))
-                        .foregroundStyle(Sweech.Color.accent.opacity(0.5))
-                }
+                .padding(.leading, 26)
             }
         }
     }

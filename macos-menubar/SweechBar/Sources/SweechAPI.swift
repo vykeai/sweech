@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 struct LiveBucket: Codable {
     let label: String
@@ -184,6 +185,59 @@ class SweechService: ObservableObject {
             _ = Self.runSweech(["serve", "--uninstall"])
             _ = Self.runSweech(["serve", "--install"])
         }
+    }
+
+    // MARK: - Launch at Login
+
+    private static let plistPath = NSString(
+        "~/Library/LaunchAgents/ai.sweech.bar.plist"
+    ).expandingTildeInPath
+
+    var launchAtLogin: Bool {
+        get { FileManager.default.fileExists(atPath: Self.plistPath) }
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        if enabled {
+            guard let binaryPath = Bundle.main.executablePath ?? Self.findBinary() else { return }
+            let plist = """
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.sweech.bar</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>\(binaryPath)</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>StandardOutPath</key>
+    <string>\(NSString("~/Library/Logs/sweech-bar.log").expandingTildeInPath)</string>
+    <key>StandardErrorPath</key>
+    <string>\(NSString("~/Library/Logs/sweech-bar.log").expandingTildeInPath)</string>
+</dict>
+</plist>
+"""
+            try? plist.write(toFile: Self.plistPath, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o644],
+                ofItemAtPath: Self.plistPath)
+        } else {
+            try? FileManager.default.removeItem(atPath: Self.plistPath)
+        }
+        objectWillChange.send()
+    }
+
+    private static func findBinary() -> String? {
+        // Walk up from __FILE__ to find the built binary
+        let candidates = [
+            NSString("~/dev/sweech/macos-menubar/SweechBar/.build/debug/SweechBar").expandingTildeInPath,
+            NSString("~/dev/sweech/macos-menubar/SweechBar/.build/release/SweechBar").expandingTildeInPath,
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     private func loadOrder() {
