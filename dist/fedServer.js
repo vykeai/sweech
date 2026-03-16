@@ -83,6 +83,7 @@ function createSweechFedServer(port) {
         }
         if (pathname === '/fed/info') {
             const profiles = getProfiles();
+            const allAccounts = (0, subscriptions_1.getKnownAccounts)(profiles);
             sendJson(res, 200, {
                 machine: getMachineName(),
                 service: 'sweech',
@@ -91,7 +92,7 @@ function createSweechFedServer(port) {
                 platform: process.platform,
                 uptime: process.uptime(),
                 hostname: node_os_1.default.hostname(),
-                accountCount: profiles.length,
+                accountCount: allAccounts.length,
                 capabilities: ['account-usage', 'claude-usage'],
             });
             return;

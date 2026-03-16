@@ -1,0 +1,81 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "SweechBar-arm64-apple-macosx26.0-debug.exe": ["<SweechBar-arm64-apple-macosx26.0-debug.exe>"]
+  "SweechBar-arm64-apple-macosx26.0-debug.module": ["<SweechBar-arm64-apple-macosx26.0-debug.module>"]
+  "main": ["<SweechBar-arm64-apple-macosx26.0-debug.exe>","<SweechBar-arm64-apple-macosx26.0-debug.module>"]
+  "test": ["<SweechBar-arm64-apple-macosx26.0-debug.exe>","<SweechBar-arm64-apple-macosx26.0-debug.module>"]
+default: "main"
+nodes:
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar":
+    is-mutated: true
+commands:
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar-entitlement.plist":
+    tool: write-auxiliary-file
+    inputs: ["<entitlement-plist>","<com.apple.security.get-task-allow>"]
+    outputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar-entitlement.plist"]
+    description: "Write auxiliary file /Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar-entitlement.plist"
+
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/AccountsView.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/Design.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/SweechAPI.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/SweechBarApp.swift"]
+    outputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/sources"]
+    description: "Write auxiliary file /Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/sources"
+
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.swift.o"]
+    outputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.product/Objects.LinkFileList"
+
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+
+  "<SweechBar-arm64-apple-macosx26.0-debug.exe>":
+    tool: phony
+    inputs: ["<SweechBar-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    outputs: ["<SweechBar-arm64-apple-macosx26.0-debug.exe>"]
+
+  "<SweechBar-arm64-apple-macosx26.0-debug.module>":
+    tool: phony
+    inputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/Modules/SweechBar.swiftmodule"]
+    outputs: ["<SweechBar-arm64-apple-macosx26.0-debug.module>"]
+
+  "C.SweechBar-arm64-apple-macosx26.0-debug.exe":
+    tool: shell
+    inputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.product/Objects.LinkFileList"]
+    outputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar"]
+    description: "Linking ./.build/arm64-apple-macosx/debug/SweechBar"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug","-o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar","-module-name","SweechBar","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-alias","-Xlinker","_SweechBar_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.product/Objects.LinkFileList","-Xlinker","-rpath","-Xlinker","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-6.2/macosx","-target","arm64-apple-macosx13.0","-Xlinker","-sectcreate","-Xlinker","__TEXT","-Xlinker","__info_plist","-Xlinker","Info.plist","-Xlinker","-add_ast_path","-Xlinker","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/Modules/SweechBar.swiftmodule","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.SweechBar-arm64-apple-macosx26.0-debug.exe-entitlements":
+    tool: shell
+    inputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar-entitlement.plist"]
+    outputs: ["<SweechBar-arm64-apple-macosx26.0-debug.exe-CodeSigning>"]
+    description: "Applying debug entitlements to ./.build/arm64-apple-macosx/debug/SweechBar"
+    args: ["codesign","--force","--sign","-","--entitlements","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar-entitlement.plist","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar"]
+
+  "C.SweechBar-arm64-apple-macosx26.0-debug.module":
+    tool: shell
+    inputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/AccountsView.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/Design.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/SweechAPI.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/SweechBarApp.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/sources"]
+    outputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.swift.o","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/Modules/SweechBar.swiftmodule"]
+    description: "Compiling Swift Module 'SweechBar' (4 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","SweechBar","-emit-dependencies","-emit-module","-emit-module-path","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/Modules/SweechBar.swiftmodule","-output-file-map","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/output-file-map.json","-incremental","-c","@/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/sources","-I","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/Modules","-target","arm64-apple-macosx13.0","-incremental","-enable-batch-mode","-serialize-diagnostics","-index-store-path","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/index/store","-Onone","-enable-testing","-j28","-DSWIFT_PACKAGE","-DDEBUG","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","SweechBar_main","-swift-version","5","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.2.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","sweechbar"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/","/Users/luke/dev/sweech/macos-menubar/SweechBar/Package.swift","/Users/luke/dev/sweech/macos-menubar/SweechBar/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

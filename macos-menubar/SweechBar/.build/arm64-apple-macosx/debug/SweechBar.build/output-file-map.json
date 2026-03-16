@@ -1,0 +1,33 @@
+{
+  "": {
+    "swift-dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/master.swiftdeps"
+  },
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/AccountsView.swift": {
+    "dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.d",
+    "object": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.swift.o",
+    "swiftmodule": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView~partial.swiftmodule",
+    "swift-dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.swiftdeps",
+    "diagnostics": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/AccountsView.dia"
+  },
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/Design.swift": {
+    "dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.d",
+    "object": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.swift.o",
+    "swiftmodule": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design~partial.swiftmodule",
+    "swift-dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.swiftdeps",
+    "diagnostics": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/Design.dia"
+  },
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/SweechAPI.swift": {
+    "dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.d",
+    "object": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.swift.o",
+    "swiftmodule": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI~partial.swiftmodule",
+    "swift-dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.swiftdeps",
+    "diagnostics": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechAPI.dia"
+  },
+  "/Users/luke/dev/sweech/macos-menubar/SweechBar/Sources/SweechBarApp.swift": {
+    "dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.d",
+    "object": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.swift.o",
+    "swiftmodule": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.swiftdeps",
+    "diagnostics": "/Users/luke/dev/sweech/macos-menubar/SweechBar/.build/arm64-apple-macosx/debug/SweechBar.build/SweechBarApp.dia"
+  }
+}
