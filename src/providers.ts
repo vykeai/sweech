@@ -34,6 +34,21 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
+
+  // ═══════════════════════════════════════════════════════════
+  // OPENAI PROVIDER (for Codex CLI)
+  // ═══════════════════════════════════════════════════════════
+
+  openai: {
+    name: 'openai',
+    displayName: 'OpenAI',
+    baseUrl: '', // Uses default
+    defaultModel: 'gpt-5.4',
+    description: 'Official OpenAI models via Codex CLI',
+    pricing: 'ChatGPT Plus/Pro subscription',
+    compatibility: ['codex'],
+    apiFormat: 'openai'
+  },
   qwen: {
     name: 'qwen',
     displayName: 'Qwen (Alibaba)',

@@ -514,7 +514,7 @@ export async function runClone(sourceName: string, targetName: string): Promise<
 
   // Set up shared dirs if clone inherits sharing
   if (inheritSharedWith) {
-    config.setupSharedDirs(targetName, inheritSharedWith);
+    config.setupSharedDirs(targetName, inheritSharedWith, source.cliType);
   }
 
   console.log(chalk.green(`\n✓ Created ${targetName} (${provider?.displayName})\n`));

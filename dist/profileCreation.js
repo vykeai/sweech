@@ -51,7 +51,7 @@ async function createProfile(answers, provider, cli, config) {
     config.createWrapperScript(answers.commandName, cli);
     // Set up shared dirs if symlink mode
     if (answers.sharedWith) {
-        config.setupSharedDirs(answers.commandName, answers.sharedWith);
+        config.setupSharedDirs(answers.commandName, answers.sharedWith, answers.cliType);
     }
     // Display success message
     console.log(chalk_1.default.green('\n✓ Provider added successfully!\n'));

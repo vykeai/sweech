@@ -68,7 +68,7 @@ export async function createProfile(
 
   // Set up shared dirs if symlink mode
   if (answers.sharedWith) {
-    config.setupSharedDirs(answers.commandName, answers.sharedWith);
+    config.setupSharedDirs(answers.commandName, answers.sharedWith, answers.cliType);
   }
 
   // Display success message

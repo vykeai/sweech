@@ -23,12 +23,19 @@ export interface ProfileConfig {
   sharedWith?: string; // commandName of master profile (e.g. 'claude') if dirs are symlinked
 }
 
-// Directories that are safe to share across profiles via symlinks.
+// Directories that are safe to share across profiles via symlinks (Claude).
 // NOT included: settings.json, cache, session-env, shell-snapshots, history.jsonl (auth/runtime)
 export const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos'] as const;
 
-// Files that are safe to share across profiles via symlinks.
+// Files that are safe to share across profiles via symlinks (Claude).
 export const SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'] as const;
+
+// Codex-specific shareable dirs.
+// NOT included: auth.json, config.toml, log, shell_snapshots, sqlite, history.jsonl (auth/runtime)
+export const CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories', 'rules', 'skills'] as const;
+
+// Codex-specific shareable files.
+export const CODEX_SHAREABLE_FILES = ['config.toml'] as const;
 
 export class ConfigManager {
   private configDir: string;
@@ -255,53 +262,62 @@ exec ${cli.command} "\${ARGS[@]}"
 
   /**
    * Symlink shareable dirs and files from a new profile to a master profile.
-   * Auth and runtime items (settings.json, cache, session-env, history.jsonl, etc.) remain isolated.
+   * Auth and runtime items remain isolated.
+   * Automatically selects the right shareable lists based on CLI type.
    */
-  public setupSharedDirs(commandName: string, masterCommandName: string): void {
+  public setupSharedDirs(commandName: string, masterCommandName: string, cliType?: string): void {
     const profileDir = this.getProfileDir(commandName);
-    // Master is either 'claude' (default ~/.claude/) or another sweech profile
-    const masterDir = masterCommandName === 'claude'
-      ? path.join(os.homedir(), '.claude')
+    const isCodex = cliType === 'codex'
+      || masterCommandName === 'codex'
+      || commandName.startsWith('codex');
+
+    // Resolve master dir
+    const defaultDirs = ['claude', 'codex'];
+    const masterDir = defaultDirs.includes(masterCommandName)
+      ? path.join(os.homedir(), `.${masterCommandName}`)
       : this.getProfileDir(masterCommandName);
 
-    for (const dir of SHAREABLE_DIRS) {
+    const dirs = isCodex ? CODEX_SHAREABLE_DIRS : SHAREABLE_DIRS;
+    const files = isCodex ? CODEX_SHAREABLE_FILES : SHAREABLE_FILES;
+
+    for (const dir of dirs) {
       const linkPath = path.join(profileDir, dir);
       const targetPath = path.join(masterDir, dir);
 
-      // Ensure target exists in master
       if (!fs.existsSync(targetPath)) {
         fs.mkdirSync(targetPath, { recursive: true });
       }
 
-      // Remove existing dir/symlink in profile if present
       try {
         const stat = fs.lstatSync(linkPath);
         if (stat) fs.rmSync(linkPath, { recursive: true, force: true });
-      } catch {
-        // doesn't exist yet, that's fine
-      }
+      } catch {}
 
       fs.symlinkSync(targetPath, linkPath);
     }
 
-    for (const file of SHAREABLE_FILES) {
+    for (const file of files) {
       const linkPath = path.join(profileDir, file);
       const targetPath = path.join(masterDir, file);
 
-      // Ensure target file exists in master (touch it if not)
       if (!fs.existsSync(targetPath)) {
         fs.writeFileSync(targetPath, '');
       }
 
-      // Remove existing file/symlink in profile if present
       try {
         const stat = fs.lstatSync(linkPath);
         if (stat) fs.rmSync(linkPath, { recursive: true, force: true });
-      } catch {
-        // doesn't exist yet, that's fine
-      }
+      } catch {}
 
       fs.symlinkSync(targetPath, linkPath);
+    }
+
+    // For codex profiles, also create required isolated dirs
+    if (isCodex) {
+      for (const dir of ['log', 'tmp', 'shell_snapshots', 'sqlite']) {
+        const d = path.join(profileDir, dir);
+        if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+      }
     }
   }
 

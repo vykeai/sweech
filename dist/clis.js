@@ -17,6 +17,7 @@ exports.SUPPORTED_CLIS = {
         description: 'Anthropic Claude Code CLI',
         installUrl: 'https://code.claude.com/',
         yoloFlag: '--dangerously-skip-permissions',
+        resumeFlag: '--continue',
     },
     codex: {
         name: 'codex',
@@ -26,6 +27,7 @@ exports.SUPPORTED_CLIS = {
         description: 'OpenAI Codex CLI - lightweight coding agent',
         installUrl: 'https://github.com/openai/codex',
         yoloFlag: '--yolo',
+        resumeFlag: 'resume --last',
     },
     // Future support for other CLIs
     // cursor: {

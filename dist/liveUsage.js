@@ -139,19 +139,116 @@ async function fetchRateLimitHeaders(accessToken) {
         });
         const get = (k) => res.headers.get(k);
         const num = (k) => { const v = get(k); return v !== null ? Number(v) : undefined; };
+        const u5h = num('anthropic-ratelimit-unified-5h-utilization');
+        const u7d = num('anthropic-ratelimit-unified-7d-utilization');
+        const uSonnet7d = num('anthropic-ratelimit-sonnet-7d-utilization');
+        const r5h = num('anthropic-ratelimit-unified-5h-reset');
+        const r7d = num('anthropic-ratelimit-unified-7d-reset');
+        const buckets = [
+            {
+                label: 'All models',
+                session: u5h !== undefined ? { utilization: u5h, resetsAt: r5h } : undefined,
+                weekly: u7d !== undefined ? { utilization: u7d, resetsAt: r7d } : undefined,
+            },
+        ];
+        if (uSonnet7d !== undefined) {
+            buckets.push({
+                label: 'Sonnet only',
+                weekly: { utilization: uSonnet7d, resetsAt: r7d },
+            });
+        }
         return {
-            utilization5h: num('anthropic-ratelimit-unified-5h-utilization'),
-            utilization7d: num('anthropic-ratelimit-unified-7d-utilization'),
-            reset5hAt: num('anthropic-ratelimit-unified-5h-reset'),
-            reset7dAt: num('anthropic-ratelimit-unified-7d-reset'),
+            buckets,
             status: get('anthropic-ratelimit-unified-status') ?? undefined,
-            representativeClaim: get('anthropic-ratelimit-unified-representative-claim') ?? undefined,
             capturedAt: Date.now(),
+            // Legacy
+            utilization5h: u5h, utilization7d: u7d, utilizationSonnet7d: uSonnet7d,
+            reset5hAt: r5h, reset7dAt: r7d,
+            representativeClaim: get('anthropic-ratelimit-unified-representative-claim') ?? undefined,
         };
     }
     catch {
         return null;
     }
+}
+// ── Codex app-server rate limits ──────────────────────────────────────────────
+async function fetchCodexRateLimits(configDir) {
+    const { spawn } = require('child_process');
+    return new Promise((resolve) => {
+        const timeout = setTimeout(() => { proc.kill(); resolve(null); }, 10000);
+        const proc = spawn('codex', ['app-server', '--listen', 'stdio://'], {
+            stdio: ['pipe', 'pipe', 'ignore'],
+            env: { ...process.env, CODEX_HOME: configDir },
+        });
+        let buffer = '';
+        proc.stdout.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+            for (const line of lines) {
+                if (!line.trim())
+                    continue;
+                try {
+                    const msg = JSON.parse(line);
+                    if (msg.id === 1) {
+                        // Init response — now request rate limits
+                        const req = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read', params: {} });
+                        proc.stdin.write(req + '\n');
+                    }
+                    else if (msg.id === 2) {
+                        clearTimeout(timeout);
+                        proc.kill();
+                        const byId = msg.result?.rateLimitsByLimitId || {};
+                        if (!Object.keys(byId).length) {
+                            resolve(null);
+                            return;
+                        }
+                        // Build one bucket per limit ID, each with 5h + 7d
+                        const buckets = [];
+                        let mainStatus = 'allowed';
+                        let mainPlanType;
+                        // Legacy fields from the first (main) bucket
+                        let u5h, u7d, r5h, r7d;
+                        for (const [id, limit] of Object.entries(byId)) {
+                            const label = limit.limitName || 'All models';
+                            const bucket = { label };
+                            if (limit.primary) {
+                                bucket.session = { utilization: limit.primary.usedPercent / 100, resetsAt: limit.primary.resetsAt };
+                            }
+                            if (limit.secondary) {
+                                bucket.weekly = { utilization: limit.secondary.usedPercent / 100, resetsAt: limit.secondary.resetsAt };
+                                if (limit.secondary.usedPercent >= 100)
+                                    mainStatus = 'limit_reached';
+                            }
+                            if (limit.planType)
+                                mainPlanType = limit.planType;
+                            buckets.push(bucket);
+                            // Legacy: use main (unnamed) limit for top-level fields
+                            if (!limit.limitName) {
+                                u5h = bucket.session?.utilization;
+                                u7d = bucket.weekly?.utilization;
+                                r5h = limit.primary?.resetsAt;
+                                r7d = limit.secondary?.resetsAt;
+                            }
+                        }
+                        resolve({
+                            buckets,
+                            status: mainStatus,
+                            planType: mainPlanType,
+                            capturedAt: Date.now(),
+                            utilization5h: u5h, utilization7d: u7d,
+                            reset5hAt: r5h, reset7dAt: r7d,
+                        });
+                    }
+                }
+                catch { }
+            }
+        });
+        proc.on('error', () => { clearTimeout(timeout); resolve(null); });
+        // Send initialize
+        const init = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'sweech', version: '0.1' } } });
+        proc.stdin.write(init + '\n');
+    });
 }
 // ── Public API ────────────────────────────────────────────────────────────────
 /**
@@ -160,10 +257,18 @@ async function fetchRateLimitHeaders(accessToken) {
  *
  * Returns null if no valid token is available or on any error.
  */
-async function getLiveUsage(configDir) {
+async function getLiveUsage(configDir, cliType) {
     const cached = getCached(configDir);
     if (cached)
         return cached;
+    // Codex: use app-server JSON-RPC
+    if (cliType === 'codex') {
+        const data = await fetchCodexRateLimits(configDir);
+        if (data)
+            setCached(configDir, data);
+        return data;
+    }
+    // Claude: use OAuth token + Anthropic API headers
     const token = readOAuthToken(configDir);
     if (!token)
         return null;
@@ -176,7 +281,13 @@ async function getLiveUsage(configDir) {
 /**
  * Force-refresh live rate limit data, bypassing the cache.
  */
-async function refreshLiveUsage(configDir) {
+async function refreshLiveUsage(configDir, cliType) {
+    if (cliType === 'codex') {
+        const data = await fetchCodexRateLimits(configDir);
+        if (data)
+            setCached(configDir, data);
+        return data;
+    }
     const token = readOAuthToken(configDir);
     if (!token)
         return null;

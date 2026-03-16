@@ -17,21 +17,41 @@ import { execSync } from 'child_process'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface RateLimitWindow {
+  /** 0.0–1.0 */
+  utilization: number
+  /** Unix seconds */
+  resetsAt?: number
+}
+
+export interface RateLimitBucket {
+  /** Human-readable name, e.g. "All models", "Sonnet only", "GPT-5.3-Codex-Spark" */
+  label: string
+  session?: RateLimitWindow    // 5h rolling
+  weekly?: RateLimitWindow     // 7d rolling
+}
+
 export interface LiveRateLimitData {
-  /** 0.0–1.0 */
-  utilization5h?: number
-  /** 0.0–1.0 */
-  utilization7d?: number
-  /** Unix seconds */
-  reset5hAt?: number
-  /** Unix seconds */
-  reset7dAt?: number
-  /** "allowed" | "allowed_warning" | "rejected" */
+  buckets: RateLimitBucket[]
+  /** "allowed" | "allowed_warning" | "rejected" | "limit_reached" */
   status?: string
-  /** "five_hour" | "seven_day" etc */
-  representativeClaim?: string
+  /** Plan type — "pro", "max", etc. */
+  planType?: string
   /** When this snapshot was captured (ms) */
   capturedAt: number
+
+  // Legacy fields for backward compat with existing code
+  /** @deprecated use buckets[0].session.utilization */
+  utilization5h?: number
+  /** @deprecated use buckets[0].weekly.utilization */
+  utilization7d?: number
+  /** @deprecated */
+  utilizationSonnet7d?: number
+  /** @deprecated */
+  reset5hAt?: number
+  /** @deprecated */
+  reset7dAt?: number
+  representativeClaim?: string
 }
 
 // ── Cache ─────────────────────────────────────────────────────────────────────
@@ -140,18 +160,123 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
     const get = (k: string) => res.headers.get(k)
     const num = (k: string) => { const v = get(k); return v !== null ? Number(v) : undefined }
 
+    const u5h = num('anthropic-ratelimit-unified-5h-utilization')
+    const u7d = num('anthropic-ratelimit-unified-7d-utilization')
+    const uSonnet7d = num('anthropic-ratelimit-sonnet-7d-utilization')
+    const r5h = num('anthropic-ratelimit-unified-5h-reset')
+    const r7d = num('anthropic-ratelimit-unified-7d-reset')
+
+    const buckets: RateLimitBucket[] = [
+      {
+        label: 'All models',
+        session: u5h !== undefined ? { utilization: u5h, resetsAt: r5h } : undefined,
+        weekly: u7d !== undefined ? { utilization: u7d, resetsAt: r7d } : undefined,
+      },
+    ]
+    if (uSonnet7d !== undefined) {
+      buckets.push({
+        label: 'Sonnet only',
+        weekly: { utilization: uSonnet7d, resetsAt: r7d },
+      })
+    }
+
     return {
-      utilization5h: num('anthropic-ratelimit-unified-5h-utilization'),
-      utilization7d: num('anthropic-ratelimit-unified-7d-utilization'),
-      reset5hAt: num('anthropic-ratelimit-unified-5h-reset'),
-      reset7dAt: num('anthropic-ratelimit-unified-7d-reset'),
+      buckets,
       status: get('anthropic-ratelimit-unified-status') ?? undefined,
-      representativeClaim: get('anthropic-ratelimit-unified-representative-claim') ?? undefined,
       capturedAt: Date.now(),
+      // Legacy
+      utilization5h: u5h, utilization7d: u7d, utilizationSonnet7d: uSonnet7d,
+      reset5hAt: r5h, reset7dAt: r7d,
+      representativeClaim: get('anthropic-ratelimit-unified-representative-claim') ?? undefined,
     }
   } catch {
     return null
   }
+}
+
+// ── Codex app-server rate limits ──────────────────────────────────────────────
+
+async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitData | null> {
+  const { spawn } = require('child_process')
+
+  return new Promise<LiveRateLimitData | null>((resolve) => {
+    const timeout = setTimeout(() => { proc.kill(); resolve(null) }, 10_000)
+
+    const proc = spawn('codex', ['app-server', '--listen', 'stdio://'], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+      env: { ...process.env, CODEX_HOME: configDir },
+    })
+
+    let buffer = ''
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString()
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const msg = JSON.parse(line)
+          if (msg.id === 1) {
+            // Init response — now request rate limits
+            const req = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read', params: {} })
+            proc.stdin.write(req + '\n')
+          } else if (msg.id === 2) {
+            clearTimeout(timeout)
+            proc.kill()
+
+            const byId = msg.result?.rateLimitsByLimitId || {}
+            if (!Object.keys(byId).length) { resolve(null); return }
+
+            // Build one bucket per limit ID, each with 5h + 7d
+            const buckets: RateLimitBucket[] = []
+            let mainStatus = 'allowed'
+            let mainPlanType: string | undefined
+            // Legacy fields from the first (main) bucket
+            let u5h: number | undefined, u7d: number | undefined, r5h: number | undefined, r7d: number | undefined
+
+            for (const [id, limit] of Object.entries(byId) as [string, any][]) {
+              const label = limit.limitName || 'All models'
+              const bucket: RateLimitBucket = { label }
+              if (limit.primary) {
+                bucket.session = { utilization: limit.primary.usedPercent / 100, resetsAt: limit.primary.resetsAt }
+              }
+              if (limit.secondary) {
+                bucket.weekly = { utilization: limit.secondary.usedPercent / 100, resetsAt: limit.secondary.resetsAt }
+                if (limit.secondary.usedPercent >= 100) mainStatus = 'limit_reached'
+              }
+              if (limit.planType) mainPlanType = limit.planType
+              buckets.push(bucket)
+
+              // Legacy: use main (unnamed) limit for top-level fields
+              if (!limit.limitName) {
+                u5h = bucket.session?.utilization
+                u7d = bucket.weekly?.utilization
+                r5h = limit.primary?.resetsAt
+                r7d = limit.secondary?.resetsAt
+              }
+            }
+
+            resolve({
+              buckets,
+              status: mainStatus,
+              planType: mainPlanType,
+              capturedAt: Date.now(),
+              utilization5h: u5h, utilization7d: u7d,
+              reset5hAt: r5h, reset7dAt: r7d,
+            })
+          }
+        } catch {}
+      }
+    })
+
+    proc.on('error', () => { clearTimeout(timeout); resolve(null) })
+
+    // Send initialize
+    const init = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'sweech', version: '0.1' } } })
+    proc.stdin.write(init + '\n')
+  })
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -162,10 +287,18 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
  *
  * Returns null if no valid token is available or on any error.
  */
-export async function getLiveUsage(configDir: string): Promise<LiveRateLimitData | null> {
+export async function getLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
   const cached = getCached(configDir)
   if (cached) return cached
 
+  // Codex: use app-server JSON-RPC
+  if (cliType === 'codex') {
+    const data = await fetchCodexRateLimits(configDir)
+    if (data) setCached(configDir, data)
+    return data
+  }
+
+  // Claude: use OAuth token + Anthropic API headers
   const token = readOAuthToken(configDir)
   if (!token) return null
 
@@ -179,7 +312,13 @@ export async function getLiveUsage(configDir: string): Promise<LiveRateLimitData
 /**
  * Force-refresh live rate limit data, bypassing the cache.
  */
-export async function refreshLiveUsage(configDir: string): Promise<LiveRateLimitData | null> {
+export async function refreshLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
+  if (cliType === 'codex') {
+    const data = await fetchCodexRateLimits(configDir)
+    if (data) setCached(configDir, data)
+    return data
+  }
+
   const token = readOAuthToken(configDir)
   if (!token) return null
 

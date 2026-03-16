@@ -514,7 +514,7 @@ async function runClone(sourceName, targetName) {
     }
     // Set up shared dirs if clone inherits sharing
     if (inheritSharedWith) {
-        config.setupSharedDirs(targetName, inheritSharedWith);
+        config.setupSharedDirs(targetName, inheritSharedWith, source.cliType);
     }
     console.log(chalk_1.default.green(`\n✓ Created ${targetName} (${provider?.displayName})\n`));
 }

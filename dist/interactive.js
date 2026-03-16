@@ -82,7 +82,6 @@ async function interactiveAddProvider(existingProfiles = []) {
             message: 'Choose a provider:',
             choices: (answers) => {
                 if (answers.providerType === 'official') {
-                    // For official, use the CLI's native provider (anthropic for claude)
                     const cliType = answers.cliType || 'claude';
                     if (cliType === 'claude') {
                         return [
@@ -92,7 +91,14 @@ async function interactiveAddProvider(existingProfiles = []) {
                             }
                         ];
                     }
-                    // Future: add official providers for other CLIs
+                    if (cliType === 'codex') {
+                        return [
+                            {
+                                name: 'OpenAI - Official OpenAI Codex models',
+                                value: 'openai'
+                            }
+                        ];
+                    }
                     return [];
                 }
                 // For external, show compatible providers for the selected CLI
@@ -108,6 +114,10 @@ async function interactiveAddProvider(existingProfiles = []) {
             default: (answers) => {
                 const provider = (0, providers_1.getProvider)(answers.provider);
                 const providerName = provider?.name || answers.provider;
+                const cliType = answers.cliType || 'claude';
+                if (cliType === 'codex') {
+                    return providerName === 'openai' ? 'codex-work' : `codex-${providerName}`;
+                }
                 const defaultMap = {
                     'minimax': 'claude-mini',
                     'qwen': 'claude-qwen',
@@ -126,11 +136,13 @@ async function interactiveAddProvider(existingProfiles = []) {
                 if (!/^[a-z0-9-]+$/.test(trimmed)) {
                     return 'Use only lowercase letters, numbers, and hyphens (e.g., "claude-mini", "cmini")';
                 }
-                if (trimmed === 'claude') {
-                    return 'Cannot use "claude" - this is reserved for your default account';
+                if (trimmed === 'claude' || trimmed === 'codex') {
+                    return `Cannot use "${trimmed}" - this is reserved for your default account`;
                 }
-                if (!trimmed.startsWith('claude-')) {
-                    return 'Command name must start with "claude-" (e.g., "claude-rai", "claude-work")';
+                const cliType = answers.cliType || 'claude';
+                const prefix = cliType === 'codex' ? 'codex-' : 'claude-';
+                if (!trimmed.startsWith(prefix)) {
+                    return `Command name must start with "${prefix}" (e.g., "${prefix}work", "${prefix}pole")`;
                 }
                 // Check for clashes with existing commands
                 const existing = existingProfiles.find(p => p.commandName === trimmed);
@@ -177,18 +189,21 @@ async function interactiveAddProvider(existingProfiles = []) {
             name: 'sharedWith',
             message: 'Share data with which profile?',
             when: (answers) => answers.dataMode === 'shared',
-            choices: () => {
-                const options = [
+            choices: (answers) => {
+                const cliType = answers.cliType || 'claude';
+                const defaultName = cliType === 'codex' ? 'codex' : 'claude';
+                const defaultDir = `~/.${defaultName}/`;
+                const sameCliProfiles = existingProfiles.filter(p => (p.cliType || 'claude') === cliType);
+                return [
                     {
-                        name: `claude ${chalk_1.default.gray('(your default ~/.claude/)')}`,
-                        value: 'claude'
+                        name: `${defaultName} ${chalk_1.default.gray(`(your default ${defaultDir})`)}`,
+                        value: defaultName
                     },
-                    ...existingProfiles.map(p => ({
+                    ...sameCliProfiles.map(p => ({
                         name: `${p.commandName} ${chalk_1.default.gray(`(~/.${p.commandName}/)`)}`,
                         value: p.commandName
                     }))
                 ];
-                return options;
             }
         },
         {
@@ -220,7 +235,16 @@ async function interactiveAddProvider(existingProfiles = []) {
                     }
                 ];
             },
-            default: 'api-key'
+            default: (answers) => {
+                const cliType = answers.cliType || 'claude';
+                const provider = answers.provider;
+                // Default to OAuth for official subscription providers
+                if ((cliType === 'claude' && provider === 'anthropic') ||
+                    (cliType === 'codex' && provider === 'openai')) {
+                    return 'oauth';
+                }
+                return 'api-key';
+            }
         },
         {
             type: 'password',

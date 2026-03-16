@@ -76,33 +76,58 @@ function getConfigDir(commandName) {
     return path.join(os.homedir(), `.${commandName}`);
 }
 function readClaudeJson(configDir) {
+    let result = {};
     // Try .claude.json first (sweech-managed profiles)
     const file = path.join(configDir, '.claude.json');
     try {
         const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
         if (data.oauthAccount)
-            return data;
+            result = data;
     }
     catch { }
     // Fallback: .credentials.json (default claude account stores auth here)
-    const credFile = path.join(configDir, '.credentials.json');
-    try {
-        const cred = JSON.parse(fs.readFileSync(credFile, 'utf-8'));
-        const oauth = cred.claudeAiOauth;
-        if (oauth) {
-            return {
-                oauthAccount: {
-                    subscriptionCreatedAt: undefined,
-                    billingType: oauth.subscriptionType
-                        ? `${oauth.subscriptionType}` // e.g. "max"
-                        : undefined,
-                    rateLimitTier: oauth.rateLimitTier, // e.g. "default_claude_max_20x"
-                }
-            };
+    if (!result.oauthAccount) {
+        const credFile = path.join(configDir, '.credentials.json');
+        try {
+            const cred = JSON.parse(fs.readFileSync(credFile, 'utf-8'));
+            const oauth = cred.claudeAiOauth;
+            if (oauth) {
+                result = {
+                    oauthAccount: {
+                        subscriptionCreatedAt: undefined,
+                        billingType: oauth.subscriptionType || undefined,
+                        rateLimitTier: oauth.rateLimitTier,
+                    }
+                };
+            }
         }
+        catch { }
     }
-    catch { }
-    return {};
+    // Enrich with Keychain data (has rateLimitTier even when files don't)
+    if (process.platform === 'darwin' && result.oauthAccount && !result.oauthAccount.rateLimitTier) {
+        try {
+            const crypto = require('crypto');
+            const defaultDir = path.join(os.homedir(), '.claude');
+            const service = configDir === defaultDir
+                ? 'Claude Code-credentials'
+                : `Claude Code-credentials-${crypto.createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`;
+            const { execSync } = require('child_process');
+            const username = process.env.USER || os.userInfo().username;
+            const raw = execSync(`security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                const token = parsed.claudeAiOauth;
+                if (token?.rateLimitTier) {
+                    result.oauthAccount.rateLimitTier = token.rateLimitTier;
+                }
+                if (token?.subscriptionType && !result.oauthAccount.billingType) {
+                    result.oauthAccount.billingType = token.subscriptionType;
+                }
+            }
+        }
+        catch { }
+    }
+    return result;
 }
 function readHistory(configDir) {
     const file = path.join(configDir, 'history.jsonl');
@@ -231,11 +256,31 @@ async function getAccountInfo(profiles, options = {}) {
             : undefined;
         const usageFn = options.refresh ? liveUsage_1.refreshLiveUsage : liveUsage_1.getLiveUsage;
         const live = await usageFn(configDir, cliType).catch(() => undefined) ?? undefined;
-        // Detect if we can get a valid token (Keychain on macOS, fallback to file)
+        // Only flag reauth if the Keychain token is actually expired (not just a transient fetch failure)
         let needsReauth = false;
-        if (process.platform === 'darwin') {
-            // If live fetch returned null AND we expected a Claude account, token may be dead
-            needsReauth = !live && !!sub;
+        if (process.platform === 'darwin' && cliType === 'claude' && !live) {
+            try {
+                const crypto = require('crypto');
+                const defaultDir = path.join(os.homedir(), '.claude');
+                const service = configDir === defaultDir
+                    ? 'Claude Code-credentials'
+                    : `Claude Code-credentials-${crypto.createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`;
+                const { execSync } = require('child_process');
+                const username = process.env.USER || os.userInfo().username;
+                const raw = execSync(`security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+                if (raw) {
+                    const token = JSON.parse(raw).claudeAiOauth;
+                    if (!token?.accessToken || (token.expiresAt && token.expiresAt < Date.now())) {
+                        needsReauth = true;
+                    }
+                }
+                else {
+                    needsReauth = true; // no token at all
+                }
+            }
+            catch {
+                needsReauth = true;
+            }
         }
         return {
             name: p.name,
