@@ -44,11 +44,13 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.setMeta = setMeta;
 exports.getConfigDir = getConfigDir;
+exports.getKnownAccounts = getKnownAccounts;
 exports.getAccountInfo = getAccountInfo;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const liveUsage_1 = require("./liveUsage");
+const clis_1 = require("./clis");
 // ── Storage ───────────────────────────────────────────────────────────────────
 const SUBSCRIPTIONS_FILE = path.join(os.homedir(), '.sweech', 'subscriptions.json');
 function readMeta() {
@@ -74,13 +76,33 @@ function getConfigDir(commandName) {
     return path.join(os.homedir(), `.${commandName}`);
 }
 function readClaudeJson(configDir) {
+    // Try .claude.json first (sweech-managed profiles)
     const file = path.join(configDir, '.claude.json');
     try {
-        return JSON.parse(fs.readFileSync(file, 'utf-8'));
+        const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
+        if (data.oauthAccount)
+            return data;
     }
-    catch {
-        return {};
+    catch { }
+    // Fallback: .credentials.json (default claude account stores auth here)
+    const credFile = path.join(configDir, '.credentials.json');
+    try {
+        const cred = JSON.parse(fs.readFileSync(credFile, 'utf-8'));
+        const oauth = cred.claudeAiOauth;
+        if (oauth) {
+            return {
+                oauthAccount: {
+                    subscriptionCreatedAt: undefined,
+                    billingType: oauth.subscriptionType
+                        ? `${oauth.subscriptionType}` // e.g. "max"
+                        : undefined,
+                    rateLimitTier: oauth.rateLimitTier, // e.g. "default_claude_max_20x"
+                }
+            };
+        }
     }
+    catch { }
+    return {};
 }
 function readHistory(configDir) {
     const file = path.join(configDir, 'history.jsonl');
@@ -92,7 +114,12 @@ function readHistory(configDir) {
         if (!line.trim())
             continue;
         try {
-            entries.push(JSON.parse(line));
+            const parsed = JSON.parse(line);
+            // Normalise codex `ts` (epoch seconds) to `timestamp` (epoch millis)
+            if (!parsed.timestamp && parsed.ts) {
+                parsed.timestamp = parsed.ts * 1000;
+            }
+            entries.push(parsed);
         }
         catch { /* skip */ }
     }
@@ -162,10 +189,38 @@ function computeWeeklyReset(subscriptionCreatedAt) {
     };
 }
 // ── Main export ───────────────────────────────────────────────────────────────
-async function getAccountInfo(profiles) {
+function getKnownAccounts(profiles) {
+    const seen = new Set();
+    const accounts = [];
+    for (const cli of Object.values(clis_1.SUPPORTED_CLIS)) {
+        if (seen.has(cli.name))
+            continue;
+        seen.add(cli.name);
+        accounts.push({
+            name: cli.command,
+            commandName: cli.name,
+            cliType: cli.name,
+            isDefault: true,
+        });
+    }
+    for (const profile of profiles) {
+        if (seen.has(profile.commandName))
+            continue;
+        seen.add(profile.commandName);
+        accounts.push({
+            name: profile.name,
+            commandName: profile.commandName,
+            cliType: profile.cliType,
+            isDefault: false,
+        });
+    }
+    return accounts;
+}
+async function getAccountInfo(profiles, options = {}) {
     const allMeta = readMeta();
     return Promise.all(profiles.map(async (p) => {
         const configDir = getConfigDir(p.commandName);
+        const cliType = p.cliType || (p.commandName.startsWith('codex') ? 'codex' : 'claude');
         const meta = allMeta[p.commandName] ?? {};
         const claude = readClaudeJson(configDir);
         const history = readHistory(configDir);
@@ -174,15 +229,25 @@ async function getAccountInfo(profiles) {
         const weeklyReset = sub?.subscriptionCreatedAt
             ? computeWeeklyReset(sub.subscriptionCreatedAt)
             : undefined;
-        const live = await (0, liveUsage_1.getLiveUsage)(configDir).catch(() => undefined) ?? undefined;
+        const usageFn = options.refresh ? liveUsage_1.refreshLiveUsage : liveUsage_1.getLiveUsage;
+        const live = await usageFn(configDir, cliType).catch(() => undefined) ?? undefined;
+        // Detect if we can get a valid token (Keychain on macOS, fallback to file)
+        let needsReauth = false;
+        if (process.platform === 'darwin') {
+            // If live fetch returned null AND we expected a Claude account, token may be dead
+            needsReauth = !live && !!sub;
+        }
         return {
             name: p.name,
             commandName: p.commandName,
+            cliType,
             configDir,
             displayName: sub?.displayName,
             emailAddress: sub?.emailAddress,
             billingType: sub?.billingType,
+            rateLimitTier: sub?.rateLimitTier,
             subscriptionCreatedAt: sub?.subscriptionCreatedAt,
+            needsReauth,
             meta,
             ...windows,
             ...(weeklyReset ?? {}),

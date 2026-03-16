@@ -21,7 +21,7 @@ import { runReset } from './reset';
 import { runInit } from './init';
 import { createProfile } from './profileCreation';
 import { runLauncher } from './launcher';
-import { getAccountInfo, setMeta } from './subscriptions';
+import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { startSweechFedServer } from './fedServer';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -665,7 +665,7 @@ program
       console.log(chalk.green(`sweech federation server running on :${port}`));
       console.log(chalk.dim(`  /fed/info   — metadata`));
       console.log(chalk.dim(`  /fed/runs   — account list`));
-      console.log(chalk.dim(`  /fed/widget — claude-usage widget`));
+      console.log(chalk.dim(`  /fed/widget — account-usage widget`));
       // Keep alive
       await new Promise(() => {});
     } catch (error: any) {
@@ -677,22 +677,36 @@ program
 // ── sweech usage ───────────────────────────────────────────────────────────────
 const usageCmd = program
   .command('usage')
-  .description('Show Claude Code usage windows (5h rolling + 7d) for all accounts')
-  .action(async () => {
+  .description('Show account usage windows (5h rolling + 7d) for Claude and Codex accounts')
+  .option('--json', 'Output machine-readable JSON')
+  .option('--refresh', 'Force-refresh live usage instead of using cached data')
+  .action(async (opts: { json?: boolean; refresh?: boolean }) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
-    if (profiles.length === 0) {
-      console.log(chalk.dim('\nNo accounts configured. Run sweech add to get started.\n'));
+    const accountList = getKnownAccounts(profiles);
+
+    if (accountList.length === 0) {
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ accounts: [] }, null, 2) + '\n');
+      } else {
+        console.log(chalk.dim('\nNo accounts found. Run sweech add to get started.\n'));
+      }
       return;
     }
 
-    const accounts = await getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
-    console.log(chalk.bold('\n  sweech · claude code usage\n'));
+    const accounts = await getAccountInfo(accountList, { refresh: opts.refresh });
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ accounts }, null, 2) + '\n');
+      return;
+    }
+
+    console.log(chalk.bold('\n  sweech · usage\n'));
 
     for (const a of accounts) {
       const planStr = a.meta.plan ? chalk.cyan(` [${a.meta.plan}]`) : '';
       const emailStr = a.emailAddress ? chalk.dim(` · ${a.emailAddress}`) : '';
-      console.log(`  ${chalk.bold(a.name)}${planStr}${emailStr}`);
+      const cliStr = chalk.dim(` · ${a.cliType}`);
+      console.log(`  ${chalk.bold(a.name)}${cliStr}${planStr}${emailStr}`);
 
       // 5-hour window — prefer live utilization % if available
       const cap5hStr = a.minutesUntilFirstCapacity !== undefined
@@ -725,11 +739,11 @@ usageCmd
   .description('Set the plan label for an account (e.g. "Max 5x", "Max 20x", "Pro")')
   .action((account: string, plan: string) => {
     const config = new ConfigManager();
-    const profiles = config.getProfiles();
-    const profile = profiles.find(p => p.name === account || p.commandName === account);
+    const known = getKnownAccounts(config.getProfiles());
+    const profile = known.find(p => p.name === account || p.commandName === account);
     if (!profile) {
       console.error(chalk.red(`Account '${account}' not found`));
-      console.log(chalk.dim('Available: ' + profiles.map(p => p.name).join(', ')));
+      console.log(chalk.dim('Available: ' + known.map(p => p.name).join(', ')));
       process.exit(1);
     }
     setMeta(profile.commandName, { plan });
@@ -741,8 +755,8 @@ usageCmd
   .description('Set known message limits for progress bars (e.g. "Max 5x" = 225 5h, 2000 7d)')
   .action((account: string, limit5h: string, limit7d: string) => {
     const config = new ConfigManager();
-    const profiles = config.getProfiles();
-    const profile = profiles.find(p => p.name === account || p.commandName === account);
+    const known = getKnownAccounts(config.getProfiles());
+    const profile = known.find(p => p.name === account || p.commandName === account);
     if (!profile) {
       console.error(chalk.red(`Account '${account}' not found`));
       process.exit(1);
@@ -795,7 +809,7 @@ program
       console.error(chalk.red(`Profile '${commandName}' is not in shared mode`));
       process.exit(1);
     }
-    config.setupSharedDirs(commandName, profile.sharedWith);
+    config.setupSharedDirs(commandName, profile.sharedWith, profile.cliType);
     console.log(chalk.green(`✓ Symlinks resynced for ${commandName} → ${profile.sharedWith}\n`));
   });
 

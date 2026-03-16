@@ -4,7 +4,7 @@
  * Exposes the fed contract endpoints so sweech appears in the fed dashboard:
  *   GET /fed/info    — machine metadata
  *   GET /fed/runs    — account list (sidebar/status)
- *   GET /fed/widget  — claude-usage widget with 5h + 7d window data
+ *   GET /fed/widget  — account-usage widget with 5h + 7d window data
  *
  * Start with: sweech serve [--port PORT]
  * Default fed port: 7854 (matches ~/.fed/config.json)
@@ -15,7 +15,7 @@ import os from 'node:os'
 import * as fs from 'fs'
 import * as path from 'path'
 import { ConfigManager } from './config'
-import { getAccountInfo } from './subscriptions'
+import { getAccountInfo, getKnownAccounts } from './subscriptions'
 
 const packageJsonPath = path.join(__dirname, '../package.json')
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { version: string }
@@ -60,17 +60,18 @@ export function createSweechFedServer(port: number): http.Server {
         uptime: process.uptime(),
         hostname: os.hostname(),
         accountCount: profiles.length,
-        capabilities: ['claude-usage'],
+        capabilities: ['account-usage', 'claude-usage'],
       })
       return
     }
 
     if (pathname === '/fed/runs') {
       const profiles = getProfiles()
-      const accounts = await getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })))
+      const accounts = await getAccountInfo(getKnownAccounts(profiles))
       sendJson(res, 200, accounts.map(a => ({
         name: a.name,
         slug: a.commandName,
+        cliType: a.cliType,
         plan: a.meta.plan,
         messages5h: a.messages5h,
         messages7d: a.messages7d,
@@ -82,14 +83,15 @@ export function createSweechFedServer(port: number): http.Server {
 
     if (pathname === '/fed/widget') {
       const profiles = getProfiles()
-      const accounts = await getAccountInfo(profiles.map(p => ({ name: p.name, commandName: p.commandName })))
+      const accounts = await getAccountInfo(getKnownAccounts(profiles))
       sendJson(res, 200, {
-        type: 'claude-usage',
+        type: 'account-usage',
         title: 'sweech',
         emoji: '🍭',
         data: {
           accounts: accounts.map(a => ({
             name: a.name,
+            cliType: a.cliType,
             plan: a.meta.plan,
             limits: a.meta.limits,
             messages5h: a.messages5h,

@@ -5,7 +5,7 @@
  * Exposes the fed contract endpoints so sweech appears in the fed dashboard:
  *   GET /fed/info    — machine metadata
  *   GET /fed/runs    — account list (sidebar/status)
- *   GET /fed/widget  — claude-usage widget with 5h + 7d window data
+ *   GET /fed/widget  — account-usage widget with 5h + 7d window data
  *
  * Start with: sweech serve [--port PORT]
  * Default fed port: 7854 (matches ~/.fed/config.json)
@@ -92,16 +92,17 @@ function createSweechFedServer(port) {
                 uptime: process.uptime(),
                 hostname: node_os_1.default.hostname(),
                 accountCount: profiles.length,
-                capabilities: ['claude-usage'],
+                capabilities: ['account-usage', 'claude-usage'],
             });
             return;
         }
         if (pathname === '/fed/runs') {
             const profiles = getProfiles();
-            const accounts = await (0, subscriptions_1.getAccountInfo)(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
+            const accounts = await (0, subscriptions_1.getAccountInfo)((0, subscriptions_1.getKnownAccounts)(profiles));
             sendJson(res, 200, accounts.map(a => ({
                 name: a.name,
                 slug: a.commandName,
+                cliType: a.cliType,
                 plan: a.meta.plan,
                 messages5h: a.messages5h,
                 messages7d: a.messages7d,
@@ -112,14 +113,15 @@ function createSweechFedServer(port) {
         }
         if (pathname === '/fed/widget') {
             const profiles = getProfiles();
-            const accounts = await (0, subscriptions_1.getAccountInfo)(profiles.map(p => ({ name: p.name, commandName: p.commandName })));
+            const accounts = await (0, subscriptions_1.getAccountInfo)((0, subscriptions_1.getKnownAccounts)(profiles));
             sendJson(res, 200, {
-                type: 'claude-usage',
+                type: 'account-usage',
                 title: 'sweech',
                 emoji: '🍭',
                 data: {
                     accounts: accounts.map(a => ({
                         name: a.name,
+                        cliType: a.cliType,
                         plan: a.meta.plan,
                         limits: a.meta.limits,
                         messages5h: a.messages5h,

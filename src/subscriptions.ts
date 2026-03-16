@@ -11,7 +11,8 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { getLiveUsage, type LiveRateLimitData } from './liveUsage'
+import { getLiveUsage, refreshLiveUsage, type LiveRateLimitData } from './liveUsage'
+import { SUPPORTED_CLIS } from './clis'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -25,13 +26,17 @@ export interface SubscriptionMeta {
 export interface AccountInfo {
   name: string
   commandName: string
+  cliType: string
   configDir: string
 
-  // From .claude.json
+  // From .claude.json or .credentials.json
   displayName?: string
   emailAddress?: string
   billingType?: string
+  rateLimitTier?: string
   subscriptionCreatedAt?: string
+  /** True if OAuth token is expired and needs re-auth */
+  needsReauth?: boolean
 
   // From ~/.sweech/subscriptions.json
   meta: SubscriptionMeta
@@ -56,6 +61,13 @@ export interface AccountInfo {
 
   // Live data from API (requires Keychain token)
   live?: LiveRateLimitData
+}
+
+export interface AccountRef {
+  name: string
+  commandName: string
+  cliType?: string
+  isDefault?: boolean
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
@@ -98,23 +110,46 @@ interface ClaudeJson {
     billingType?: string
     subscriptionCreatedAt?: string
     organizationName?: string
+    rateLimitTier?: string
   }
 }
 
 function readClaudeJson(configDir: string): ClaudeJson {
+  // Try .claude.json first (sweech-managed profiles)
   const file = path.join(configDir, '.claude.json')
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8')) as ClaudeJson
-  } catch {
-    return {}
-  }
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8')) as ClaudeJson
+    if (data.oauthAccount) return data
+  } catch {}
+
+  // Fallback: .credentials.json (default claude account stores auth here)
+  const credFile = path.join(configDir, '.credentials.json')
+  try {
+    const cred = JSON.parse(fs.readFileSync(credFile, 'utf-8')) as any
+    const oauth = cred.claudeAiOauth
+    if (oauth) {
+      return {
+        oauthAccount: {
+          subscriptionCreatedAt: undefined,
+          billingType: oauth.subscriptionType
+            ? `${oauth.subscriptionType}` // e.g. "max"
+            : undefined,
+          rateLimitTier: oauth.rateLimitTier, // e.g. "default_claude_max_20x"
+        }
+      }
+    }
+  } catch {}
+
+  return {}
 }
 
 // ── history.jsonl reader ──────────────────────────────────────────────────────
 
 interface HistoryEntry {
   timestamp?: number
+  ts?: number        // codex uses `ts` instead of `timestamp`
   sessionId?: string
+  session_id?: string // codex uses snake_case
   display?: string
 }
 
@@ -125,7 +160,14 @@ function readHistory(configDir: string): HistoryEntry[] {
   const entries: HistoryEntry[] = []
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue
-    try { entries.push(JSON.parse(line) as HistoryEntry) } catch { /* skip */ }
+    try {
+      const parsed = JSON.parse(line) as HistoryEntry
+      // Normalise codex `ts` (epoch seconds) to `timestamp` (epoch millis)
+      if (!parsed.timestamp && parsed.ts) {
+        parsed.timestamp = parsed.ts * 1000
+      }
+      entries.push(parsed)
+    } catch { /* skip */ }
   }
   return entries
 }
@@ -214,13 +256,46 @@ function computeWeeklyReset(subscriptionCreatedAt: string): { weeklyResetAt: str
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
+export function getKnownAccounts(
+  profiles: Array<{ name: string; commandName: string; cliType?: string }>,
+): AccountRef[] {
+  const seen = new Set<string>()
+  const accounts: AccountRef[] = []
+
+  for (const cli of Object.values(SUPPORTED_CLIS)) {
+    if (seen.has(cli.name)) continue
+    seen.add(cli.name)
+    accounts.push({
+      name: cli.command,
+      commandName: cli.name,
+      cliType: cli.name,
+      isDefault: true,
+    })
+  }
+
+  for (const profile of profiles) {
+    if (seen.has(profile.commandName)) continue
+    seen.add(profile.commandName)
+    accounts.push({
+      name: profile.name,
+      commandName: profile.commandName,
+      cliType: profile.cliType,
+      isDefault: false,
+    })
+  }
+
+  return accounts
+}
+
 export async function getAccountInfo(
-  profiles: Array<{ name: string; commandName: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string }>,
+  options: { refresh?: boolean } = {},
 ): Promise<AccountInfo[]> {
   const allMeta = readMeta()
 
   return Promise.all(profiles.map(async p => {
     const configDir = getConfigDir(p.commandName)
+    const cliType = p.cliType || (p.commandName.startsWith('codex') ? 'codex' : 'claude')
     const meta = allMeta[p.commandName] ?? {}
     const claude = readClaudeJson(configDir)
     const history = readHistory(configDir)
@@ -231,16 +306,27 @@ export async function getAccountInfo(
       ? computeWeeklyReset(sub.subscriptionCreatedAt)
       : undefined
 
-    const live = await getLiveUsage(configDir).catch(() => undefined) ?? undefined
+    const usageFn = options.refresh ? refreshLiveUsage : getLiveUsage
+    const live = await usageFn(configDir, cliType).catch(() => undefined) ?? undefined
+
+    // Detect if we can get a valid token (Keychain on macOS, fallback to file)
+    let needsReauth = false
+    if (process.platform === 'darwin') {
+      // If live fetch returned null AND we expected a Claude account, token may be dead
+      needsReauth = !live && !!sub
+    }
 
     return {
       name: p.name,
       commandName: p.commandName,
+      cliType,
       configDir,
       displayName: sub?.displayName,
       emailAddress: sub?.emailAddress,
       billingType: sub?.billingType,
+      rateLimitTier: sub?.rateLimitTier,
       subscriptionCreatedAt: sub?.subscriptionCreatedAt,
+      needsReauth,
       meta,
       ...windows,
       ...(weeklyReset ?? {}),
