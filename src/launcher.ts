@@ -94,15 +94,17 @@ function renderBar(pct: number, width: number, ub: UsageBar): string {
   const filled = Math.round((pct / 100) * width);
   const empty = width - filled;
   const bar = '█'.repeat(filled) + '░'.repeat(empty);
-  const pctStr = `${pct}%`;
+  const free = Math.max(0, 100 - pct);
+  const usedStr = `${pct}%`;
+  const freeStr = chalk.dim(`${free}%`);
 
   // At limit → always red
-  if (pct >= 100) return chalk.red(bar) + chalk.red(` ${pctStr}`);
+  if (pct >= 100) return chalk.red(usedStr) + ' ' + chalk.red(bar) + ' ' + freeStr;
   // Nothing used → green
-  if (pct === 0) return chalk.green(bar) + chalk.dim(` ${pctStr}`);
+  if (pct === 0) return chalk.dim(usedStr) + ' ' + chalk.green(bar) + ' ' + chalk.green(freeStr);
 
   // Calculate what % of the window has elapsed
-  let elapsed = 0.5; // default: assume midpoint if we can't compute
+  let elapsed = 0.5;
   if (ub.resetsAt && ub.windowMins > 0) {
     const now = Date.now() / 1000;
     const windowSec = ub.windowMins * 60;
@@ -111,22 +113,20 @@ function renderBar(pct: number, width: number, ub: UsageBar): string {
   }
 
   // Burn ratio: usage% / elapsed%
-  // <1.0 = under budget, 1.0-1.5 = warm, >1.5 = hot
   const usageFrac = pct / 100;
   const ratio = elapsed > 0.01 ? usageFrac / elapsed : (usageFrac > 0 ? 10 : 0);
 
-  // Weekly limits are harder to recover — tighten thresholds
   const isWeekly = ub.windowMins > 1000;
   const warnThreshold = isWeekly ? 1.1 : 1.3;
   const dangerThreshold = isWeekly ? 1.5 : 2.0;
 
   if (ratio >= dangerThreshold || pct >= 90) {
-    return chalk.red(bar) + chalk.red(` ${pctStr}`);
+    return chalk.red(usedStr) + ' ' + chalk.red(bar) + ' ' + freeStr;
   }
   if (ratio >= warnThreshold || pct >= 70) {
-    return chalk.yellow(bar) + chalk.yellow(` ${pctStr}`);
+    return chalk.yellow(usedStr) + ' ' + chalk.yellow(bar) + ' ' + freeStr;
   }
-  return chalk.green(bar) + chalk.dim(` ${pctStr}`);
+  return chalk.dim(usedStr) + ' ' + chalk.green(bar) + ' ' + chalk.green(freeStr);
 }
 
 function formatReset(epochSec: number | undefined): string {

@@ -381,19 +381,33 @@ struct UsageRow: View {
                     .foregroundStyle(Sweech.Color.textMuted)
                     .kerning(0.5)
 
-                // Primary: percentage remaining
+                // Used %
+                Text("\(used)%")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .foregroundStyle(barColor)
+                    .monospacedDigit()
+
+                Text("used")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
+
+                Text("·")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.3))
+
+                // Free %
                 Text("\(remaining)%")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
                     .foregroundStyle(remainingColor)
                     .monospacedDigit()
 
-                Text("left")
+                Text("free")
                     .font(.system(size: 10))
-                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
+                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
 
                 Spacer()
 
-                // Reset time — prominent
+                // Reset time
                 if let resetIn {
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.counterclockwise")

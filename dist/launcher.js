@@ -96,15 +96,17 @@ function renderBar(pct, width, ub) {
     const filled = Math.round((pct / 100) * width);
     const empty = width - filled;
     const bar = '█'.repeat(filled) + '░'.repeat(empty);
-    const pctStr = `${pct}%`;
+    const free = Math.max(0, 100 - pct);
+    const usedStr = `${pct}%`;
+    const freeStr = chalk_1.default.dim(`${free}%`);
     // At limit → always red
     if (pct >= 100)
-        return chalk_1.default.red(bar) + chalk_1.default.red(` ${pctStr}`);
+        return chalk_1.default.red(usedStr) + ' ' + chalk_1.default.red(bar) + ' ' + freeStr;
     // Nothing used → green
     if (pct === 0)
-        return chalk_1.default.green(bar) + chalk_1.default.dim(` ${pctStr}`);
+        return chalk_1.default.dim(usedStr) + ' ' + chalk_1.default.green(bar) + ' ' + chalk_1.default.green(freeStr);
     // Calculate what % of the window has elapsed
-    let elapsed = 0.5; // default: assume midpoint if we can't compute
+    let elapsed = 0.5;
     if (ub.resetsAt && ub.windowMins > 0) {
         const now = Date.now() / 1000;
         const windowSec = ub.windowMins * 60;
@@ -112,20 +114,18 @@ function renderBar(pct, width, ub) {
         elapsed = Math.max(0, Math.min(1, (now - windowStartSec) / windowSec));
     }
     // Burn ratio: usage% / elapsed%
-    // <1.0 = under budget, 1.0-1.5 = warm, >1.5 = hot
     const usageFrac = pct / 100;
     const ratio = elapsed > 0.01 ? usageFrac / elapsed : (usageFrac > 0 ? 10 : 0);
-    // Weekly limits are harder to recover — tighten thresholds
     const isWeekly = ub.windowMins > 1000;
     const warnThreshold = isWeekly ? 1.1 : 1.3;
     const dangerThreshold = isWeekly ? 1.5 : 2.0;
     if (ratio >= dangerThreshold || pct >= 90) {
-        return chalk_1.default.red(bar) + chalk_1.default.red(` ${pctStr}`);
+        return chalk_1.default.red(usedStr) + ' ' + chalk_1.default.red(bar) + ' ' + freeStr;
     }
     if (ratio >= warnThreshold || pct >= 70) {
-        return chalk_1.default.yellow(bar) + chalk_1.default.yellow(` ${pctStr}`);
+        return chalk_1.default.yellow(usedStr) + ' ' + chalk_1.default.yellow(bar) + ' ' + freeStr;
     }
-    return chalk_1.default.green(bar) + chalk_1.default.dim(` ${pctStr}`);
+    return chalk_1.default.dim(usedStr) + ' ' + chalk_1.default.green(bar) + ' ' + chalk_1.default.green(freeStr);
 }
 function formatReset(epochSec) {
     if (!epochSec)
