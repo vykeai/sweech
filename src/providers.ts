@@ -2,7 +2,7 @@
  * Provider templates with pre-configured settings
  */
 
-export type CLIType = 'claude' | 'codex' | 'cursor' | 'windsurf' | 'aider' | 'gemini' | 'amazonq';
+export type CLIType = 'claude' | 'codex';
 export type APIFormat = 'anthropic' | 'openai';
 
 export interface ProviderConfig {
@@ -31,7 +31,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'claude-haiku-4-5-20251001',
     description: 'Official Anthropic Claude models',
     pricing: 'Varies by model',
-    compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
+    compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
 
@@ -46,7 +46,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'gpt-5.4',
     description: 'Official OpenAI models via Codex CLI',
     pricing: 'ChatGPT Plus/Pro subscription',
-    compatibility: ['codex', 'aider'],
+    compatibility: ['codex'],
     apiFormat: 'openai'
   },
   qwen: {
@@ -57,7 +57,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen-flash',
     description: 'Alibaba Qwen models via DashScope Anthropic API',
     pricing: '$0.14-$2.49 per million tokens',
-    compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
+    compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
   minimax: {
@@ -67,7 +67,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'MiniMax-M2',
     description: 'MiniMax M2 coding model',
     pricing: '$10/month coding plan',
-    compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
+    compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
   kimi: {
@@ -77,7 +77,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'kimi-k2-turbo-preview',
     description: 'Moonshot AI Kimi K2 with 256K context',
     pricing: '$0.14-$2.49 per million tokens',
-    compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
+    compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
   deepseek: {
@@ -87,7 +87,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'deepseek-chat',
     description: 'DeepSeek via Anthropic-compatible API',
     pricing: '$0.28-$0.42 per million tokens (lowest cost)',
-    compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
+    compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
   glm: {
@@ -97,7 +97,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'glm-4-plus',
     description: 'Zhipu GLM 4.6 models',
     pricing: '$3/month coding plan',
-    compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
+    compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
   dashscope: {
@@ -108,7 +108,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen3-coder-plus',
     description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via Anthropic-compat API (sk-sp-... key)',
     pricing: 'Subscription plan',
-    compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
+    compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
 
@@ -124,7 +124,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'deepseek-reasoner',
     description: 'DeepSeek via native OpenAI-compatible API',
     pricing: '$0.28-$0.42 per million tokens (lowest cost)',
-    compatibility: ['codex', 'aider'],
+    compatibility: ['codex'],
     apiFormat: 'openai'
   },
   'qwen-openai': {
@@ -135,7 +135,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen-turbo',
     description: 'Alibaba Qwen via OpenAI-compatible DashScope API',
     pricing: '$0.14-$2.49 per million tokens',
-    compatibility: ['codex', 'aider'],
+    compatibility: ['codex'],
     apiFormat: 'openai'
   },
   'dashscope-openai': {
@@ -146,7 +146,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen3-coder-plus',
     description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via OpenAI-compat API (sk-sp-... key)',
     pricing: 'Subscription plan',
-    compatibility: ['codex', 'aider'],
+    compatibility: ['codex'],
     apiFormat: 'openai'
   },
   openrouter: {
@@ -157,38 +157,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'anthropic/claude-3.5-haiku',
     description: '300+ models: Claude, Gemini, GPT, Llama, etc.',
     pricing: 'Varies by model',
-    compatibility: ['codex', 'aider'],
+    compatibility: ['codex'],
     apiFormat: 'openai'
-  },
-
-  // ═══════════════════════════════════════════════════════════
-  // GOOGLE / GEMINI PROVIDERS
-  // ═══════════════════════════════════════════════════════════
-
-  google: {
-    name: 'google',
-    displayName: 'Google (Gemini)',
-    baseUrl: '', // Uses default
-    defaultModel: 'gemini-2.5-pro',
-    description: 'Official Google Gemini models',
-    pricing: 'Varies by model',
-    compatibility: ['gemini'],
-    apiFormat: 'openai'
-  },
-
-  // ═══════════════════════════════════════════════════════════
-  // AWS / AMAZON PROVIDERS
-  // ═══════════════════════════════════════════════════════════
-
-  bedrock: {
-    name: 'bedrock',
-    displayName: 'Amazon Bedrock',
-    baseUrl: '', // Uses default
-    defaultModel: 'anthropic.claude-sonnet-4-6-v1:0',
-    description: 'AWS Bedrock managed AI models',
-    pricing: 'AWS pay-per-use',
-    compatibility: ['amazonq'],
-    apiFormat: 'anthropic'
   },
 
   // ═══════════════════════════════════════════════════════════
@@ -202,7 +172,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: '', // User will provide
     description: 'Custom/local LLM (localhost, LAN, or self-hosted)',
     pricing: 'Varies',
-    compatibility: ['claude', 'codex', 'cursor', 'windsurf', 'aider', 'gemini', 'amazonq'], // User chooses API format
+    compatibility: ['claude', 'codex'], // User chooses API format
     apiFormat: 'openai', // Default, user can change
     isCustom: true
   }
