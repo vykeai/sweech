@@ -46,6 +46,8 @@ interface LaunchState {
   usage: boolean;
 }
 
+type UsageLoadState = 'idle' | 'loading' | 'loaded' | 'error';
+
 const STATE_FILE = path.join(os.homedir(), '.sweech', 'last-launch.json');
 
 function loadLastState(): LaunchState {
@@ -54,7 +56,7 @@ function loadLastState(): LaunchState {
       return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
     }
   } catch {}
-  return { selectedIndex: 0, yolo: false, resume: false, usage: true };
+  return { selectedIndex: 0, yolo: false, resume: false, usage: false };
 }
 
 function saveState(state: LaunchState): void {
@@ -239,7 +241,7 @@ function buildEntry(
   };
 }
 
-function render(entries: LaunchEntry[], state: LaunchState): string[] {
+function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoadState = 'idle'): string[] {
   const lines: string[] = [];
   const W = 56; // frame width
 
@@ -280,18 +282,24 @@ function render(entries: LaunchEntry[], state: LaunchState): string[] {
 
       if (state.usage) {
         const BAR_WIDTH = 20;
-        const maxBars = 4;
-        for (let b = 0; b < maxBars; b++) {
-          if (b < entry.bars.length) {
-            const ub = entry.bars[b];
-            const label = ub.label.padEnd(14);
-            const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
-            const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
-            lines.push(chalk.yellowBright('  ┃ ') + chalk.gray(`${label} `) + barStr + reset);
-          } else if (entry.bars.length === 0 && b === 0) {
-            lines.push(chalk.yellowBright('  ┃ ') + chalk.dim('no live usage data'));
-          } else {
-            lines.push(chalk.yellowBright('  ┃'));
+        if (usageLoad === 'loading') {
+          lines.push(chalk.yellowBright('  ┃ ') + chalk.dim('fetching usage...'));
+        } else if (usageLoad === 'error') {
+          lines.push(chalk.yellowBright('  ┃ ') + chalk.red('usage unavailable'));
+        } else {
+          const maxBars = 4;
+          for (let b = 0; b < maxBars; b++) {
+            if (b < entry.bars.length) {
+              const ub = entry.bars[b];
+              const label = ub.label.padEnd(14);
+              const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
+              const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
+              lines.push(chalk.yellowBright('  ┃ ') + chalk.gray(`${label} `) + barStr + reset);
+            } else if (entry.bars.length === 0 && b === 0) {
+              lines.push(chalk.yellowBright('  ┃ ') + chalk.dim('no live usage data'));
+            } else {
+              lines.push(chalk.yellowBright('  ┃'));
+            }
           }
         }
       }
@@ -304,18 +312,22 @@ function render(entries: LaunchEntry[], state: LaunchState): string[] {
 
       if (state.usage) {
         const BAR_WIDTH = 20;
-        const maxBars = 4;
-        for (let b = 0; b < maxBars; b++) {
-          if (b < entry.bars.length) {
-            const ub = entry.bars[b];
-            const label = ub.label.padEnd(14);
-            const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
-            const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
-            lines.push(chalk.dim('  │ ') + chalk.gray(`${label} `) + barStr + reset);
-          } else if (entry.bars.length === 0 && b === 0) {
-            lines.push(chalk.dim('  │ ') + chalk.dim('no live usage data'));
-          } else {
-            lines.push(chalk.dim('  │'));
+        if (usageLoad === 'loading') {
+          lines.push(chalk.dim('  │ ') + chalk.dim('fetching...'));
+        } else if (usageLoad !== 'error') {
+          const maxBars = 4;
+          for (let b = 0; b < maxBars; b++) {
+            if (b < entry.bars.length) {
+              const ub = entry.bars[b];
+              const label = ub.label.padEnd(14);
+              const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
+              const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
+              lines.push(chalk.dim('  │ ') + chalk.gray(`${label} `) + barStr + reset);
+            } else if (entry.bars.length === 0 && b === 0) {
+              lines.push(chalk.dim('  │ ') + chalk.dim('no live usage data'));
+            } else {
+              lines.push(chalk.dim('  │'));
+            }
           }
         }
       }
@@ -329,10 +341,14 @@ function render(entries: LaunchEntry[], state: LaunchState): string[] {
 
   const yoloBox = state.yolo ? chalk.red('[✓]') : chalk.gray('[ ]');
   const resumeBox = state.resume ? chalk.green('[✓]') : chalk.gray('[ ]');
-  const usageBox = state.usage ? chalk.yellow('[✓]') : chalk.gray('[ ]');
-  lines.push(`  ${yoloBox} ${chalk.white('yolo')} ${chalk.dim('(y)')}    ${resumeBox} ${chalk.white('resume')} ${chalk.dim('(r)')}    ${usageBox} ${chalk.white('usage')} ${chalk.dim('(u)')}`);
+  const usageLabel = usageLoad === 'loading'
+    ? chalk.dim('loading...')
+    : usageLoad === 'loaded' && state.usage
+      ? chalk.yellow('usage')
+      : chalk.dim('usage');
+  lines.push(`  ${yoloBox} ${chalk.white('yolo')} ${chalk.dim('(y)')}    ${resumeBox} ${chalk.white('resume')} ${chalk.dim('(r)')}    ${usageLabel} ${chalk.dim('(u)')}`);
 
-  if (state.usage) {
+  if (state.usage && usageLoad === 'loaded') {
     lines.push('');
     lines.push(chalk.dim('  Bars show burn rate: ') + chalk.green('green') + chalk.dim(' = on pace  ') + chalk.yellow('yellow') + chalk.dim(' = ahead  ') + chalk.red('red') + chalk.dim(' = will hit limit'));
   }
@@ -355,12 +371,32 @@ function render(entries: LaunchEntry[], state: LaunchState): string[] {
   return lines;
 }
 
+/** Build a placeholder entry from static data only — no I/O, instant. */
+function buildStaticEntry(
+  name: string, command: string, configDir: string | null, label: string,
+  yoloFlag: string, resumeFlag: string, isDefault: boolean,
+  opts?: { sharedWith?: string; model?: string }
+): LaunchEntry {
+  const dataDir = configDir ?? path.join(os.homedir(), `.${name}`);
+  return {
+    name, command, configDir, label, yoloFlag, resumeFlag, isDefault,
+    sharedWith: opts?.sharedWith,
+    model: opts?.model,
+    dataDir,
+    dataSizeMB: '',
+    authType: '',
+    needsReauth: false,
+    lastActive: '',
+    bars: [],
+  };
+}
+
 export async function runLauncher(): Promise<void> {
   const config = new ConfigManager();
   const profiles = config.getProfiles();
   const { execFileSync } = require('child_process');
 
-  // Build account list for getAccountInfo
+  // ── Build entries instantly from static data (no I/O) ──────────────────────
   const accountList: Array<{ name: string; commandName: string; command: string; isDefault: boolean }> = [];
   for (const cli of Object.values(SUPPORTED_CLIS)) {
     try {
@@ -373,34 +409,27 @@ export async function runLauncher(): Promise<void> {
     accountList.push({ name: p.name || p.commandName, commandName: p.commandName, command: cliType, isDefault: false });
   }
 
-  // Fetch real usage data for all accounts
-  const accounts = await getAccountInfo(accountList.map(a => ({ name: a.name, commandName: a.commandName })));
-  const accountMap = new Map(accounts.map(a => [a.commandName, a]));
-
-  // Build entries with real data, sorted by CLI type (defaults first, then profiles)
   const unsorted: LaunchEntry[] = accountList.map(a => {
-    const account = accountMap.get(a.commandName);
     const cli = getCLI(a.command);
     if (a.isDefault) {
-      return buildEntry(
+      return buildStaticEntry(
         a.command, a.command, null, 'default',
         cli?.yoloFlag || '--dangerously-skip-permissions',
         cli?.resumeFlag || '--continue',
-        true, account!
+        true
       );
     }
     const profile = profiles.find(p => p.commandName === a.commandName)!;
-    return buildEntry(
+    return buildStaticEntry(
       profile.commandName, a.command, config.getProfileDir(profile.commandName),
       getProvider(profile.provider)?.displayName || profile.provider,
       cli?.yoloFlag || '--dangerously-skip-permissions',
       cli?.resumeFlag || '--continue',
-      false, account!,
+      false,
       { sharedWith: profile.sharedWith, model: profile.model }
     );
   });
 
-  // Group: claude default + claude profiles, then codex default + codex profiles
   const entries: LaunchEntry[] = [
     ...unsorted.filter(e => e.command !== 'codex' && e.isDefault),
     ...unsorted.filter(e => e.command !== 'codex' && !e.isDefault),
@@ -409,6 +438,7 @@ export async function runLauncher(): Promise<void> {
   ];
 
   const state = loadLastState();
+  state.usage = false; // always start with usage hidden
   if (state.selectedIndex >= entries.length) state.selectedIndex = 0;
 
   if (!process.stdin.isTTY) {
@@ -420,19 +450,73 @@ export async function runLauncher(): Promise<void> {
   process.stdin.setRawMode(true);
   process.stdin.resume();
 
+  let usageLoad: UsageLoadState = 'idle';
   let lastLineCount = 0;
 
   const draw = () => {
     if (lastLineCount > 0) {
-      process.stdout.write(`\x1b[${lastLineCount - 1}A\x1b[G`);
+      // Move up to top of previously drawn area, clear each line
+      process.stdout.write(`\x1b[${lastLineCount}A`);
       for (let i = 0; i < lastLineCount; i++) {
-        process.stdout.write('\x1b[2K' + (i < lastLineCount - 1 ? '\n' : ''));
+        process.stdout.write('\x1b[2K\n');
       }
-      if (lastLineCount > 1) process.stdout.write(`\x1b[${lastLineCount - 1}A`);
-      process.stdout.write('\x1b[G');
+      process.stdout.write(`\x1b[${lastLineCount}A`);
     }
-    const renderedLines = render(entries, state);
+    const renderedLines = render(entries, state, usageLoad);
     lastLineCount = renderedLines.length;
+  };
+
+  /** Fetch usage data async, patch entries in-place, redraw. */
+  const fetchUsage = () => {
+    if (usageLoad === 'loading' || usageLoad === 'loaded') return;
+    usageLoad = 'loading';
+    draw();
+
+    getAccountInfo(accountList.map(a => ({ name: a.name, commandName: a.commandName })))
+      .then(accounts => {
+        const accountMap = new Map(accounts.map(a => [a.commandName, a]));
+        for (const entry of entries) {
+          const account = accountMap.get(entry.name);
+          if (!account) continue;
+          entry.lastActive = account.lastActive ? timeAgo(account.lastActive) : '';
+          entry.needsReauth = account.needsReauth || false;
+          entry.authType = resolveAuthType(account, entry.command);
+          entry.dataSizeMB = getDirSize(entry.dataDir);
+          // Rebuild bars
+          entry.bars = [];
+          const live = account.live;
+          if (live?.buckets) {
+            for (const bucket of live.buckets) {
+              let lbl = bucket.label;
+              if (lbl.length > 14) lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
+              if (bucket.session) {
+                entry.bars.push({
+                  label: `${lbl} 5h`,
+                  pct: Math.round(bucket.session.utilization * 100),
+                  resetLabel: formatReset(bucket.session.resetsAt),
+                  resetsAt: bucket.session.resetsAt,
+                  windowMins: 300,
+                });
+              }
+              if (bucket.weekly) {
+                entry.bars.push({
+                  label: `${lbl} 7d`,
+                  pct: Math.round(bucket.weekly.utilization * 100),
+                  resetLabel: formatReset(bucket.weekly.resetsAt),
+                  resetsAt: bucket.weekly.resetsAt,
+                  windowMins: 10080,
+                });
+              }
+            }
+          }
+        }
+        usageLoad = 'loaded';
+        draw();
+      })
+      .catch(() => {
+        usageLoad = 'error';
+        draw();
+      });
   };
 
   console.log();
@@ -454,7 +538,16 @@ export async function runLauncher(): Promise<void> {
       } else if (str === 'r' || str === 'R') {
         state.resume = !state.resume; draw();
       } else if (str === 'u' || str === 'U') {
-        state.usage = !state.usage; draw();
+        if (usageLoad === 'idle') {
+          // First press: start fetch and show
+          state.usage = true;
+          fetchUsage();
+        } else if (usageLoad === 'loaded') {
+          // Subsequent presses: toggle visibility
+          state.usage = !state.usage;
+          draw();
+        }
+        // If loading: ignore (already in progress)
       } else if (str === 'a' || str === 'A') {
         cleanup(); runSubcommand('add');
       } else if (str === 'e' || str === 'E') {

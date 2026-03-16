@@ -57,7 +57,7 @@ function loadLastState() {
         }
     }
     catch { }
-    return { selectedIndex: 0, yolo: false, resume: false, usage: true };
+    return { selectedIndex: 0, yolo: false, resume: false, usage: false };
 }
 function saveState(state) {
     try {
@@ -246,7 +246,7 @@ function buildEntry(name, command, configDir, label, yoloFlag, resumeFlag, isDef
         bars,
     };
 }
-function render(entries, state) {
+function render(entries, state, usageLoad = 'idle') {
     const lines = [];
     const W = 56; // frame width
     lines.push(chalk_1.default.bold('🍭 Sweech') + chalk_1.default.dim('  —  ↑↓ to select, ⏎ to launch'));
@@ -281,20 +281,28 @@ function render(entries, state) {
             lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(infoLine));
             if (state.usage) {
                 const BAR_WIDTH = 20;
-                const maxBars = 4;
-                for (let b = 0; b < maxBars; b++) {
-                    if (b < entry.bars.length) {
-                        const ub = entry.bars[b];
-                        const label = ub.label.padEnd(14);
-                        const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
-                        const reset = ub.resetLabel ? chalk_1.default.dim(`  ${ub.resetLabel}`) : '';
-                        lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
-                    }
-                    else if (entry.bars.length === 0 && b === 0) {
-                        lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim('no live usage data'));
-                    }
-                    else {
-                        lines.push(chalk_1.default.yellowBright('  ┃'));
+                if (usageLoad === 'loading') {
+                    lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim('fetching usage...'));
+                }
+                else if (usageLoad === 'error') {
+                    lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.red('usage unavailable'));
+                }
+                else {
+                    const maxBars = 4;
+                    for (let b = 0; b < maxBars; b++) {
+                        if (b < entry.bars.length) {
+                            const ub = entry.bars[b];
+                            const label = ub.label.padEnd(14);
+                            const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
+                            const reset = ub.resetLabel ? chalk_1.default.dim(`  ${ub.resetLabel}`) : '';
+                            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
+                        }
+                        else if (entry.bars.length === 0 && b === 0) {
+                            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim('no live usage data'));
+                        }
+                        else {
+                            lines.push(chalk_1.default.yellowBright('  ┃'));
+                        }
                     }
                 }
             }
@@ -306,20 +314,25 @@ function render(entries, state) {
             lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(infoLine));
             if (state.usage) {
                 const BAR_WIDTH = 20;
-                const maxBars = 4;
-                for (let b = 0; b < maxBars; b++) {
-                    if (b < entry.bars.length) {
-                        const ub = entry.bars[b];
-                        const label = ub.label.padEnd(14);
-                        const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
-                        const reset = ub.resetLabel ? chalk_1.default.dim(`  ${ub.resetLabel}`) : '';
-                        lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
-                    }
-                    else if (entry.bars.length === 0 && b === 0) {
-                        lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim('no live usage data'));
-                    }
-                    else {
-                        lines.push(chalk_1.default.dim('  │'));
+                if (usageLoad === 'loading') {
+                    lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim('fetching...'));
+                }
+                else if (usageLoad !== 'error') {
+                    const maxBars = 4;
+                    for (let b = 0; b < maxBars; b++) {
+                        if (b < entry.bars.length) {
+                            const ub = entry.bars[b];
+                            const label = ub.label.padEnd(14);
+                            const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
+                            const reset = ub.resetLabel ? chalk_1.default.dim(`  ${ub.resetLabel}`) : '';
+                            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
+                        }
+                        else if (entry.bars.length === 0 && b === 0) {
+                            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim('no live usage data'));
+                        }
+                        else {
+                            lines.push(chalk_1.default.dim('  │'));
+                        }
                     }
                 }
             }
@@ -331,9 +344,13 @@ function render(entries, state) {
     lines.push('');
     const yoloBox = state.yolo ? chalk_1.default.red('[✓]') : chalk_1.default.gray('[ ]');
     const resumeBox = state.resume ? chalk_1.default.green('[✓]') : chalk_1.default.gray('[ ]');
-    const usageBox = state.usage ? chalk_1.default.yellow('[✓]') : chalk_1.default.gray('[ ]');
-    lines.push(`  ${yoloBox} ${chalk_1.default.white('yolo')} ${chalk_1.default.dim('(y)')}    ${resumeBox} ${chalk_1.default.white('resume')} ${chalk_1.default.dim('(r)')}    ${usageBox} ${chalk_1.default.white('usage')} ${chalk_1.default.dim('(u)')}`);
-    if (state.usage) {
+    const usageLabel = usageLoad === 'loading'
+        ? chalk_1.default.dim('loading...')
+        : usageLoad === 'loaded' && state.usage
+            ? chalk_1.default.yellow('usage')
+            : chalk_1.default.dim('usage');
+    lines.push(`  ${yoloBox} ${chalk_1.default.white('yolo')} ${chalk_1.default.dim('(y)')}    ${resumeBox} ${chalk_1.default.white('resume')} ${chalk_1.default.dim('(r)')}    ${usageLabel} ${chalk_1.default.dim('(u)')}`);
+    if (state.usage && usageLoad === 'loaded') {
         lines.push('');
         lines.push(chalk_1.default.dim('  Bars show burn rate: ') + chalk_1.default.green('green') + chalk_1.default.dim(' = on pace  ') + chalk_1.default.yellow('yellow') + chalk_1.default.dim(' = ahead  ') + chalk_1.default.red('red') + chalk_1.default.dim(' = will hit limit'));
     }
@@ -351,11 +368,26 @@ function render(entries, state) {
     process.stdout.write(lines.join('\n'));
     return lines;
 }
+/** Build a placeholder entry from static data only — no I/O, instant. */
+function buildStaticEntry(name, command, configDir, label, yoloFlag, resumeFlag, isDefault, opts) {
+    const dataDir = configDir ?? path.join(os.homedir(), `.${name}`);
+    return {
+        name, command, configDir, label, yoloFlag, resumeFlag, isDefault,
+        sharedWith: opts?.sharedWith,
+        model: opts?.model,
+        dataDir,
+        dataSizeMB: '',
+        authType: '',
+        needsReauth: false,
+        lastActive: '',
+        bars: [],
+    };
+}
 async function runLauncher() {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
     const { execFileSync } = require('child_process');
-    // Build account list for getAccountInfo
+    // ── Build entries instantly from static data (no I/O) ──────────────────────
     const accountList = [];
     for (const cli of Object.values(clis_1.SUPPORTED_CLIS)) {
         try {
@@ -368,20 +400,14 @@ async function runLauncher() {
         const cliType = p.cliType === 'codex' ? 'codex' : 'claude';
         accountList.push({ name: p.name || p.commandName, commandName: p.commandName, command: cliType, isDefault: false });
     }
-    // Fetch real usage data for all accounts
-    const accounts = await (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })));
-    const accountMap = new Map(accounts.map(a => [a.commandName, a]));
-    // Build entries with real data, sorted by CLI type (defaults first, then profiles)
     const unsorted = accountList.map(a => {
-        const account = accountMap.get(a.commandName);
         const cli = (0, clis_1.getCLI)(a.command);
         if (a.isDefault) {
-            return buildEntry(a.command, a.command, null, 'default', cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', true, account);
+            return buildStaticEntry(a.command, a.command, null, 'default', cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', true);
         }
         const profile = profiles.find(p => p.commandName === a.commandName);
-        return buildEntry(profile.commandName, a.command, config.getProfileDir(profile.commandName), (0, providers_1.getProvider)(profile.provider)?.displayName || profile.provider, cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', false, account, { sharedWith: profile.sharedWith, model: profile.model });
+        return buildStaticEntry(profile.commandName, a.command, config.getProfileDir(profile.commandName), (0, providers_1.getProvider)(profile.provider)?.displayName || profile.provider, cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', false, { sharedWith: profile.sharedWith, model: profile.model });
     });
-    // Group: claude default + claude profiles, then codex default + codex profiles
     const entries = [
         ...unsorted.filter(e => e.command !== 'codex' && e.isDefault),
         ...unsorted.filter(e => e.command !== 'codex' && !e.isDefault),
@@ -389,6 +415,7 @@ async function runLauncher() {
         ...unsorted.filter(e => e.command === 'codex' && !e.isDefault),
     ];
     const state = loadLastState();
+    state.usage = false; // always start with usage hidden
     if (state.selectedIndex >= entries.length)
         state.selectedIndex = 0;
     if (!process.stdin.isTTY) {
@@ -398,19 +425,73 @@ async function runLauncher() {
     readline.emitKeypressEvents(process.stdin);
     process.stdin.setRawMode(true);
     process.stdin.resume();
+    let usageLoad = 'idle';
     let lastLineCount = 0;
     const draw = () => {
         if (lastLineCount > 0) {
-            process.stdout.write(`\x1b[${lastLineCount - 1}A\x1b[G`);
+            // Move up to top of previously drawn area, clear each line
+            process.stdout.write(`\x1b[${lastLineCount}A`);
             for (let i = 0; i < lastLineCount; i++) {
-                process.stdout.write('\x1b[2K' + (i < lastLineCount - 1 ? '\n' : ''));
+                process.stdout.write('\x1b[2K\n');
             }
-            if (lastLineCount > 1)
-                process.stdout.write(`\x1b[${lastLineCount - 1}A`);
-            process.stdout.write('\x1b[G');
+            process.stdout.write(`\x1b[${lastLineCount}A`);
         }
-        const renderedLines = render(entries, state);
+        const renderedLines = render(entries, state, usageLoad);
         lastLineCount = renderedLines.length;
+    };
+    /** Fetch usage data async, patch entries in-place, redraw. */
+    const fetchUsage = () => {
+        if (usageLoad === 'loading' || usageLoad === 'loaded')
+            return;
+        usageLoad = 'loading';
+        draw();
+        (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })))
+            .then(accounts => {
+            const accountMap = new Map(accounts.map(a => [a.commandName, a]));
+            for (const entry of entries) {
+                const account = accountMap.get(entry.name);
+                if (!account)
+                    continue;
+                entry.lastActive = account.lastActive ? timeAgo(account.lastActive) : '';
+                entry.needsReauth = account.needsReauth || false;
+                entry.authType = resolveAuthType(account, entry.command);
+                entry.dataSizeMB = getDirSize(entry.dataDir);
+                // Rebuild bars
+                entry.bars = [];
+                const live = account.live;
+                if (live?.buckets) {
+                    for (const bucket of live.buckets) {
+                        let lbl = bucket.label;
+                        if (lbl.length > 14)
+                            lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
+                        if (bucket.session) {
+                            entry.bars.push({
+                                label: `${lbl} 5h`,
+                                pct: Math.round(bucket.session.utilization * 100),
+                                resetLabel: formatReset(bucket.session.resetsAt),
+                                resetsAt: bucket.session.resetsAt,
+                                windowMins: 300,
+                            });
+                        }
+                        if (bucket.weekly) {
+                            entry.bars.push({
+                                label: `${lbl} 7d`,
+                                pct: Math.round(bucket.weekly.utilization * 100),
+                                resetLabel: formatReset(bucket.weekly.resetsAt),
+                                resetsAt: bucket.weekly.resetsAt,
+                                windowMins: 10080,
+                            });
+                        }
+                    }
+                }
+            }
+            usageLoad = 'loaded';
+            draw();
+        })
+            .catch(() => {
+            usageLoad = 'error';
+            draw();
+        });
     };
     console.log();
     draw();
@@ -438,8 +519,17 @@ async function runLauncher() {
                 draw();
             }
             else if (str === 'u' || str === 'U') {
-                state.usage = !state.usage;
-                draw();
+                if (usageLoad === 'idle') {
+                    // First press: start fetch and show
+                    state.usage = true;
+                    fetchUsage();
+                }
+                else if (usageLoad === 'loaded') {
+                    // Subsequent presses: toggle visibility
+                    state.usage = !state.usage;
+                    draw();
+                }
+                // If loading: ignore (already in progress)
             }
             else if (str === 'a' || str === 'A') {
                 cleanup();
