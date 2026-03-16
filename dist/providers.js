@@ -21,7 +21,7 @@ exports.PROVIDERS = {
         smallFastModel: 'claude-haiku-4-5-20251001',
         description: 'Official Anthropic Claude models',
         pricing: 'Varies by model',
-        compatibility: ['claude'],
+        compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
         apiFormat: 'anthropic'
     },
     // ═══════════════════════════════════════════════════════════
@@ -34,7 +34,7 @@ exports.PROVIDERS = {
         defaultModel: 'gpt-5.4',
         description: 'Official OpenAI models via Codex CLI',
         pricing: 'ChatGPT Plus/Pro subscription',
-        compatibility: ['codex'],
+        compatibility: ['codex', 'aider'],
         apiFormat: 'openai'
     },
     qwen: {
@@ -45,7 +45,7 @@ exports.PROVIDERS = {
         smallFastModel: 'qwen-flash',
         description: 'Alibaba Qwen models via DashScope Anthropic API',
         pricing: '$0.14-$2.49 per million tokens',
-        compatibility: ['claude'],
+        compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
         apiFormat: 'anthropic'
     },
     minimax: {
@@ -55,7 +55,7 @@ exports.PROVIDERS = {
         defaultModel: 'MiniMax-M2',
         description: 'MiniMax M2 coding model',
         pricing: '$10/month coding plan',
-        compatibility: ['claude'],
+        compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
         apiFormat: 'anthropic'
     },
     kimi: {
@@ -65,7 +65,7 @@ exports.PROVIDERS = {
         defaultModel: 'kimi-k2-turbo-preview',
         description: 'Moonshot AI Kimi K2 with 256K context',
         pricing: '$0.14-$2.49 per million tokens',
-        compatibility: ['claude'],
+        compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
         apiFormat: 'anthropic'
     },
     deepseek: {
@@ -75,7 +75,7 @@ exports.PROVIDERS = {
         defaultModel: 'deepseek-chat',
         description: 'DeepSeek via Anthropic-compatible API',
         pricing: '$0.28-$0.42 per million tokens (lowest cost)',
-        compatibility: ['claude'],
+        compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
         apiFormat: 'anthropic'
     },
     glm: {
@@ -85,7 +85,7 @@ exports.PROVIDERS = {
         defaultModel: 'glm-4-plus',
         description: 'Zhipu GLM 4.6 models',
         pricing: '$3/month coding plan',
-        compatibility: ['claude'],
+        compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
         apiFormat: 'anthropic'
     },
     dashscope: {
@@ -96,7 +96,7 @@ exports.PROVIDERS = {
         smallFastModel: 'qwen3-coder-plus',
         description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via Anthropic-compat API (sk-sp-... key)',
         pricing: 'Subscription plan',
-        compatibility: ['claude'],
+        compatibility: ['claude', 'cursor', 'windsurf', 'aider'],
         apiFormat: 'anthropic'
     },
     // ═══════════════════════════════════════════════════════════
@@ -110,7 +110,7 @@ exports.PROVIDERS = {
         smallFastModel: 'deepseek-reasoner',
         description: 'DeepSeek via native OpenAI-compatible API',
         pricing: '$0.28-$0.42 per million tokens (lowest cost)',
-        compatibility: ['codex'],
+        compatibility: ['codex', 'aider'],
         apiFormat: 'openai'
     },
     'qwen-openai': {
@@ -121,7 +121,7 @@ exports.PROVIDERS = {
         smallFastModel: 'qwen-turbo',
         description: 'Alibaba Qwen via OpenAI-compatible DashScope API',
         pricing: '$0.14-$2.49 per million tokens',
-        compatibility: ['codex'],
+        compatibility: ['codex', 'aider'],
         apiFormat: 'openai'
     },
     'dashscope-openai': {
@@ -132,7 +132,7 @@ exports.PROVIDERS = {
         smallFastModel: 'qwen3-coder-plus',
         description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via OpenAI-compat API (sk-sp-... key)',
         pricing: 'Subscription plan',
-        compatibility: ['codex'],
+        compatibility: ['codex', 'aider'],
         apiFormat: 'openai'
     },
     openrouter: {
@@ -143,8 +143,34 @@ exports.PROVIDERS = {
         smallFastModel: 'anthropic/claude-3.5-haiku',
         description: '300+ models: Claude, Gemini, GPT, Llama, etc.',
         pricing: 'Varies by model',
-        compatibility: ['codex'],
+        compatibility: ['codex', 'aider'],
         apiFormat: 'openai'
+    },
+    // ═══════════════════════════════════════════════════════════
+    // GOOGLE / GEMINI PROVIDERS
+    // ═══════════════════════════════════════════════════════════
+    google: {
+        name: 'google',
+        displayName: 'Google (Gemini)',
+        baseUrl: '', // Uses default
+        defaultModel: 'gemini-2.5-pro',
+        description: 'Official Google Gemini models',
+        pricing: 'Varies by model',
+        compatibility: ['gemini'],
+        apiFormat: 'openai'
+    },
+    // ═══════════════════════════════════════════════════════════
+    // AWS / AMAZON PROVIDERS
+    // ═══════════════════════════════════════════════════════════
+    bedrock: {
+        name: 'bedrock',
+        displayName: 'Amazon Bedrock',
+        baseUrl: '', // Uses default
+        defaultModel: 'anthropic.claude-sonnet-4-6-v1:0',
+        description: 'AWS Bedrock managed AI models',
+        pricing: 'AWS pay-per-use',
+        compatibility: ['amazonq'],
+        apiFormat: 'anthropic'
     },
     // ═══════════════════════════════════════════════════════════
     // CUSTOM/LOCAL PROVIDERS (for localhost, LAN, self-hosted)
@@ -156,7 +182,7 @@ exports.PROVIDERS = {
         defaultModel: '', // User will provide
         description: 'Custom/local LLM (localhost, LAN, or self-hosted)',
         pricing: 'Varies',
-        compatibility: ['claude', 'codex'], // User chooses API format
+        compatibility: ['claude', 'codex', 'cursor', 'windsurf', 'aider', 'gemini', 'amazonq'], // User chooses API format
         apiFormat: 'openai', // Default, user can change
         isCustom: true
     }

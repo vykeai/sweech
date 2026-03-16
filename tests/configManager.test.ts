@@ -245,7 +245,9 @@ describe('ConfigManager', () => {
   });
 
   describe('setupSharedDirs', () => {
-    const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins'];
+    const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos'];
+    const SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'];
+    const TOTAL_SYMLINKS = SHAREABLE_DIRS.length + SHAREABLE_FILES.length;
 
     beforeEach(() => {
       jest.clearAllMocks();
@@ -269,10 +271,15 @@ describe('ConfigManager', () => {
       const profileDir = path.join(mockHomeDir, '.claude-work');
       const masterDir = path.join(mockHomeDir, '.claude');
 
-      expect(symlinkSpy).toHaveBeenCalledTimes(SHAREABLE_DIRS.length);
+      expect(symlinkSpy).toHaveBeenCalledTimes(TOTAL_SYMLINKS);
       SHAREABLE_DIRS.forEach(dir => {
         const linkPath = path.join(profileDir, dir);
         const targetPath = path.join(masterDir, dir);
+        expect(symlinkSpy).toHaveBeenCalledWith(targetPath, linkPath);
+      });
+      SHAREABLE_FILES.forEach(file => {
+        const linkPath = path.join(profileDir, file);
+        const targetPath = path.join(masterDir, file);
         expect(symlinkSpy).toHaveBeenCalledWith(targetPath, linkPath);
       });
 
@@ -338,8 +345,8 @@ describe('ConfigManager', () => {
 
       // rmSync should have been called to remove existing dirs
       expect(mockFs.rmSync).toHaveBeenCalled();
-      // symlinkSync should still be called for all dirs
-      expect(symlinkSpy).toHaveBeenCalledTimes(SHAREABLE_DIRS.length);
+      // symlinkSync should still be called for all dirs + files
+      expect(symlinkSpy).toHaveBeenCalledTimes(TOTAL_SYMLINKS);
 
       symlinkSpy.mockRestore();
     });

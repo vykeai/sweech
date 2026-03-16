@@ -43,13 +43,17 @@ beforeEach(() => {
 // SHAREABLE_DIRS constant
 // ---------------------------------------------------------------------------
 describe('SHAREABLE_DIRS', () => {
-  test('contains exactly the 5 expected directories', () => {
-    expect(SHAREABLE_DIRS).toHaveLength(5);
+  test('contains exactly the 9 expected directories', () => {
+    expect(SHAREABLE_DIRS).toHaveLength(9);
     expect(SHAREABLE_DIRS).toContain('projects');
     expect(SHAREABLE_DIRS).toContain('plans');
     expect(SHAREABLE_DIRS).toContain('tasks');
     expect(SHAREABLE_DIRS).toContain('commands');
     expect(SHAREABLE_DIRS).toContain('plugins');
+    expect(SHAREABLE_DIRS).toContain('hooks');
+    expect(SHAREABLE_DIRS).toContain('agents');
+    expect(SHAREABLE_DIRS).toContain('teams');
+    expect(SHAREABLE_DIRS).toContain('todos');
   });
 
   test('does not include auth/runtime dirs', () => {

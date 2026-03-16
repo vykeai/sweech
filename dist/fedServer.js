@@ -3,6 +3,7 @@
  * sweech → fed integration server
  *
  * Exposes the fed contract endpoints so sweech appears in the fed dashboard:
+ *   GET /healthz     — health check
  *   GET /fed/info    — machine metadata
  *   GET /fed/runs    — account list (sidebar/status)
  *   GET /fed/widget  — account-usage widget with 5h + 7d window data
@@ -49,6 +50,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createSweechFedServer = createSweechFedServer;
 exports.startSweechFedServer = startSweechFedServer;
+exports.startSweechFedServerWithShutdown = startSweechFedServerWithShutdown;
 const node_http_1 = __importDefault(require("node:http"));
 const node_os_1 = __importDefault(require("node:os"));
 const fs = __importStar(require("fs"));
@@ -72,6 +74,38 @@ function getMachineName() {
 function getProfiles() {
     return new config_1.ConfigManager().getProfiles();
 }
+const rateLimitStore = new Map();
+const RATE_LIMIT_WINDOW_MS = 60000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 60; // 60 req/min per IP
+function isRateLimited(ip) {
+    const now = Date.now();
+    let entry = rateLimitStore.get(ip);
+    if (!entry) {
+        entry = { timestamps: [] };
+        rateLimitStore.set(ip, entry);
+    }
+    // Prune expired timestamps
+    entry.timestamps = entry.timestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+    if (entry.timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
+        return true;
+    }
+    entry.timestamps.push(now);
+    return false;
+}
+// Periodic cleanup of stale entries
+const rateLimitCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, entry] of rateLimitStore) {
+        entry.timestamps = entry.timestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+        if (entry.timestamps.length === 0)
+            rateLimitStore.delete(ip);
+    }
+}, 60000);
+rateLimitCleanupInterval.unref();
+// ---------------------------------------------------------------------------
+// Server
+// ---------------------------------------------------------------------------
+const startTime = Date.now();
 function createSweechFedServer(port) {
     const server = node_http_1.default.createServer(async (req, res) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
@@ -79,6 +113,22 @@ function createSweechFedServer(port) {
         if (req.method === 'OPTIONS') {
             res.writeHead(204, { 'Access-Control-Allow-Origin': '*' });
             res.end();
+            return;
+        }
+        // Health check — no rate limit
+        if (pathname === '/healthz') {
+            sendJson(res, 200, {
+                status: 'ok',
+                uptime: process.uptime(),
+                version: packageJson.version,
+                timestamp: new Date().toISOString(),
+            });
+            return;
+        }
+        // Rate limit all other endpoints
+        const ip = req.socket.remoteAddress ?? 'unknown';
+        if (isRateLimited(ip)) {
+            sendJson(res, 429, { error: 'Too many requests', retryAfterMs: RATE_LIMIT_WINDOW_MS });
             return;
         }
         if (pathname === '/fed/info') {
@@ -147,5 +197,23 @@ async function startSweechFedServer(port) {
         server.on('error', reject);
         server.listen(port, '0.0.0.0', resolve);
     });
+    return server;
+}
+/**
+ * Start server with graceful shutdown on SIGTERM/SIGINT.
+ * Used by `sweech serve`.
+ */
+async function startSweechFedServerWithShutdown(port) {
+    const server = await startSweechFedServer(port);
+    const shutdown = () => {
+        console.error('[sweech serve] shutting down...');
+        server.close(() => {
+            process.exit(0);
+        });
+        // Force exit after 5s if connections don't drain
+        setTimeout(() => process.exit(0), 5000).unref();
+    };
+    process.on('SIGTERM', shutdown);
+    process.on('SIGINT', shutdown);
     return server;
 }

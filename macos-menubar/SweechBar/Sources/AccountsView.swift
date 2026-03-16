@@ -3,6 +3,18 @@ import SwiftUI
 struct AccountsView: View {
     @ObservedObject var service: SweechService
 
+    private var claudeAccounts: [SweechAccount] {
+        service.accounts.filter { ($0.cliType ?? "claude") == "claude" }
+    }
+
+    private var codexAccounts: [SweechAccount] {
+        service.accounts.filter { $0.cliType == "codex" }
+    }
+
+    private var hasBothTypes: Bool {
+        !claudeAccounts.isEmpty && !codexAccounts.isEmpty
+    }
+
     var body: some View {
         ZStack {
             Sweech.Gradient.backgroundRadial.ignoresSafeArea()
@@ -13,6 +25,30 @@ struct AccountsView: View {
 
                 if service.accounts.isEmpty && !service.isConnected {
                     disconnectedView
+                } else if hasBothTypes {
+                    VStack(spacing: 10) {
+                        summaryHeader
+                        HStack(alignment: .top, spacing: 10) {
+                            // Claude column
+                            VStack(spacing: 8) {
+                                columnHeader(title: "claude", count: claudeAccounts.count)
+                                ForEach(claudeAccounts) { account in
+                                    AccountCard(account: account)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+
+                            // Codex column
+                            VStack(spacing: 8) {
+                                columnHeader(title: "codex", count: codexAccounts.count)
+                                ForEach(codexAccounts) { account in
+                                    AccountCard(account: account)
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .padding(12)
                 } else {
                     VStack(spacing: 10) {
                         summaryHeader
@@ -29,7 +65,23 @@ struct AccountsView: View {
             .onAppear { service.fetch() }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(width: 360)
+        .frame(width: hasBothTypes ? 680 : 360)
+    }
+
+    private func columnHeader(title: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(Sweech.Color.accent)
+            Text("\(count)")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Sweech.Color.textMuted)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Sweech.Color.surfaceHigh)
+                .clipShape(Capsule())
+            Spacer()
+        }
     }
 
     private var disconnectedView: some View {

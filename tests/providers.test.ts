@@ -44,7 +44,7 @@ describe('Provider Management', () => {
       Object.values(PROVIDERS).forEach(provider => {
         expect(provider.compatibility.length).toBeGreaterThan(0);
         provider.compatibility.forEach(cli => {
-          expect(['claude', 'codex']).toContain(cli);
+          expect(['claude', 'codex', 'cursor', 'windsurf', 'aider', 'gemini', 'amazonq']).toContain(cli);
         });
       });
     });
@@ -245,19 +245,20 @@ describe('Provider Management', () => {
       expect(qwenOpenai?.compatibility).toContain('codex');
     });
 
-    test('OpenRouter is Codex-only', () => {
+    test('OpenRouter supports Codex and Aider', () => {
       const openrouter = getProvider('openrouter');
 
       expect(openrouter).toBeDefined();
-      expect(openrouter?.compatibility).toEqual(['codex']);
+      expect(openrouter?.compatibility).toContain('codex');
+      expect(openrouter?.compatibility).toContain('aider');
       expect(openrouter?.apiFormat).toBe('openai');
     });
 
-    test('Anthropic is Claude-only', () => {
+    test('Anthropic supports Claude-compatible CLIs', () => {
       const anthropic = getProvider('anthropic');
 
       expect(anthropic).toBeDefined();
-      expect(anthropic?.compatibility).toEqual(['claude']);
+      expect(anthropic?.compatibility).toContain('claude');
       expect(anthropic?.apiFormat).toBe('anthropic');
     });
   });

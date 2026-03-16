@@ -22,7 +22,7 @@ import { runInit } from './init';
 import { createProfile } from './profileCreation';
 import { runLauncher } from './launcher';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
-import { startSweechFedServer } from './fedServer';
+import { startSweechFedServerWithShutdown } from './fedServer';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -656,16 +656,30 @@ program
 // ── sweech serve ───────────────────────────────────────────────────────────────
 program
   .command('serve')
-  .description('Start the fed integration server (exposes /fed/info, /fed/runs, /fed/widget)')
+  .description('Start the fed integration server (exposes /healthz, /fed/info, /fed/runs, /fed/widget)')
   .option('--port <number>', 'Port to listen on', '7854')
-  .action(async (opts: { port: string }) => {
+  .option('--install', 'Install as launchd daemon (macOS)')
+  .option('--uninstall', 'Uninstall launchd daemon (macOS)')
+  .action(async (opts: { port: string; install?: boolean; uninstall?: boolean }) => {
+    if (opts.install) {
+      const { installLaunchd } = await import('./launchd');
+      await installLaunchd(parseInt(opts.port, 10));
+      return;
+    }
+    if (opts.uninstall) {
+      const { uninstallLaunchd } = await import('./launchd');
+      await uninstallLaunchd();
+      return;
+    }
     const port = parseInt(opts.port, 10);
     try {
-      await startSweechFedServer(port);
+      await startSweechFedServerWithShutdown(port);
       console.log(chalk.green(`sweech federation server running on :${port}`));
+      console.log(chalk.dim(`  /healthz    — health check`));
       console.log(chalk.dim(`  /fed/info   — metadata`));
       console.log(chalk.dim(`  /fed/runs   — account list`));
       console.log(chalk.dim(`  /fed/widget — account-usage widget`));
+      console.log(chalk.dim(`  SIGTERM/SIGINT for graceful shutdown`));
       // Keep alive
       await new Promise(() => {});
     } catch (error: any) {
@@ -811,6 +825,276 @@ program
     }
     config.setupSharedDirs(commandName, profile.sharedWith, profile.cliType);
     console.log(chalk.green(`✓ Symlinks resynced for ${commandName} → ${profile.sharedWith}\n`));
+  });
+
+// ── sweech sessions ─────────────────────────────────────────────────────────────
+program
+  .command('sessions')
+  .description('List active CLI sessions across all accounts')
+  .option('--json', 'Output machine-readable JSON')
+  .action(async (opts: { json?: boolean }) => {
+    const { detectActiveSessions } = await import('./sessions');
+    const sessions = detectActiveSessions();
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ sessions }, null, 2) + '\n');
+      return;
+    }
+    if (sessions.length === 0) {
+      console.log(chalk.dim('\n  No active CLI sessions.\n'));
+      return;
+    }
+    console.log(chalk.bold(`\n  ${sessions.length} active session(s)\n`));
+    for (const s of sessions) {
+      console.log(`  ${chalk.white(s.commandName || s.cliType)} ${chalk.dim(`pid=${s.pid}`)} ${chalk.dim(s.command)}`);
+    }
+    console.log();
+  });
+
+// ── sweech sync ─────────────────────────────────────────────────────────────────
+const syncCmd = program
+  .command('sync')
+  .description('Git-based config sync');
+
+syncCmd
+  .command('init')
+  .description('Initialize config sync with optional git remote')
+  .argument('[remote]', 'Git remote URL')
+  .action(async (remote?: string) => {
+    const { initSync } = await import('./sync');
+    await initSync(remote);
+    console.log(chalk.green('✓ Sync initialized'));
+  });
+
+syncCmd
+  .command('push')
+  .description('Push config changes to remote')
+  .action(async () => {
+    const { pushSync } = await import('./sync');
+    await pushSync();
+    console.log(chalk.green('✓ Config pushed'));
+  });
+
+syncCmd
+  .command('pull')
+  .description('Pull config changes from remote')
+  .action(async () => {
+    const { pullSync } = await import('./sync');
+    await pullSync();
+    console.log(chalk.green('✓ Config pulled'));
+  });
+
+syncCmd
+  .command('status')
+  .description('Show sync status')
+  .action(async () => {
+    const { getSyncStatus } = await import('./sync');
+    const status = getSyncStatus();
+    if (!status.initialized) {
+      console.log(chalk.dim('\n  Sync not initialized. Run: sweech sync init [remote]\n'));
+      return;
+    }
+    console.log(chalk.bold('\n  sync status'));
+    if (status.remote) console.log(`  remote: ${chalk.cyan(status.remote)}`);
+    if (status.lastSync) console.log(`  last sync: ${chalk.dim(status.lastSync)}`);
+    console.log();
+  });
+
+// ── sweech audit ────────────────────────────────────────────────────────────────
+program
+  .command('audit')
+  .description('View the audit log')
+  .option('--limit <n>', 'Number of entries to show', '20')
+  .option('--action <type>', 'Filter by action type')
+  .option('--json', 'Output machine-readable JSON')
+  .action(async (opts: { limit: string; action?: string; json?: boolean }) => {
+    const { readAuditLog } = await import('./auditLog');
+    const entries = readAuditLog({ limit: parseInt(opts.limit), action: opts.action });
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ entries }, null, 2) + '\n');
+      return;
+    }
+    if (entries.length === 0) {
+      console.log(chalk.dim('\n  No audit entries.\n'));
+      return;
+    }
+    console.log(chalk.bold(`\n  audit log (${entries.length} entries)\n`));
+    for (const e of entries) {
+      const acct = e.account ? chalk.cyan(` [${e.account}]`) : '';
+      console.log(`  ${chalk.dim(e.timestamp)} ${chalk.white(e.action)}${acct}`);
+    }
+    console.log();
+  });
+
+// ── sweech team ─────────────────────────────────────────────────────────────────
+const teamCmd = program
+  .command('team')
+  .description('Team management');
+
+teamCmd
+  .command('join <invite-code>')
+  .description('Join a team using an invite code')
+  .option('--hub <url>', 'Team hub URL')
+  .action(async (inviteCode: string, opts: { hub?: string }) => {
+    const { joinTeam } = await import('./team');
+    await joinTeam(inviteCode, opts.hub || '');
+    console.log(chalk.green('✓ Joined team'));
+  });
+
+teamCmd
+  .command('leave')
+  .description('Leave the current team')
+  .action(async () => {
+    const { leaveTeam } = await import('./team');
+    await leaveTeam();
+    console.log(chalk.green('✓ Left team'));
+  });
+
+teamCmd
+  .command('invite <email>')
+  .description('Invite a member to the team')
+  .action(async (email: string) => {
+    const { inviteMember } = await import('./team');
+    await inviteMember(email);
+    console.log(chalk.green(`✓ Invite sent to ${email}`));
+  });
+
+teamCmd
+  .command('members')
+  .description('List team members')
+  .action(async () => {
+    const { listMembers } = await import('./team');
+    const members = await listMembers();
+    console.log(chalk.bold(`\n  team members (${members.length})\n`));
+    for (const m of members) {
+      console.log(`  ${chalk.white(m.name)} ${chalk.dim(`[${m.role}]`)} ${chalk.dim(`${m.accounts} accounts`)} ${chalk.dim(`last seen: ${m.lastSeen}`)}`);
+    }
+    console.log();
+  });
+
+// ── sweech webhooks ─────────────────────────────────────────────────────────────
+program
+  .command('webhooks')
+  .description('Show configured webhooks')
+  .action(async () => {
+    const { loadWebhookConfig } = await import('./webhooks');
+    const hooks = loadWebhookConfig();
+    if (hooks.length === 0) {
+      console.log(chalk.dim('\n  No webhooks configured. Add them to ~/.sweech/webhooks.json\n'));
+      return;
+    }
+    console.log(chalk.bold(`\n  ${hooks.length} webhook(s)\n`));
+    for (const h of hooks) {
+      const name = h.name ? chalk.white(h.name) : chalk.dim('unnamed');
+      console.log(`  ${name} → ${chalk.cyan(h.url)} ${chalk.dim(`[${h.events.join(', ')}]`)}`);
+    }
+    console.log();
+  });
+
+// ── sweech peers ────────────────────────────────────────────────────────────────
+const peersCmd = program
+  .command('peers')
+  .description('Manage federation peers');
+
+peersCmd
+  .command('list')
+  .description('List configured federation peers')
+  .action(async () => {
+    const { loadFedPeers, fetchPeerHealth } = await import('./fedClient');
+    const peers = loadFedPeers();
+    if (peers.length === 0) {
+      console.log(chalk.dim('\n  No peers configured. Add them to ~/.sweech/fed-peers.json\n'));
+      return;
+    }
+    console.log(chalk.bold(`\n  ${peers.length} peer(s)\n`));
+    for (const p of peers) {
+      const health = await fetchPeerHealth(p);
+      const status = health?.ok ? chalk.green('ok') : chalk.red('down');
+      const latency = health?.latencyMs ? chalk.dim(`${health.latencyMs}ms`) : '';
+      console.log(`  ${chalk.white(p.name)} ${chalk.dim(`${p.host}:${p.port}`)} ${status} ${latency}`);
+    }
+    console.log();
+  });
+
+peersCmd
+  .command('add <name> <host> <port>')
+  .description('Add a federation peer')
+  .option('--secret <secret>', 'Shared secret for auth')
+  .action(async (name: string, host: string, port: string, opts: { secret?: string }) => {
+    const { loadFedPeers, saveFedPeers } = await import('./fedClient');
+    const peers = loadFedPeers();
+    peers.push({ name, host, port: parseInt(port), secret: opts.secret });
+    saveFedPeers(peers);
+    console.log(chalk.green(`✓ Peer '${name}' added`));
+  });
+
+peersCmd
+  .command('remove <name>')
+  .description('Remove a federation peer')
+  .action(async (name: string) => {
+    const { loadFedPeers, saveFedPeers } = await import('./fedClient');
+    const peers = loadFedPeers().filter(p => p.name !== name);
+    saveFedPeers(peers);
+    console.log(chalk.green(`✓ Peer '${name}' removed`));
+  });
+
+// ── sweech plugins ──────────────────────────────────────────────────────────────
+const pluginsCmd = program
+  .command('plugins')
+  .description('Manage sweech plugins');
+
+pluginsCmd
+  .command('list')
+  .description('List installed plugins')
+  .action(async () => {
+    const { listPlugins } = await import('./plugins');
+    const plugins = listPlugins();
+    if (plugins.length === 0) {
+      console.log(chalk.dim('\n  No plugins installed.\n'));
+      return;
+    }
+    console.log(chalk.bold(`\n  ${plugins.length} plugin(s)\n`));
+    for (const p of plugins) {
+      const status = p.enabled ? chalk.green('enabled') : chalk.red('disabled');
+      console.log(`  ${chalk.white(p.name)} ${chalk.dim(`v${p.version}`)} ${status}`);
+    }
+    console.log();
+  });
+
+pluginsCmd
+  .command('install <package>')
+  .description('Install a plugin from npm')
+  .action(async (pkg: string) => {
+    const { installPlugin } = await import('./plugins');
+    await installPlugin(pkg);
+    console.log(chalk.green(`✓ Plugin '${pkg}' installed`));
+  });
+
+pluginsCmd
+  .command('uninstall <name>')
+  .description('Uninstall a plugin')
+  .action(async (name: string) => {
+    const { uninstallPlugin } = await import('./plugins');
+    await uninstallPlugin(name);
+    console.log(chalk.green(`✓ Plugin '${name}' uninstalled`));
+  });
+
+// ── sweech templates ────────────────────────────────────────────────────────────
+program
+  .command('templates')
+  .description('List available profile templates')
+  .option('--json', 'Output as JSON')
+  .action(async (opts: { json?: boolean }) => {
+    const { getAllTemplates } = await import('./templates');
+    const templates = getAllTemplates();
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ templates }, null, 2) + '\n');
+      return;
+    }
+    console.log(chalk.bold(`\n  ${templates.length} template(s)\n`));
+    for (const t of templates) {
+      console.log(`  ${chalk.white(t.name)} ${chalk.dim(`[${t.cliType}/${t.provider}]`)} ${chalk.dim(t.description)}`);
+    }
+    console.log();
   });
 
 // Default action: interactive launcher when no command given
