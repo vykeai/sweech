@@ -107,8 +107,10 @@ struct UsageResponse: Codable {
 class SweechService: ObservableObject {
     @Published var accounts: [SweechAccount] = []
     @Published var isConnected = false
+    @Published var isFetching = false
     @Published var lastError: String?
     @Published var lastFetched: Date?
+    @Published var accountOrder: [String] = []  // commandNames in user order
 
     var worstStatus: String {
         var worst = "allowed"
@@ -120,19 +122,32 @@ class SweechService: ObservableObject {
         return worst
     }
 
+    /// Accounts sorted by user-defined order, then by name for new ones
+    var sortedAccounts: [SweechAccount] {
+        if accountOrder.isEmpty { return accounts }
+        let ordered = accountOrder.compactMap { id in accounts.first { $0.commandName == id } }
+        let rest = accounts.filter { a in !accountOrder.contains(a.commandName) }
+        return ordered + rest
+    }
+
     private var timer: Timer?
 
     init() {
+        loadOrder()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.fetch()
         }
+        fetch()
     }
 
     func fetch() {
+        guard !isFetching else { return }
+        isFetching = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Self.runSweech(["usage", "--json"])
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.isFetching = false
                 switch result {
                 case .success(let data):
                     do {
@@ -141,6 +156,11 @@ class SweechService: ObservableObject {
                         self.isConnected = true
                         self.lastError = nil
                         self.lastFetched = Date()
+                        // Seed order on first load
+                        if self.accountOrder.isEmpty {
+                            self.accountOrder = response.accounts.map { $0.commandName }
+                            self.saveOrder()
+                        }
                     } catch {
                         NSLog("SweechBar parse error: %@", error.localizedDescription)
                         self.lastError = "Parse: \(error.localizedDescription)"
@@ -152,6 +172,27 @@ class SweechService: ObservableObject {
                 }
             }
         }
+    }
+
+    func moveAccount(from source: IndexSet, to destination: Int) {
+        accountOrder.move(fromOffsets: source, toOffset: destination)
+        saveOrder()
+    }
+
+    func restartDaemon() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = Self.runSweech(["serve", "--uninstall"])
+            _ = Self.runSweech(["serve", "--install"])
+        }
+    }
+
+    private func loadOrder() {
+        let defaults = UserDefaults.standard
+        accountOrder = defaults.stringArray(forKey: "sweechAccountOrder") ?? []
+    }
+
+    private func saveOrder() {
+        UserDefaults.standard.set(accountOrder, forKey: "sweechAccountOrder")
     }
 
     private static func runSweech(_ args: [String]) -> Result<Data, Error> {

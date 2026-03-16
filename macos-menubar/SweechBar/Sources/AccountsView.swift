@@ -4,11 +4,11 @@ struct AccountsView: View {
     @ObservedObject var service: SweechService
 
     private var claudeAccounts: [SweechAccount] {
-        service.accounts.filter { ($0.cliType ?? "claude") == "claude" }
+        service.sortedAccounts.filter { ($0.cliType ?? "claude") == "claude" }
     }
 
     private var codexAccounts: [SweechAccount] {
-        service.accounts.filter { $0.cliType == "codex" }
+        service.sortedAccounts.filter { $0.cliType == "codex" }
     }
 
     private var hasBothTypes: Bool {
@@ -50,13 +50,19 @@ struct AccountsView: View {
                     }
                     .padding(12)
                 } else {
-                    VStack(spacing: 10) {
-                        summaryHeader
-                        ForEach(service.accounts) { account in
+                    List {
+                        ForEach(service.sortedAccounts) { account in
                             AccountCard(account: account)
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                         }
+                        .onMove { service.moveAccount(from: $0, to: $1) }
                     }
-                    .padding(12)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
 
                 Divider().overlay(Sweech.Color.core.opacity(0.1))
@@ -127,11 +133,19 @@ struct AccountsView: View {
                 .frame(width: 7, height: 7)
 
             Button(action: { service.fetch() }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
+                if service.isFetching {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .scaleEffect(0.6)
+                        .frame(width: 16, height: 16)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
+                }
             }
             .buttonStyle(.plain)
+            .disabled(service.isFetching)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -160,10 +174,38 @@ struct AccountsView: View {
             }
 
             Spacer()
-            Button("Quit") { NSApp.terminate(nil) }
-                .buttonStyle(.plain)
-                .font(.system(size: 10))
-                .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
+
+            // Actions menu
+            Menu {
+                Button {
+                    service.fetch()
+                } label: {
+                    Label("Reload", systemImage: "arrow.clockwise")
+                }
+                .disabled(service.isFetching)
+
+                Divider()
+
+                Button {
+                    service.restartDaemon()
+                } label: {
+                    Label("Restart Daemon", systemImage: "arrow.counterclockwise.circle")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    NSApp.terminate(nil)
+                } label: {
+                    Label("Quit SweechBar", systemImage: "xmark.circle")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
