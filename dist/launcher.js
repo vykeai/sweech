@@ -251,7 +251,16 @@ function render(entries, state) {
     const W = 56; // frame width
     lines.push(chalk_1.default.bold('🍭 Sweech') + chalk_1.default.dim('  —  ↑↓ to select, ⏎ to launch'));
     lines.push('');
+    // Group entries by CLI type, render with section headers
+    let lastCliType = '';
     entries.forEach((entry, i) => {
+        const cliType = entry.command === 'codex' ? 'codex' : 'claude';
+        if (cliType !== lastCliType) {
+            const cliLabel = cliType === 'codex' ? 'Codex (OpenAI)' : 'Claude (Anthropic)';
+            lines.push(chalk_1.default.dim(`  ── ${cliLabel} ${'─'.repeat(Math.max(0, 42 - cliLabel.length))}`));
+            lines.push('');
+            lastCliType = cliType;
+        }
         const selected = i === state.selectedIndex;
         // Tags
         const authBadge = entry.authType ? ` [${entry.authType}]` : '';
@@ -362,8 +371,8 @@ async function runLauncher() {
     // Fetch real usage data for all accounts
     const accounts = await (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })));
     const accountMap = new Map(accounts.map(a => [a.commandName, a]));
-    // Build entries with real data
-    const entries = accountList.map(a => {
+    // Build entries with real data, sorted by CLI type (defaults first, then profiles)
+    const unsorted = accountList.map(a => {
         const account = accountMap.get(a.commandName);
         const cli = (0, clis_1.getCLI)(a.command);
         if (a.isDefault) {
@@ -372,6 +381,13 @@ async function runLauncher() {
         const profile = profiles.find(p => p.commandName === a.commandName);
         return buildEntry(profile.commandName, a.command, config.getProfileDir(profile.commandName), (0, providers_1.getProvider)(profile.provider)?.displayName || profile.provider, cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', false, account, { sharedWith: profile.sharedWith, model: profile.model });
     });
+    // Group: claude default + claude profiles, then codex default + codex profiles
+    const entries = [
+        ...unsorted.filter(e => e.command !== 'codex' && e.isDefault),
+        ...unsorted.filter(e => e.command !== 'codex' && !e.isDefault),
+        ...unsorted.filter(e => e.command === 'codex' && e.isDefault),
+        ...unsorted.filter(e => e.command === 'codex' && !e.isDefault),
+    ];
     const state = loadLastState();
     if (state.selectedIndex >= entries.length)
         state.selectedIndex = 0;

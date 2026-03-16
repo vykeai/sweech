@@ -246,7 +246,16 @@ function render(entries: LaunchEntry[], state: LaunchState): string[] {
   lines.push(chalk.bold('🍭 Sweech') + chalk.dim('  —  ↑↓ to select, ⏎ to launch'));
   lines.push('');
 
+  // Group entries by CLI type, render with section headers
+  let lastCliType = '';
   entries.forEach((entry, i) => {
+    const cliType = entry.command === 'codex' ? 'codex' : 'claude';
+    if (cliType !== lastCliType) {
+      const cliLabel = cliType === 'codex' ? 'Codex (OpenAI)' : 'Claude (Anthropic)';
+      lines.push(chalk.dim(`  ── ${cliLabel} ${'─'.repeat(Math.max(0, 42 - cliLabel.length))}`));
+      lines.push('');
+      lastCliType = cliType;
+    }
     const selected = i === state.selectedIndex;
 
     // Tags
@@ -368,8 +377,8 @@ export async function runLauncher(): Promise<void> {
   const accounts = await getAccountInfo(accountList.map(a => ({ name: a.name, commandName: a.commandName })));
   const accountMap = new Map(accounts.map(a => [a.commandName, a]));
 
-  // Build entries with real data
-  const entries: LaunchEntry[] = accountList.map(a => {
+  // Build entries with real data, sorted by CLI type (defaults first, then profiles)
+  const unsorted: LaunchEntry[] = accountList.map(a => {
     const account = accountMap.get(a.commandName);
     const cli = getCLI(a.command);
     if (a.isDefault) {
@@ -390,6 +399,14 @@ export async function runLauncher(): Promise<void> {
       { sharedWith: profile.sharedWith, model: profile.model }
     );
   });
+
+  // Group: claude default + claude profiles, then codex default + codex profiles
+  const entries: LaunchEntry[] = [
+    ...unsorted.filter(e => e.command !== 'codex' && e.isDefault),
+    ...unsorted.filter(e => e.command !== 'codex' && !e.isDefault),
+    ...unsorted.filter(e => e.command === 'codex' && e.isDefault),
+    ...unsorted.filter(e => e.command === 'codex' && !e.isDefault),
+  ];
 
   const state = loadLastState();
   if (state.selectedIndex >= entries.length) state.selectedIndex = 0;
