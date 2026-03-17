@@ -89,7 +89,8 @@ struct AccountsView: View {
 
     @AppStorage("sweechSortMode") private var sortMode: String = "smart"
     @AppStorage("sweechGrouped")  private var grouped: Bool = true
-    @State private var showGuide = false
+    @State private var showGuide    = false
+    @State private var showSettings = false
 
     // Raw account groups
     private var rawClaude: [SweechAccount] {
@@ -352,6 +353,20 @@ struct AccountsView: View {
             }
 
             Spacer()
+
+            Button {
+                showSettings.toggle()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
+                    .padding(8)
+            }
+            .buttonStyle(.plain)
+            .help("Preferences — configure menu bar display and defaults")
+            .popover(isPresented: $showSettings, arrowEdge: .bottom) {
+                SettingsView()
+            }
 
             Menu {
                 Button { service.fetch() } label: {
@@ -966,5 +981,154 @@ struct BucketCard: View {
         .padding(8)
         .background(Sweech.Color.background.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+// MARK: - Settings View
+
+struct SettingsView: View {
+    @AppStorage("sweechBarLabelMode") private var labelMode: String = "capacity"
+    @AppStorage("sweechSortMode")     private var sortMode: String  = "smart"
+    @AppStorage("sweechGrouped")      private var grouped: Bool     = true
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Preferences")
+                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .foregroundStyle(Sweech.Color.textPrimary)
+
+                // Menu bar label
+                settingsSection(title: "MENU BAR SHOWS") {
+                    labelOption(
+                        mode: "expiry",
+                        icon: "exclamationmark.arrow.circlepath",
+                        iconColor: Sweech.Color.expiry,
+                        label: "Expiring quota",
+                        desc: "Shows ⚡72% when you have weekly quota that will expire unused. Nothing shown when all is fine."
+                    )
+                    labelOption(
+                        mode: "capacity",
+                        icon: "gauge.with.dots.needle.67percent",
+                        iconColor: Sweech.Color.ok,
+                        label: "5h capacity",
+                        desc: "Free % remaining in the best account's 5-hour rolling window. Useful when actively switching accounts."
+                    )
+                    labelOption(
+                        mode: "count",
+                        icon: "person.2",
+                        iconColor: Sweech.Color.accent,
+                        label: "Account count",
+                        desc: "Available / total accounts, e.g. 5/6. Good at a glance when you have many accounts."
+                    )
+                    labelOption(
+                        mode: "icon",
+                        icon: "eye.slash",
+                        iconColor: Sweech.Color.textMuted,
+                        label: "Icon only",
+                        desc: "Just 🍭 — minimal. Status color (🔴 / ⚠️) still shows when an account hits its limit."
+                    )
+                }
+
+                // Default sort
+                settingsSection(title: "DEFAULT SORT") {
+                    sortOption(mode: "smart",  icon: "bolt.fill",  iconColor: Sweech.Color.warning,
+                               label: "Smart (expiry-first)",
+                               desc: "Ranks by weekly quota ÷ days until reset — puts the account you should use most urgently first.")
+                    sortOption(mode: "status", icon: "circle.fill", iconColor: Sweech.Color.ok,
+                               label: "By status",
+                               desc: "Available accounts first, then warning, then limit reached.")
+                    sortOption(mode: "manual", icon: "hand.draw",   iconColor: Sweech.Color.textMuted,
+                               label: "Manual",
+                               desc: "Drag cards to reorder. Order is saved between sessions.")
+                }
+
+                // Grouping
+                settingsSection(title: "LAYOUT") {
+                    Toggle(isOn: $grouped) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Group by provider")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                            Text("Show Claude and Codex accounts in separate columns.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Sweech.Color.textMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(Sweech.Color.core)
+                }
+            }
+            .padding(16)
+        }
+        .frame(width: 320)
+        .background(Sweech.Color.surface)
+    }
+
+    private func settingsSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Sweech.Color.textMuted.opacity(0.7))
+                .kerning(0.8)
+            VStack(alignment: .leading, spacing: 6) {
+                content()
+            }
+        }
+        .padding(12)
+        .background(Sweech.Color.surfaceHigh)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func labelOption(mode: String, icon: String, iconColor: Color, label: String, desc: String) -> some View {
+        Button { labelMode = mode } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: labelMode == mode ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(labelMode == mode ? Sweech.Color.core : Sweech.Color.textMuted.opacity(0.4))
+                    .frame(width: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 14)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Sweech.Color.textPrimary)
+                    Text(desc)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Sweech.Color.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sortOption(mode: String, icon: String, iconColor: Color, label: String, desc: String) -> some View {
+        Button { sortMode = mode } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: sortMode == mode ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(sortMode == mode ? Sweech.Color.core : Sweech.Color.textMuted.opacity(0.4))
+                    .frame(width: 16)
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 14)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Sweech.Color.textPrimary)
+                    Text(desc)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Sweech.Color.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
