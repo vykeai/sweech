@@ -133,6 +133,8 @@ struct AccountsView: View {
     private func tier(for account: SweechAccount, rank: Int) -> CardTier {
         if account.needsReauth == true           { return .needsReauth }
         if account.liveStatus == "limit_reached" { return .limitReached }
+        // use-first / use-next badges only apply in smart sort mode (parity with CLI launcher)
+        guard sortMode == "smart" else { return .normal }
         switch rank {
         case 0:  return .useFirst(urgent: hasExpiryUrgency(account))
         case 1:  return .useNext

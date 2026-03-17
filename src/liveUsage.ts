@@ -13,7 +13,8 @@ import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
-import { execSync } from 'child_process'
+import { execSync, execFileSync } from 'child_process'
+import { refreshOAuthToken } from './oauth'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ interface OAuthEntry {
   expiresAt?: number
 }
 
-function readOAuthToken(configDir: string): OAuthEntry | null {
+async function readOAuthToken(configDir: string): Promise<OAuthEntry | null> {
   if (process.platform !== 'darwin') return null
   const service = keychainServiceName(configDir)
   try {
@@ -127,11 +128,47 @@ function readOAuthToken(configDir: string): OAuthEntry | null {
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim()
     if (!raw) return null
-    const parsed = JSON.parse(raw) as { claudeAiOauth?: OAuthEntry }
-    const token = parsed.claudeAiOauth
+    const payload = JSON.parse(raw) as Record<string, unknown>
+    const token = payload.claudeAiOauth as OAuthEntry | undefined
     if (!token?.accessToken) return null
-    if (token.expiresAt && token.expiresAt < Date.now() + 60_000) return null  // expires in < 1m
-    return token
+
+    // Token still valid
+    if (!token.expiresAt || token.expiresAt >= Date.now() + 60_000) return token
+
+    // Token expired — try to refresh silently using the stored refresh token
+    if (token.refreshToken) {
+      try {
+        const refreshed = await refreshOAuthToken({
+          accessToken: token.accessToken,
+          refreshToken: token.refreshToken,
+          expiresAt: token.expiresAt,
+          tokenType: 'Bearer',
+          provider: 'anthropic',
+        })
+        // Write refreshed token back to Keychain, preserving any other fields in the payload
+        const updatedPayload = {
+          ...payload,
+          claudeAiOauth: {
+            ...(payload.claudeAiOauth as object),
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+            expiresAt: refreshed.expiresAt,
+          },
+        }
+        execFileSync('security', [
+          'add-generic-password', '-U',
+          '-a', username,
+          '-s', service,
+          '-w', JSON.stringify(updatedPayload),
+        ], { stdio: 'ignore' })
+        return updatedPayload.claudeAiOauth as OAuthEntry
+      } catch {
+        // Refresh failed — token is truly expired, needs manual re-auth
+        return null
+      }
+    }
+
+    return null // expired with no refresh token
   } catch {
     return null
   }
@@ -299,7 +336,7 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
   }
 
   // Claude: use OAuth token + Anthropic API headers
-  const token = readOAuthToken(configDir)
+  const token = await readOAuthToken(configDir)
   if (!token) return null
 
   const data = await fetchRateLimitHeaders(token.accessToken)
@@ -319,7 +356,7 @@ export async function refreshLiveUsage(configDir: string, cliType?: string): Pro
     return data
   }
 
-  const token = readOAuthToken(configDir)
+  const token = await readOAuthToken(configDir)
   if (!token) return null
 
   const data = await fetchRateLimitHeaders(token.accessToken)
