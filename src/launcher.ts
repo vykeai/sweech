@@ -44,6 +44,7 @@ interface LaunchState {
   yolo: boolean;
   resume: boolean;
   usage: boolean;
+  sortMode: 'smart' | 'status' | 'manual';
 }
 
 type UsageLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -56,7 +57,7 @@ function loadLastState(): LaunchState {
       return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
     }
   } catch {}
-  return { selectedIndex: 0, yolo: false, resume: false, usage: false };
+  return { selectedIndex: 0, yolo: false, resume: false, usage: false, sortMode: 'smart' };
 }
 
 function saveState(state: LaunchState): void {
@@ -129,22 +130,28 @@ function renderBar(pct: number, width: number, ub: UsageBar): string {
   return chalk.dim(usedStr) + ' ' + chalk.green(bar) + ' ' + chalk.green(freeStr);
 }
 
-function formatReset(epochSec: number | undefined): string {
+function formatReset(epochSec: number | undefined, windowMins = 0): string {
   if (!epochSec) return '';
   const diff = epochSec * 1000 - Date.now();
-  if (diff <= 0) return 'resetting...';
+  if (diff <= 0) return chalk.red('resetting...');
   const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `resets in ${mins}m`;
+  const isSession = windowMins <= 300; // 5h window
+  // Urgency coloring — only for session (5h) window, weekly resets are rarely urgent
+  if (isSession) {
+    if (mins < 30)  return chalk.red(`resets in ${mins}m`);
+    if (mins < 120) return chalk.yellow(`resets in ${mins}m`);
+  }
+  if (mins < 60) return chalk.cyan(`resets in ${mins}m`);
   const hours = Math.floor(mins / 60);
   const remMins = mins % 60;
-  if (hours < 24) return `resets in ${hours}h ${remMins}m`;
+  if (hours < 24) return chalk.cyan(`resets in ${hours}h ${remMins}m`);
   // Show day + time
   const d = new Date(epochSec * 1000);
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const h = d.getHours();
   const ampm = h >= 12 ? 'PM' : 'AM';
   const h12 = h % 12 || 12;
-  return `resets ${days[d.getDay()]} ${h12}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`;
+  return chalk.dim(`resets ${days[d.getDay()]} ${h12}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`);
 }
 
 function timeAgo(iso: string): string {
@@ -211,7 +218,7 @@ function buildEntry(
         bars.push({
           label: `${label} 5h`,
           pct: Math.round(bucket.session.utilization * 100),
-          resetLabel: formatReset(bucket.session.resetsAt),
+          resetLabel: formatReset(bucket.session.resetsAt, 300),
           resetsAt: bucket.session.resetsAt,
           windowMins: 300,
         });
@@ -220,7 +227,7 @@ function buildEntry(
         bars.push({
           label: `${label} 7d`,
           pct: Math.round(bucket.weekly.utilization * 100),
-          resetLabel: formatReset(bucket.weekly.resetsAt),
+          resetLabel: formatReset(bucket.weekly.resetsAt, 10080),
           resetsAt: bucket.weekly.resetsAt,
           windowMins: 10080,
         });
@@ -241,12 +248,60 @@ function buildEntry(
   };
 }
 
+function entrySmartScore(e: LaunchEntry): number {
+  if (e.needsReauth) return -2;
+  const bar5h = e.bars.find(b => b.windowMins === 300);
+  if (bar5h && bar5h.pct >= 100) return -1;
+  const bar7d = e.bars.find(b => b.windowMins === 10080);
+  if (!bar7d) return bar5h ? (100 - bar5h.pct) / 100 : 0;
+  const remaining7d = (100 - bar7d.pct) / 100;
+  if (!bar7d.resetsAt) return remaining7d;
+  const hoursLeft = Math.max(0.5, (bar7d.resetsAt - Date.now() / 1000) / 3600);
+  return remaining7d / (hoursLeft / 24);
+}
+
+function sortedWithinGroup(list: LaunchEntry[], mode: string): LaunchEntry[] {
+  if (mode === 'manual') return list;
+  if (mode === 'status') {
+    return [...list].sort((a, b) => {
+      const score = (e: LaunchEntry) => e.needsReauth ? -2 : e.bars.some(b => b.windowMins === 300 && b.pct >= 100) ? -1 : 0;
+      return score(b) - score(a);
+    });
+  }
+  return [...list].sort((a, b) => entrySmartScore(b) - entrySmartScore(a));
+}
+
+function getSorted(allEntries: LaunchEntry[], mode: string): LaunchEntry[] {
+  const claude = allEntries.filter(e => e.command !== 'codex');
+  const codex  = allEntries.filter(e => e.command === 'codex');
+  return [...sortedWithinGroup(claude, mode), ...sortedWithinGroup(codex, mode)];
+}
+
+function expiryAlert(e: LaunchEntry): string {
+  const bar7d = e.bars.find(b => b.windowMins === 10080);
+  if (!bar7d?.resetsAt) return '';
+  const hoursLeft = (bar7d.resetsAt - Date.now() / 1000) / 3600;
+  const remaining = (100 - bar7d.pct) / 100;
+  if (remaining <= 0.1 || hoursLeft <= 0 || hoursLeft >= 72) return '';
+  const pct = Math.round(remaining * 100);
+  const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
+  return chalk.cyan(` ⚡ ${pct}% expiring in ${label}`);
+}
+
 function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoadState = 'idle'): string[] {
   const lines: string[] = [];
   const W = 56; // frame width
 
-  lines.push(chalk.bold('🍭 Sweech') + chalk.dim('  —  ↑↓ to select, ⏎ to launch'));
+  const sortLabel = state.sortMode === 'status' ? 'status' : state.sortMode === 'manual' ? 'manual' : 'smart';
+  lines.push(chalk.bold('🍭 Sweech') + chalk.dim(`  —  ↑↓ select  s:${sortLabel}  ⏎ launch`));
   lines.push('');
+
+  // Track rank within each CLI group for "use first" badge
+  const claudeGroup = entries.filter(e => e.command !== 'codex');
+  const codexGroup  = entries.filter(e => e.command === 'codex');
+  const useFirstSet = new Set<LaunchEntry>();
+  if (claudeGroup[0] && entrySmartScore(claudeGroup[0]) >= 0) useFirstSet.add(claudeGroup[0]);
+  if (codexGroup[0]  && entrySmartScore(codexGroup[0])  >= 0) useFirstSet.add(codexGroup[0]);
 
   // Group entries by CLI type, render with section headers
   let lastCliType = '';
@@ -264,6 +319,8 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
     const authBadge = entry.authType ? ` [${entry.authType}]` : '';
     const sharedBadge = entry.sharedWith ? ` [shared ↔ ${entry.sharedWith}]` : '';
     const reauthBadge = entry.needsReauth ? ' ⚠ re-auth' : '';
+    const useFirstBadge = usageLoad === 'loaded' && useFirstSet.has(entry) ? chalk.cyan(' ⚡ use first') : '';
+    const expiryStr = usageLoad === 'loaded' ? expiryAlert(entry) : '';
 
     // Provider line
     const providerStr = entry.isDefault
@@ -277,7 +334,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
     if (selected) {
       // ── Framed selected entry ──
       lines.push(chalk.yellowBright(`  ┏${'━'.repeat(W)}┓`));
-      lines.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : ''));
+      lines.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
       lines.push(chalk.yellowBright('  ┃ ') + chalk.gray(infoLine));
 
       if (state.usage) {
@@ -307,7 +364,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
       lines.push(chalk.yellowBright(`  ┗${'━'.repeat(W)}┛`));
     } else {
       // ── Unselected entry ──
-      lines.push(chalk.dim('  │ ') + chalk.bold.white(entry.name) + chalk.dim(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : ''));
+      lines.push(chalk.dim('  │ ') + chalk.bold.white(entry.name) + chalk.dim(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
       lines.push(chalk.dim('  │ ') + chalk.gray(infoLine));
 
       if (state.usage) {
@@ -364,7 +421,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   // Shortcuts
   const key = (k: string) => chalk.bold.white(k);
   const desc = (d: string) => chalk.dim(d);
-  lines.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
+  lines.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
   lines.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}`);
 
   process.stdout.write(lines.join('\n'));
@@ -455,7 +512,7 @@ export async function runLauncher(): Promise<void> {
   const draw = () => {
     // Move to top-left and clear to end of screen — works in alternate buffer
     process.stdout.write('\x1b[H\x1b[J');
-    render(entries, state, usageLoad);
+    render(getSorted(entries, state.sortMode), state, usageLoad);
   };
 
   /** Fetch usage data async, patch entries in-place, redraw. */
@@ -485,7 +542,7 @@ export async function runLauncher(): Promise<void> {
                 entry.bars.push({
                   label: `${lbl} 5h`,
                   pct: Math.round(bucket.session.utilization * 100),
-                  resetLabel: formatReset(bucket.session.resetsAt),
+                  resetLabel: formatReset(bucket.session.resetsAt, 300),
                   resetsAt: bucket.session.resetsAt,
                   windowMins: 300,
                 });
@@ -494,7 +551,7 @@ export async function runLauncher(): Promise<void> {
                 entry.bars.push({
                   label: `${lbl} 7d`,
                   pct: Math.round(bucket.weekly.utilization * 100),
-                  resetLabel: formatReset(bucket.weekly.resetsAt),
+                  resetLabel: formatReset(bucket.weekly.resetsAt, 10080),
                   resetsAt: bucket.weekly.resetsAt,
                   windowMins: 10080,
                 });
@@ -541,11 +598,18 @@ export async function runLauncher(): Promise<void> {
           draw();
         }
         // If loading: ignore (already in progress)
+      } else if (str === 's' || str === 'S') {
+        const modes: Array<'smart' | 'status' | 'manual'> = ['smart', 'status', 'manual'];
+        const next = modes[(modes.indexOf(state.sortMode) + 1) % modes.length];
+        state.sortMode = next;
+        state.selectedIndex = 0;
+        draw();
       } else if (str === 'a' || str === 'A') {
         cleanup(); runSubcommand('add');
       } else if (str === 'e' || str === 'E') {
-        if (entries[state.selectedIndex].isDefault) return;
-        cleanup(); runSubcommand('edit', entries[state.selectedIndex].name);
+        const sortedNow = getSorted(entries, state.sortMode);
+        if (sortedNow[state.selectedIndex].isDefault) return;
+        cleanup(); runSubcommand('edit', sortedNow[state.selectedIndex].name);
       } else if (key.name === 'return') {
         cleanup(); launch();
       }
@@ -573,7 +637,7 @@ export async function runLauncher(): Promise<void> {
     const launch = () => {
       cleanup();
       saveState(state);
-      const entry = entries[state.selectedIndex];
+      const entry = getSorted(entries, state.sortMode)[state.selectedIndex];
       const preview = buildCommandPreview(entry, state);
       console.log(chalk.gray(`→ ${preview}\n`));
 
