@@ -5,9 +5,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFileSync } from 'child_process';
 import { ProviderConfig } from './providers';
-import { CLIConfig, getDefaultCLI } from './clis';
+import { CLIConfig } from './clis';
 import { OAuthToken } from './oauth';
 
 export interface ProfileConfig {
@@ -38,9 +37,8 @@ export const CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories'
 // Codex-specific shareable files.
 export const CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'] as const;
 
-// Codex SQLite databases are profile-specific runtime/auth state — never share them.
-// Each profile must have its own independent copy.
-export const CODEX_SHAREABLE_DBS: readonly string[] = [] as const;
+// Codex SQLite databases — shared for transcript access. Auth stays in auth.json (never shared).
+export const CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'] as const;
 
 export class ConfigManager {
   private configDir: string;
@@ -334,47 +332,31 @@ exec ${cli.command} "\${ARGS[@]}"
       fs.symlinkSync(targetPath, linkPath);
     }
 
-    // For codex profiles, symlink shared SQLite databases
+    // For codex profiles, symlink shared SQLite DBs (transcripts — NOT auth, NOT usage state)
     if (isCodex) {
       for (const db of CODEX_SHAREABLE_DBS) {
         const linkPath = path.join(profileDir, db);
         const targetPath = path.join(masterDir, db);
 
-        // Skip if already a symlink pointing to the right place
+        // Skip if already the correct symlink
         try {
-          const stat = fs.lstatSync(linkPath);
-          if (stat.isSymbolicLink()) {
-            if (fs.readlinkSync(linkPath) === targetPath) continue;
-            fs.unlinkSync(linkPath);
-          } else if (stat.isFile()) {
-            // Real file exists — backup, flush WAL, and merge before replacing
-            this.backupFile(linkPath, commandName);
-            this.flushAndMergeDb(db, linkPath, targetPath);
-          }
+          if (fs.lstatSync(linkPath).isSymbolicLink() && fs.readlinkSync(linkPath) === targetPath) continue;
         } catch {}
 
-        if (!fs.existsSync(targetPath)) {
-          // No master DB yet — move the pole file there instead of symlinking empty
-          try {
-            if (fs.lstatSync(linkPath).isFile()) {
-              fs.renameSync(linkPath, targetPath);
-            }
-          } catch {}
-          if (!fs.existsSync(targetPath)) {
-            fs.writeFileSync(targetPath, '');
-          }
-        }
+        // Master DB must exist — don't create empty placeholder DBs
+        if (!fs.existsSync(targetPath)) continue;
 
-        // Clean up WAL/SHM artifacts from the pole copy
-        for (const ext of ['-wal', '-shm']) {
-          try { fs.unlinkSync(linkPath + ext); } catch {}
-        }
+        // Only replace existing symlinks — never overwrite a real DB file
+        try {
+          const stat = fs.lstatSync(linkPath);
+          if (!stat.isSymbolicLink()) continue;
+          fs.unlinkSync(linkPath);
+        } catch {}
 
-        try { fs.unlinkSync(linkPath); } catch {}
         fs.symlinkSync(targetPath, linkPath);
       }
 
-      // Create required isolated dirs
+      // Create required isolated dirs (auth/runtime — never shared)
       for (const dir of ['log', 'tmp', 'shell_snapshots', 'sqlite']) {
         const d = path.join(profileDir, dir);
         if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
@@ -382,98 +364,28 @@ exec ${cli.command} "\${ARGS[@]}"
     }
   }
 
-  /** Copy a file to ~/.sweech/backups/<profile>/ before destructive operations. */
-  private backupFile(srcPath: string, profileName: string): void {
-    try {
-      const backupDir = path.join(os.homedir(), '.sweech', 'backups', profileName);
+  private backupFile(filePath: string, commandName: string): void {
+    const backupDir = path.join(this.configDir, 'backups', commandName);
+    if (!fs.existsSync(backupDir)) {
       fs.mkdirSync(backupDir, { recursive: true });
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const dest = path.join(backupDir, `${path.basename(srcPath)}.${ts}.bak`);
-      fs.copyFileSync(srcPath, dest);
-    } catch {
-      // Backup failed — log but don't abort (merge already happened)
-      console.error(`  ⚠  Could not back up ${path.basename(srcPath)} — proceeding anyway`);
     }
+    const basename = path.basename(filePath);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(backupDir, `${basename}.${timestamp}.bak`);
+    fs.copyFileSync(filePath, backupPath);
   }
 
-  /**
-   * Merge a JSONL file from polePath into masterPath, deduplicating by full line content.
-   * Appends only lines not already present in master.
-   */
-  private mergeJsonl(polePath: string, masterPath: string): void {
-    try {
-      const poleLines = fs.readFileSync(polePath, 'utf-8').split('\n').filter(l => l.trim());
-      if (!poleLines.length) return;
-
-      const masterLines = fs.existsSync(masterPath)
-        ? new Set(fs.readFileSync(masterPath, 'utf-8').split('\n').filter(l => l.trim()))
-        : new Set<string>();
-
-      const newLines = poleLines.filter(l => !masterLines.has(l));
-      if (newLines.length) {
-        fs.appendFileSync(masterPath, newLines.join('\n') + '\n');
+  private mergeJsonl(sourcePath: string, targetPath: string): void {
+    const existing = new Set<string>();
+    if (fs.existsSync(targetPath)) {
+      for (const line of fs.readFileSync(targetPath, 'utf-8').split('\n')) {
+        if (line.trim()) existing.add(line);
       }
-    } catch {
-      console.error(`  ⚠  Could not merge ${path.basename(polePath)} — original backed up`);
     }
-  }
-
-  /**
-   * Flush WAL and merge ALL user data tables from a pole SQLite database into master.
-   * Backs up the pole file first. After this call the pole file can be safely replaced with a symlink.
-   */
-  private flushAndMergeDb(dbName: string, polePath: string, masterPath: string): void {
-    const sqlite3 = (dbPath: string, sql: string): boolean => {
-      try {
-        execFileSync('sqlite3', [dbPath, sql], { stdio: 'pipe', timeout: 10_000 });
-        return true;
-      } catch {
-        return false;
-      }
-    };
-
-    const hasSqlite3 = (() => {
-      try { execFileSync('sqlite3', ['--version'], { stdio: 'pipe' }); return true; } catch { return false; }
-    })();
-
-    if (!hasSqlite3) {
-      console.error(`  ⚠  sqlite3 CLI not found — cannot merge ${dbName}. Original backed up.`);
-      return;
-    }
-
-    // Flush WAL on both databases so all data is in the main file
-    sqlite3(polePath, 'PRAGMA wal_checkpoint(TRUNCATE);');
-    if (fs.existsSync(masterPath)) {
-      sqlite3(masterPath, 'PRAGMA wal_checkpoint(TRUNCATE);');
-    }
-
-    if (!fs.existsSync(masterPath)) return;
-
-    const escapedPole = polePath.replace(/'/g, "''");
-
-    if (dbName === 'state_5.sqlite') {
-      // Merge all user-data tables (skip schema migration table)
-      const mergeSQL = [
-        `ATTACH '${escapedPole}' AS pole`,
-        `INSERT OR IGNORE INTO threads SELECT * FROM pole.threads`,
-        `INSERT OR IGNORE INTO thread_dynamic_tools SELECT * FROM pole.thread_dynamic_tools`,
-        `INSERT OR IGNORE INTO stage1_outputs SELECT * FROM pole.stage1_outputs`,
-        `INSERT OR IGNORE INTO agent_jobs SELECT * FROM pole.agent_jobs`,
-        `INSERT OR IGNORE INTO agent_job_items SELECT * FROM pole.agent_job_items`,
-        `INSERT OR IGNORE INTO jobs SELECT * FROM pole.jobs`,
-        `DETACH pole`,
-      ].join('; ');
-      const ok = sqlite3(masterPath, mergeSQL);
-      if (!ok) console.error(`  ⚠  Partial merge failure for ${dbName} — original backed up`);
-
-    } else if (dbName === 'logs_1.sqlite') {
-      const mergeSQL = [
-        `ATTACH '${escapedPole}' AS pole`,
-        `INSERT OR IGNORE INTO logs SELECT * FROM pole.logs`,
-        `DETACH pole`,
-      ].join('; ');
-      const ok = sqlite3(masterPath, mergeSQL);
-      if (!ok) console.error(`  ⚠  Partial merge failure for ${dbName} — original backed up`);
+    const newLines = fs.readFileSync(sourcePath, 'utf-8').split('\n')
+      .filter(l => l.trim() && !existing.has(l));
+    if (newLines.length > 0) {
+      fs.appendFileSync(targetPath, newLines.join('\n') + '\n');
     }
   }
 

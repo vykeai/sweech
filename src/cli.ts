@@ -887,24 +887,7 @@ program
     }
   });
 
-// Resync command - re-apply shared symlinks for a profile
-program
-  .command('resync <command-name>')
-  .description('Re-apply all shared symlinks for a profile (use after upgrading sweech)')
-  .action((commandName: string) => {
-    const config = new ConfigManager();
-    const profile = config.getProfiles().find(p => p.commandName === commandName);
-    if (!profile) {
-      console.error(chalk.red(`Profile '${commandName}' not found`));
-      process.exit(1);
-    }
-    if (!profile.sharedWith) {
-      console.error(chalk.red(`Profile '${commandName}' is not in shared mode`));
-      process.exit(1);
-    }
-    config.setupSharedDirs(commandName, profile.sharedWith, profile.cliType);
-    console.log(chalk.green(`✓ Symlinks resynced for ${commandName} → ${profile.sharedWith}\n`));
-  });
+// resync intentionally removed — it caused data loss by replacing real files with symlinks
 
 // ── sweech sessions ─────────────────────────────────────────────────────────────
 program
