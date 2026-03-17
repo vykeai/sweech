@@ -39,6 +39,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.entrySmartScore = entrySmartScore;
+exports.sortedWithinGroup = sortedWithinGroup;
+exports.getSorted = getSorted;
+exports.expiryAlert = expiryAlert;
 exports.runLauncher = runLauncher;
 const chalk_1 = __importDefault(require("chalk"));
 const readline = __importStar(require("readline"));
@@ -307,19 +311,21 @@ function render(entries, state, usageLoad = 'idle') {
     const groupLabel = state.grouped ? 'on' : 'off';
     lines.push(chalk_1.default.bold('🍭 Sweech') + chalk_1.default.dim(`  —  ↑↓ select  s:${sortLabel}  g:${groupLabel}  ⏎ launch`));
     lines.push('');
-    // Track rank within each group for "use first" badge
+    // "use first" badge: only meaningful in smart sort (in other modes rank-0 is arbitrary)
     const useFirstSet = new Set();
-    if (state.grouped) {
-        const claudeGroup = entries.filter(e => e.command !== 'codex');
-        const codexGroup = entries.filter(e => e.command === 'codex');
-        if (claudeGroup[0] && entrySmartScore(claudeGroup[0]) >= 0)
-            useFirstSet.add(claudeGroup[0]);
-        if (codexGroup[0] && entrySmartScore(codexGroup[0]) >= 0)
-            useFirstSet.add(codexGroup[0]);
-    }
-    else {
-        if (entries[0] && entrySmartScore(entries[0]) >= 0)
-            useFirstSet.add(entries[0]);
+    if (state.sortMode === 'smart') {
+        if (state.grouped) {
+            const claudeGroup = entries.filter(e => e.command !== 'codex');
+            const codexGroup = entries.filter(e => e.command === 'codex');
+            if (claudeGroup[0] && entrySmartScore(claudeGroup[0]) >= 0)
+                useFirstSet.add(claudeGroup[0]);
+            if (codexGroup[0] && entrySmartScore(codexGroup[0]) >= 0)
+                useFirstSet.add(codexGroup[0]);
+        }
+        else {
+            if (entries[0] && entrySmartScore(entries[0]) >= 0)
+                useFirstSet.add(entries[0]);
+        }
     }
     // Group entries by CLI type, render with section headers
     let lastCliType = '';
@@ -336,8 +342,10 @@ function render(entries, state, usageLoad = 'idle') {
         const authBadge = entry.authType ? ` [${entry.authType}]` : '';
         const sharedBadge = entry.sharedWith ? ` [shared ↔ ${entry.sharedWith}]` : '';
         const reauthBadge = entry.needsReauth ? ' ⚠ re-auth' : '';
-        const useFirstBadge = usageLoad === 'loaded' && useFirstSet.has(entry) ? chalk_1.default.cyan(' ⚡ use first') : '';
         const expiryStr = usageLoad === 'loaded' ? expiryAlert(entry) : '';
+        // suppress "use first" text when expiry alert already communicates urgency (avoids double ⚡)
+        const useFirstBadge = usageLoad === 'loaded' && useFirstSet.has(entry) && !expiryStr
+            ? chalk_1.default.cyan(' ⚡ use first') : '';
         // Provider line
         const providerStr = entry.isDefault
             ? (entry.command === 'codex' ? 'OpenAI' : 'Anthropic')

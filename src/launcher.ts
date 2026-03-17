@@ -20,7 +20,7 @@ interface UsageBar {
   windowMins: number;    // 300 (5h) or 10080 (7d)
 }
 
-interface LaunchEntry {
+export interface LaunchEntry {
   name: string;
   command: string;
   configDir: string | null;
@@ -249,7 +249,7 @@ function buildEntry(
   };
 }
 
-function entrySmartScore(e: LaunchEntry): number {
+export function entrySmartScore(e: LaunchEntry): number {
   if (e.needsReauth) return -2;
   const bar5h = e.bars.find(b => b.windowMins === 300);
   if (bar5h && bar5h.pct >= 100) return -1;
@@ -261,7 +261,7 @@ function entrySmartScore(e: LaunchEntry): number {
   return remaining7d / (hoursLeft / 24);
 }
 
-function sortedWithinGroup(list: LaunchEntry[], mode: string): LaunchEntry[] {
+export function sortedWithinGroup(list: LaunchEntry[], mode: string): LaunchEntry[] {
   if (mode === 'manual') return list;
   if (mode === 'status') {
     return [...list].sort((a, b) => {
@@ -272,7 +272,7 @@ function sortedWithinGroup(list: LaunchEntry[], mode: string): LaunchEntry[] {
   return [...list].sort((a, b) => entrySmartScore(b) - entrySmartScore(a));
 }
 
-function getSorted(allEntries: LaunchEntry[], mode: string, grouped: boolean = true): LaunchEntry[] {
+export function getSorted(allEntries: LaunchEntry[], mode: string, grouped: boolean = true): LaunchEntry[] {
   if (!grouped) {
     return sortedWithinGroup(allEntries, mode);
   }
@@ -281,7 +281,7 @@ function getSorted(allEntries: LaunchEntry[], mode: string, grouped: boolean = t
   return [...sortedWithinGroup(claude, mode), ...sortedWithinGroup(codex, mode)];
 }
 
-function expiryAlert(e: LaunchEntry): string {
+export function expiryAlert(e: LaunchEntry): string {
   const bar7d = e.bars.find(b => b.windowMins === 10080);
   if (!bar7d?.resetsAt) return '';
   const hoursLeft = (bar7d.resetsAt - Date.now() / 1000) / 3600;
@@ -301,15 +301,17 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   lines.push(chalk.bold('🍭 Sweech') + chalk.dim(`  —  ↑↓ select  s:${sortLabel}  g:${groupLabel}  ⏎ launch`));
   lines.push('');
 
-  // Track rank within each group for "use first" badge
+  // "use first" badge: only meaningful in smart sort (in other modes rank-0 is arbitrary)
   const useFirstSet = new Set<LaunchEntry>();
-  if (state.grouped) {
-    const claudeGroup = entries.filter(e => e.command !== 'codex');
-    const codexGroup  = entries.filter(e => e.command === 'codex');
-    if (claudeGroup[0] && entrySmartScore(claudeGroup[0]) >= 0) useFirstSet.add(claudeGroup[0]);
-    if (codexGroup[0]  && entrySmartScore(codexGroup[0])  >= 0) useFirstSet.add(codexGroup[0]);
-  } else {
-    if (entries[0] && entrySmartScore(entries[0]) >= 0) useFirstSet.add(entries[0]);
+  if (state.sortMode === 'smart') {
+    if (state.grouped) {
+      const claudeGroup = entries.filter(e => e.command !== 'codex');
+      const codexGroup  = entries.filter(e => e.command === 'codex');
+      if (claudeGroup[0] && entrySmartScore(claudeGroup[0]) >= 0) useFirstSet.add(claudeGroup[0]);
+      if (codexGroup[0]  && entrySmartScore(codexGroup[0])  >= 0) useFirstSet.add(codexGroup[0]);
+    } else {
+      if (entries[0] && entrySmartScore(entries[0]) >= 0) useFirstSet.add(entries[0]);
+    }
   }
 
   // Group entries by CLI type, render with section headers
@@ -328,8 +330,10 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
     const authBadge = entry.authType ? ` [${entry.authType}]` : '';
     const sharedBadge = entry.sharedWith ? ` [shared ↔ ${entry.sharedWith}]` : '';
     const reauthBadge = entry.needsReauth ? ' ⚠ re-auth' : '';
-    const useFirstBadge = usageLoad === 'loaded' && useFirstSet.has(entry) ? chalk.cyan(' ⚡ use first') : '';
     const expiryStr = usageLoad === 'loaded' ? expiryAlert(entry) : '';
+    // suppress "use first" text when expiry alert already communicates urgency (avoids double ⚡)
+    const useFirstBadge = usageLoad === 'loaded' && useFirstSet.has(entry) && !expiryStr
+      ? chalk.cyan(' ⚡ use first') : '';
 
     // Provider line
     const providerStr = entry.isDefault
