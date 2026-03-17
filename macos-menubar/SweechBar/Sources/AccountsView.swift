@@ -135,6 +135,8 @@ struct AccountsView: View {
         if account.liveStatus == "limit_reached" { return .limitReached }
         // use-first / use-next badges only apply in smart sort mode (parity with CLI launcher)
         guard sortMode == "smart" else { return .normal }
+        // No live data — we can't rank this account confidently; no badge
+        guard account.live != nil else { return .normal }
         switch rank {
         case 0:  return .useFirst(urgent: hasExpiryUrgency(account))
         case 1:  return .useNext
@@ -728,6 +730,17 @@ struct AccountCard: View {
                     resetsAt: account.live?.reset7dAt,
                     capacityNote: nil
                 )
+
+                if account.live?.isStale == true {
+                    HStack(spacing: 3) {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .font(.system(size: 9))
+                        Text("stale data · tap ↻ to retry")
+                            .font(.system(size: 9))
+                    }
+                    .foregroundStyle(Sweech.Color.warning.opacity(0.7))
+                    .padding(.top, 2)
+                }
             }
 
             // Footer

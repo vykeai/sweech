@@ -74,6 +74,13 @@ function getCached(configDir) {
         return null;
     return entry;
 }
+function getStaleCache(configDir) {
+    const store = readCache();
+    const entry = store[configDir];
+    if (!entry)
+        return null;
+    return { ...entry, isStale: true };
+}
 function setCached(configDir, data) {
     const store = readCache();
     store[configDir] = data;
@@ -304,19 +311,22 @@ async function getLiveUsage(configDir, cliType) {
     // Codex: use app-server JSON-RPC
     if (cliType === 'codex') {
         const data = await fetchCodexRateLimits(configDir);
-        if (data)
+        if (data) {
             setCached(configDir, data);
-        return data;
+            return data;
+        }
+        return getStaleCache(configDir);
     }
     // Claude: use OAuth token + Anthropic API headers
     const token = await readOAuthToken(configDir);
     if (!token)
-        return null;
+        return getStaleCache(configDir);
     const data = await fetchRateLimitHeaders(token.accessToken);
-    if (!data)
-        return null;
-    setCached(configDir, data);
-    return data;
+    if (data) {
+        setCached(configDir, data);
+        return data;
+    }
+    return getStaleCache(configDir);
 }
 /**
  * Force-refresh live rate limit data, bypassing the cache.
@@ -324,16 +334,19 @@ async function getLiveUsage(configDir, cliType) {
 async function refreshLiveUsage(configDir, cliType) {
     if (cliType === 'codex') {
         const data = await fetchCodexRateLimits(configDir);
-        if (data)
+        if (data) {
             setCached(configDir, data);
-        return data;
+            return data;
+        }
+        return getStaleCache(configDir);
     }
     const token = await readOAuthToken(configDir);
     if (!token)
-        return null;
+        return getStaleCache(configDir);
     const data = await fetchRateLimitHeaders(token.accessToken);
-    if (!data)
-        return null;
-    setCached(configDir, data);
-    return data;
+    if (data) {
+        setCached(configDir, data);
+        return data;
+    }
+    return getStaleCache(configDir);
 }

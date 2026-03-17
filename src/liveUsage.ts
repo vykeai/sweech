@@ -39,6 +39,8 @@ export interface LiveRateLimitData {
   planType?: string
   /** When this snapshot was captured (ms) */
   capturedAt: number
+  /** True when this is cached data returned because a fresh fetch failed */
+  isStale?: boolean
 
   // Legacy fields for backward compat with existing code
   /** @deprecated use buckets[0].session.utilization */
@@ -82,6 +84,13 @@ function getCached(configDir: string): LiveRateLimitData | null {
   if (!entry) return null
   if (Date.now() - entry.capturedAt > CACHE_TTL_MS) return null
   return entry
+}
+
+function getStaleCache(configDir: string): LiveRateLimitData | null {
+  const store = readCache()
+  const entry = store[configDir]
+  if (!entry) return null
+  return { ...entry, isStale: true }
 }
 
 function setCached(configDir: string, data: LiveRateLimitData): void {
@@ -335,19 +344,18 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
   // Codex: use app-server JSON-RPC
   if (cliType === 'codex') {
     const data = await fetchCodexRateLimits(configDir)
-    if (data) setCached(configDir, data)
-    return data
+    if (data) { setCached(configDir, data); return data }
+    return getStaleCache(configDir)
   }
 
   // Claude: use OAuth token + Anthropic API headers
   const token = await readOAuthToken(configDir)
-  if (!token) return null
+  if (!token) return getStaleCache(configDir)
 
   const data = await fetchRateLimitHeaders(token.accessToken)
-  if (!data) return null
+  if (data) { setCached(configDir, data); return data }
 
-  setCached(configDir, data)
-  return data
+  return getStaleCache(configDir)
 }
 
 /**
@@ -356,16 +364,15 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
 export async function refreshLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
   if (cliType === 'codex') {
     const data = await fetchCodexRateLimits(configDir)
-    if (data) setCached(configDir, data)
-    return data
+    if (data) { setCached(configDir, data); return data }
+    return getStaleCache(configDir)
   }
 
   const token = await readOAuthToken(configDir)
-  if (!token) return null
+  if (!token) return getStaleCache(configDir)
 
   const data = await fetchRateLimitHeaders(token.accessToken)
-  if (!data) return null
+  if (data) { setCached(configDir, data); return data }
 
-  setCached(configDir, data)
-  return data
+  return getStaleCache(configDir)
 }
