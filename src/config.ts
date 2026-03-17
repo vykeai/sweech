@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import { ProviderConfig } from './providers';
 import { CLIConfig, getDefaultCLI } from './clis';
 import { OAuthToken } from './oauth';
@@ -31,11 +32,14 @@ export const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugin
 export const SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'] as const;
 
 // Codex-specific shareable dirs.
-// NOT included: auth.json, config.toml, log, shell_snapshots, sqlite, history.jsonl (auth/runtime)
+// NOT included: auth.json, log, shell_snapshots, sqlite (auth/runtime)
 export const CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories', 'rules', 'skills'] as const;
 
 // Codex-specific shareable files.
-export const CODEX_SHAREABLE_FILES = ['config.toml'] as const;
+export const CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'] as const;
+
+// Codex SQLite databases to share. Need WAL flush + merge before symlinking.
+export const CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'] as const;
 
 export class ConfigManager {
   private configDir: string;
@@ -312,12 +316,83 @@ exec ${cli.command} "\${ARGS[@]}"
       fs.symlinkSync(targetPath, linkPath);
     }
 
-    // For codex profiles, also create required isolated dirs
+    // For codex profiles, symlink shared SQLite databases
     if (isCodex) {
+      for (const db of CODEX_SHAREABLE_DBS) {
+        const linkPath = path.join(profileDir, db);
+        const targetPath = path.join(masterDir, db);
+
+        // Skip if already a symlink pointing to the right place
+        try {
+          const stat = fs.lstatSync(linkPath);
+          if (stat.isSymbolicLink()) {
+            if (fs.readlinkSync(linkPath) === targetPath) continue;
+            fs.unlinkSync(linkPath);
+          } else {
+            // Real file exists — flush WAL and merge before replacing
+            this.flushAndMergeDb(db, linkPath, targetPath);
+          }
+        } catch {}
+
+        if (!fs.existsSync(targetPath)) {
+          // No master DB yet — just move the pole file there
+          try {
+            const stat = fs.lstatSync(linkPath);
+            if (stat.isFile()) {
+              fs.renameSync(linkPath, targetPath);
+            }
+          } catch {}
+          // Ensure target exists even if no source
+          if (!fs.existsSync(targetPath)) {
+            fs.writeFileSync(targetPath, '');
+          }
+        }
+
+        // Clean up WAL/SHM artifacts from the pole copy
+        for (const ext of ['-wal', '-shm']) {
+          try { fs.unlinkSync(linkPath + ext); } catch {}
+        }
+
+        try { fs.unlinkSync(linkPath); } catch {}
+        fs.symlinkSync(targetPath, linkPath);
+      }
+
+      // Create required isolated dirs
       for (const dir of ['log', 'tmp', 'shell_snapshots', 'sqlite']) {
         const d = path.join(profileDir, dir);
         if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
       }
+    }
+  }
+
+  /**
+   * Flush WAL and merge a pole SQLite database into the master copy.
+   * After this call the pole file can be safely deleted and replaced with a symlink.
+   */
+  private flushAndMergeDb(dbName: string, polePath: string, masterPath: string): void {
+    const sqlite3 = (dbPath: string, sql: string) => {
+      try {
+        execFileSync('sqlite3', [dbPath, sql], { stdio: 'pipe', timeout: 10_000 });
+      } catch {}
+    };
+
+    // Flush WAL on both databases
+    sqlite3(polePath, 'PRAGMA wal_checkpoint(TRUNCATE);');
+    if (fs.existsSync(masterPath)) {
+      sqlite3(masterPath, 'PRAGMA wal_checkpoint(TRUNCATE);');
+    }
+
+    // Merge divergent data from pole into master (state DB only)
+    if (dbName === 'state_5.sqlite' && fs.existsSync(masterPath)) {
+      const escapedPole = polePath.replace(/'/g, "''");
+      const mergeSQL = [
+        `ATTACH '${escapedPole}' AS pole`,
+        `INSERT OR IGNORE INTO threads SELECT * FROM pole.threads`,
+        `INSERT OR IGNORE INTO thread_dynamic_tools SELECT * FROM pole.thread_dynamic_tools`,
+        `INSERT OR IGNORE INTO stage1_outputs SELECT * FROM pole.stage1_outputs`,
+        `DETACH pole`,
+      ].join('; ');
+      sqlite3(masterPath, mergeSQL);
     }
   }
 

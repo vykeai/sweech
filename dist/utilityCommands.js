@@ -105,6 +105,7 @@ async function runDoctor() {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
     const binDir = config.getBinDir();
+    const symlinkIssues = [];
     // Check Node.js
     console.log(chalk_1.default.bold('Environment:'));
     try {
@@ -185,29 +186,67 @@ async function runDoctor() {
             }
             // Check symlinks for profiles that share data with a master profile
             if (profile.sharedWith) {
-                const masterDir = profile.sharedWith === 'claude'
-                    ? path.join(os.homedir(), '.claude')
+                const isCodex = profile.cliType === 'codex'
+                    || profile.commandName.startsWith('codex');
+                const masterDir = ['claude', 'codex'].includes(profile.sharedWith)
+                    ? path.join(os.homedir(), `.${profile.sharedWith}`)
                     : config.getProfileDir(profile.sharedWith);
+                const expectedDirs = isCodex ? config_1.CODEX_SHAREABLE_DIRS : config_1.SHAREABLE_DIRS;
+                const expectedFiles = isCodex
+                    ? [...config_1.CODEX_SHAREABLE_FILES, ...config_1.CODEX_SHAREABLE_DBS]
+                    : [...config_1.SHAREABLE_FILES];
                 console.log(chalk_1.default.gray(`    Shared symlinks (→ ${profile.sharedWith}):`));
-                for (const item of [...config_1.SHAREABLE_DIRS, ...config_1.SHAREABLE_FILES]) {
+                for (const item of [...expectedDirs, ...expectedFiles]) {
                     const linkPath = path.join(profileDir, item);
                     const expectedTarget = path.join(masterDir, item);
-                    let ok = false;
+                    let status = 'ok';
                     try {
                         const stat = fs.lstatSync(linkPath);
                         if (stat.isSymbolicLink()) {
-                            const actual = fs.realpathSync(linkPath);
-                            ok = actual === fs.realpathSync(expectedTarget);
+                            const actual = fs.readlinkSync(linkPath);
+                            if (actual !== expectedTarget) {
+                                try {
+                                    if (fs.realpathSync(linkPath) !== fs.realpathSync(expectedTarget)) {
+                                        status = 'wrong-target';
+                                    }
+                                }
+                                catch {
+                                    status = 'wrong-target';
+                                }
+                            }
+                        }
+                        else {
+                            status = 'not-symlink';
                         }
                     }
                     catch {
-                        ok = false;
+                        status = 'missing';
                     }
-                    if (ok) {
+                    if (status === 'ok') {
                         console.log(chalk_1.default.green(`      ✓ ${item}`));
                     }
                     else {
-                        console.log(chalk_1.default.red(`      ✗ ${item}`));
+                        const isSqlite = item.endsWith('.sqlite');
+                        let problem = '';
+                        let fix = '';
+                        if (status === 'missing') {
+                            problem = 'missing';
+                            fix = isSqlite
+                                ? `ln -s "${expectedTarget}" "${linkPath}" (ensure master DB exists first)`
+                                : `ln -s "${expectedTarget}" "${linkPath}"`;
+                        }
+                        else if (status === 'not-symlink') {
+                            problem = 'real file (not symlinked)';
+                            fix = isSqlite
+                                ? `merge divergent data then replace with symlink (needs DB merge)`
+                                : `rm "${linkPath}" && ln -s "${expectedTarget}" "${linkPath}"`;
+                        }
+                        else {
+                            problem = `wrong target → ${fs.readlinkSync(linkPath)}`;
+                            fix = `rm "${linkPath}" && ln -s "${expectedTarget}" "${linkPath}"`;
+                        }
+                        console.log(chalk_1.default.red(`      ✗ ${item}`) + chalk_1.default.gray(` — ${problem}`));
+                        symlinkIssues.push({ profile: profile.commandName, item, problem, fix });
                     }
                 }
             }
@@ -215,13 +254,34 @@ async function runDoctor() {
     }
     // Summary
     const hasIssues = !isInPath(binDir) ||
+        symlinkIssues.length > 0 ||
         profiles.some(p => {
             const wrapperPath = path.join(binDir, p.commandName);
             return !fs.existsSync(wrapperPath);
         });
     console.log();
+    // Print symlink fix suggestions if any
+    if (symlinkIssues.length > 0) {
+        console.log(chalk_1.default.bold('Suggested fixes:\n'));
+        const sqliteIssues = symlinkIssues.filter(i => i.item.endsWith('.sqlite') && i.problem.includes('real file'));
+        const simpleIssues = symlinkIssues.filter(i => !sqliteIssues.includes(i));
+        for (const issue of simpleIssues) {
+            console.log(chalk_1.default.gray(`# ${issue.profile}/${issue.item} — ${issue.problem}`));
+            console.log(`  ${issue.fix}`);
+        }
+        if (sqliteIssues.length > 0) {
+            console.log(chalk_1.default.yellow('\nSQLite databases need merge before symlinking:'));
+            for (const issue of sqliteIssues) {
+                console.log(chalk_1.default.gray(`  ${issue.profile}/${issue.item}`));
+            }
+            console.log(chalk_1.default.gray('\nRun sweech resync <profile> to flush WAL, merge, and re-symlink.'));
+            console.log(chalk_1.default.gray('Or fix manually with an AI agent — the DBs may have divergent threads.'));
+        }
+        console.log();
+    }
     if (hasIssues) {
         console.log(chalk_1.default.yellow('⚠️  Some issues detected. See above for details.\n'));
+        process.exitCode = 1;
     }
     else {
         console.log(chalk_1.default.green('✅ Everything looks good! 🎉\n'));

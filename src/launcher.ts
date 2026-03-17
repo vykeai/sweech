@@ -516,9 +516,19 @@ export async function runLauncher(): Promise<void> {
     process.exit(1);
   }
 
-  readline.emitKeypressEvents(process.stdin);
+  // Wrap stdin in a passthrough that strips mouse escape sequences
+  // so readline doesn't misinterpret scroll wheel as arrow keys
+  const { PassThrough } = require('stream') as typeof import('stream');
+  const filtered = new PassThrough();
+  readline.emitKeypressEvents(filtered);
   process.stdin.setRawMode(true);
   process.stdin.resume();
+  process.stdin.on('data', (buf: Buffer) => {
+    const s = buf.toString();
+    // SGR mouse: \x1b[<...  Legacy X10 mouse: \x1b[M...
+    if (s.startsWith('\x1b[<') || s.startsWith('\x1b[M')) return;
+    filtered.write(buf);
+  });
 
   let usageLoad: UsageLoadState = 'idle';
 
@@ -633,7 +643,7 @@ export async function runLauncher(): Promise<void> {
     };
 
     const cleanup = () => {
-      process.stdin.removeListener('keypress', onKeypress);
+      filtered.removeListener('keypress', onKeypress);
       process.stdin.setRawMode(false);
       process.stdin.pause();
       // Leave alternate screen + restore cursor
@@ -672,6 +682,6 @@ export async function runLauncher(): Promise<void> {
       process.exit(result.status || 0);
     };
 
-    process.stdin.on('keypress', onKeypress);
+    filtered.on('keypress', onKeypress);
   });
 }

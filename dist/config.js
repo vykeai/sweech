@@ -36,20 +36,23 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ConfigManager = exports.CODEX_SHAREABLE_FILES = exports.CODEX_SHAREABLE_DIRS = exports.SHAREABLE_FILES = exports.SHAREABLE_DIRS = void 0;
+exports.ConfigManager = exports.CODEX_SHAREABLE_DBS = exports.CODEX_SHAREABLE_FILES = exports.CODEX_SHAREABLE_DIRS = exports.SHAREABLE_FILES = exports.SHAREABLE_DIRS = void 0;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
+const child_process_1 = require("child_process");
 // Directories that are safe to share across profiles via symlinks (Claude).
 // NOT included: settings.json, cache, session-env, shell-snapshots, history.jsonl (auth/runtime)
 exports.SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos'];
 // Files that are safe to share across profiles via symlinks (Claude).
 exports.SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'];
 // Codex-specific shareable dirs.
-// NOT included: auth.json, config.toml, log, shell_snapshots, sqlite, history.jsonl (auth/runtime)
+// NOT included: auth.json, log, shell_snapshots, sqlite (auth/runtime)
 exports.CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories', 'rules', 'skills'];
 // Codex-specific shareable files.
-exports.CODEX_SHAREABLE_FILES = ['config.toml'];
+exports.CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'];
+// Codex SQLite databases to share. Need WAL flush + merge before symlinking.
+exports.CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'];
 class ConfigManager {
     constructor() {
         this.configDir = path.join(os.homedir(), '.sweech');
@@ -276,13 +279,87 @@ exec ${cli.command} "\${ARGS[@]}"
             catch { }
             fs.symlinkSync(targetPath, linkPath);
         }
-        // For codex profiles, also create required isolated dirs
+        // For codex profiles, symlink shared SQLite databases
         if (isCodex) {
+            for (const db of exports.CODEX_SHAREABLE_DBS) {
+                const linkPath = path.join(profileDir, db);
+                const targetPath = path.join(masterDir, db);
+                // Skip if already a symlink pointing to the right place
+                try {
+                    const stat = fs.lstatSync(linkPath);
+                    if (stat.isSymbolicLink()) {
+                        if (fs.readlinkSync(linkPath) === targetPath)
+                            continue;
+                        fs.unlinkSync(linkPath);
+                    }
+                    else {
+                        // Real file exists — flush WAL and merge before replacing
+                        this.flushAndMergeDb(db, linkPath, targetPath);
+                    }
+                }
+                catch { }
+                if (!fs.existsSync(targetPath)) {
+                    // No master DB yet — just move the pole file there
+                    try {
+                        const stat = fs.lstatSync(linkPath);
+                        if (stat.isFile()) {
+                            fs.renameSync(linkPath, targetPath);
+                        }
+                    }
+                    catch { }
+                    // Ensure target exists even if no source
+                    if (!fs.existsSync(targetPath)) {
+                        fs.writeFileSync(targetPath, '');
+                    }
+                }
+                // Clean up WAL/SHM artifacts from the pole copy
+                for (const ext of ['-wal', '-shm']) {
+                    try {
+                        fs.unlinkSync(linkPath + ext);
+                    }
+                    catch { }
+                }
+                try {
+                    fs.unlinkSync(linkPath);
+                }
+                catch { }
+                fs.symlinkSync(targetPath, linkPath);
+            }
+            // Create required isolated dirs
             for (const dir of ['log', 'tmp', 'shell_snapshots', 'sqlite']) {
                 const d = path.join(profileDir, dir);
                 if (!fs.existsSync(d))
                     fs.mkdirSync(d, { recursive: true });
             }
+        }
+    }
+    /**
+     * Flush WAL and merge a pole SQLite database into the master copy.
+     * After this call the pole file can be safely deleted and replaced with a symlink.
+     */
+    flushAndMergeDb(dbName, polePath, masterPath) {
+        const sqlite3 = (dbPath, sql) => {
+            try {
+                (0, child_process_1.execFileSync)('sqlite3', [dbPath, sql], { stdio: 'pipe', timeout: 10000 });
+            }
+            catch { }
+        };
+        // Flush WAL on both databases
+        sqlite3(polePath, 'PRAGMA wal_checkpoint(TRUNCATE);');
+        if (fs.existsSync(masterPath)) {
+            sqlite3(masterPath, 'PRAGMA wal_checkpoint(TRUNCATE);');
+        }
+        // Merge divergent data from pole into master (state DB only)
+        if (dbName === 'state_5.sqlite' && fs.existsSync(masterPath)) {
+            const escapedPole = polePath.replace(/'/g, "''");
+            const mergeSQL = [
+                `ATTACH '${escapedPole}' AS pole`,
+                `INSERT OR IGNORE INTO threads SELECT * FROM pole.threads`,
+                `INSERT OR IGNORE INTO thread_dynamic_tools SELECT * FROM pole.thread_dynamic_tools`,
+                `INSERT OR IGNORE INTO stage1_outputs SELECT * FROM pole.stage1_outputs`,
+                `DETACH pole`,
+            ].join('; ');
+            sqlite3(masterPath, mergeSQL);
         }
     }
     getConfigDir() {
