@@ -220,11 +220,12 @@ export async function refreshOAuthToken(token: OAuthToken): Promise<OAuthToken> 
 
   const tokenEndpoint =
     token.provider === 'anthropic'
-      ? 'https://claude.ai/api/oauth/token'
+      ? 'https://platform.claude.com/v1/oauth/token'
       : 'https://api.openai.com/oauth/token';
 
+  // Use the real Claude Code OAuth client ID so refresh tokens issued by Claude Code work
   const clientId = token.provider === 'anthropic'
-    ? (process.env.ANTHROPIC_CLIENT_ID || 'sweech-cli')
+    ? (process.env.ANTHROPIC_CLIENT_ID || '9d1c250a-e61b-44d9-88ed-5944d1962f5e')
     : (process.env.OPENAI_CLIENT_ID || 'sweech-cli');
 
   const clientSecret = process.env.ANTHROPIC_CLIENT_SECRET || process.env.OPENAI_CLIENT_SECRET;

@@ -355,7 +355,9 @@ export async function getAccountInfo(
         ).trim()
         if (raw) {
           const token = JSON.parse(raw).claudeAiOauth
-          if (!token?.accessToken || (token.expiresAt && token.expiresAt < Date.now())) {
+          // Expired access token is fine when a refresh token exists — Claude Code renews it automatically.
+          // Only flag reauth when there's truly no valid credential (no access token, or expired with no refresh path).
+          if (!token?.accessToken || (token.expiresAt && token.expiresAt < Date.now() && !token.refreshToken)) {
             needsReauth = true
           }
         } else {
