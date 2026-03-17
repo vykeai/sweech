@@ -51,8 +51,9 @@ exports.SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'];
 exports.CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories', 'rules', 'skills'];
 // Codex-specific shareable files.
 exports.CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'];
-// Codex SQLite databases to share. Need WAL flush + merge before symlinking.
-exports.CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'];
+// Codex SQLite databases are profile-specific runtime/auth state — never share them.
+// Each profile must have its own independent copy.
+exports.CODEX_SHAREABLE_DBS = [];
 class ConfigManager {
     constructor() {
         this.configDir = path.join(os.homedir(), '.sweech');

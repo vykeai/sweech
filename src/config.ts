@@ -38,8 +38,9 @@ export const CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories'
 // Codex-specific shareable files.
 export const CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'] as const;
 
-// Codex SQLite databases to share. Need WAL flush + merge before symlinking.
-export const CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'] as const;
+// Codex SQLite databases are profile-specific runtime/auth state — never share them.
+// Each profile must have its own independent copy.
+export const CODEX_SHAREABLE_DBS: readonly string[] = [] as const;
 
 export class ConfigManager {
   private configDir: string;
