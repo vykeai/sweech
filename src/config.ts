@@ -304,13 +304,30 @@ exec ${cli.command} "\${ARGS[@]}"
       const linkPath = path.join(profileDir, file);
       const targetPath = path.join(masterDir, file);
 
+      // Skip if already correct symlink
+      try {
+        if (fs.lstatSync(linkPath).isSymbolicLink() && fs.readlinkSync(linkPath) === targetPath) continue;
+      } catch {}
+
       if (!fs.existsSync(targetPath)) {
         fs.writeFileSync(targetPath, '');
       }
 
+      // Backup + merge real files before replacing
       try {
         const stat = fs.lstatSync(linkPath);
-        if (stat) fs.rmSync(linkPath, { recursive: true, force: true });
+        if (stat.isFile()) {
+          this.backupFile(linkPath, commandName);
+          // Merge JSONL files (history.jsonl etc.) by deduplicating into master
+          if (linkPath.endsWith('.jsonl')) {
+            this.mergeJsonl(linkPath, targetPath);
+          }
+          fs.unlinkSync(linkPath);
+        } else if (!stat.isSymbolicLink()) {
+          fs.rmSync(linkPath, { recursive: true, force: true });
+        } else {
+          fs.unlinkSync(linkPath);
+        }
       } catch {}
 
       fs.symlinkSync(targetPath, linkPath);
@@ -328,21 +345,20 @@ exec ${cli.command} "\${ARGS[@]}"
           if (stat.isSymbolicLink()) {
             if (fs.readlinkSync(linkPath) === targetPath) continue;
             fs.unlinkSync(linkPath);
-          } else {
-            // Real file exists — flush WAL and merge before replacing
+          } else if (stat.isFile()) {
+            // Real file exists — backup, flush WAL, and merge before replacing
+            this.backupFile(linkPath, commandName);
             this.flushAndMergeDb(db, linkPath, targetPath);
           }
         } catch {}
 
         if (!fs.existsSync(targetPath)) {
-          // No master DB yet — just move the pole file there
+          // No master DB yet — move the pole file there instead of symlinking empty
           try {
-            const stat = fs.lstatSync(linkPath);
-            if (stat.isFile()) {
+            if (fs.lstatSync(linkPath).isFile()) {
               fs.renameSync(linkPath, targetPath);
             }
           } catch {}
-          // Ensure target exists even if no source
           if (!fs.existsSync(targetPath)) {
             fs.writeFileSync(targetPath, '');
           }
@@ -365,34 +381,98 @@ exec ${cli.command} "\${ARGS[@]}"
     }
   }
 
+  /** Copy a file to ~/.sweech/backups/<profile>/ before destructive operations. */
+  private backupFile(srcPath: string, profileName: string): void {
+    try {
+      const backupDir = path.join(os.homedir(), '.sweech', 'backups', profileName);
+      fs.mkdirSync(backupDir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const dest = path.join(backupDir, `${path.basename(srcPath)}.${ts}.bak`);
+      fs.copyFileSync(srcPath, dest);
+    } catch {
+      // Backup failed — log but don't abort (merge already happened)
+      console.error(`  ⚠  Could not back up ${path.basename(srcPath)} — proceeding anyway`);
+    }
+  }
+
   /**
-   * Flush WAL and merge a pole SQLite database into the master copy.
-   * After this call the pole file can be safely deleted and replaced with a symlink.
+   * Merge a JSONL file from polePath into masterPath, deduplicating by full line content.
+   * Appends only lines not already present in master.
+   */
+  private mergeJsonl(polePath: string, masterPath: string): void {
+    try {
+      const poleLines = fs.readFileSync(polePath, 'utf-8').split('\n').filter(l => l.trim());
+      if (!poleLines.length) return;
+
+      const masterLines = fs.existsSync(masterPath)
+        ? new Set(fs.readFileSync(masterPath, 'utf-8').split('\n').filter(l => l.trim()))
+        : new Set<string>();
+
+      const newLines = poleLines.filter(l => !masterLines.has(l));
+      if (newLines.length) {
+        fs.appendFileSync(masterPath, newLines.join('\n') + '\n');
+      }
+    } catch {
+      console.error(`  ⚠  Could not merge ${path.basename(polePath)} — original backed up`);
+    }
+  }
+
+  /**
+   * Flush WAL and merge ALL user data tables from a pole SQLite database into master.
+   * Backs up the pole file first. After this call the pole file can be safely replaced with a symlink.
    */
   private flushAndMergeDb(dbName: string, polePath: string, masterPath: string): void {
-    const sqlite3 = (dbPath: string, sql: string) => {
+    const sqlite3 = (dbPath: string, sql: string): boolean => {
       try {
         execFileSync('sqlite3', [dbPath, sql], { stdio: 'pipe', timeout: 10_000 });
-      } catch {}
+        return true;
+      } catch {
+        return false;
+      }
     };
 
-    // Flush WAL on both databases
+    const hasSqlite3 = (() => {
+      try { execFileSync('sqlite3', ['--version'], { stdio: 'pipe' }); return true; } catch { return false; }
+    })();
+
+    if (!hasSqlite3) {
+      console.error(`  ⚠  sqlite3 CLI not found — cannot merge ${dbName}. Original backed up.`);
+      return;
+    }
+
+    // Flush WAL on both databases so all data is in the main file
     sqlite3(polePath, 'PRAGMA wal_checkpoint(TRUNCATE);');
     if (fs.existsSync(masterPath)) {
       sqlite3(masterPath, 'PRAGMA wal_checkpoint(TRUNCATE);');
     }
 
-    // Merge divergent data from pole into master (state DB only)
-    if (dbName === 'state_5.sqlite' && fs.existsSync(masterPath)) {
-      const escapedPole = polePath.replace(/'/g, "''");
+    if (!fs.existsSync(masterPath)) return;
+
+    const escapedPole = polePath.replace(/'/g, "''");
+
+    if (dbName === 'state_5.sqlite') {
+      // Merge all user-data tables (skip schema migration table)
       const mergeSQL = [
         `ATTACH '${escapedPole}' AS pole`,
         `INSERT OR IGNORE INTO threads SELECT * FROM pole.threads`,
         `INSERT OR IGNORE INTO thread_dynamic_tools SELECT * FROM pole.thread_dynamic_tools`,
         `INSERT OR IGNORE INTO stage1_outputs SELECT * FROM pole.stage1_outputs`,
+        `INSERT OR IGNORE INTO agent_jobs SELECT * FROM pole.agent_jobs`,
+        `INSERT OR IGNORE INTO agent_job_items SELECT * FROM pole.agent_job_items`,
+        `INSERT OR IGNORE INTO jobs SELECT * FROM pole.jobs`,
         `DETACH pole`,
       ].join('; ');
-      sqlite3(masterPath, mergeSQL);
+      const ok = sqlite3(masterPath, mergeSQL);
+      if (!ok) console.error(`  ⚠  Partial merge failure for ${dbName} — original backed up`);
+
+    } else if (dbName === 'logs_1.sqlite') {
+      const mergeSQL = [
+        `ATTACH '${escapedPole}' AS pole`,
+        `INSERT OR IGNORE INTO logs SELECT * FROM pole.logs`,
+        `DETACH pole`,
+      ].join('; ');
+      const ok = sqlite3(masterPath, mergeSQL);
+      if (!ok) console.error(`  ⚠  Partial merge failure for ${dbName} — original backed up`);
     }
   }
 
