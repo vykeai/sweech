@@ -89,6 +89,7 @@ struct AccountsView: View {
 
     @AppStorage("sweechSortMode") private var sortMode: String = "smart"
     @AppStorage("sweechGrouped")  private var grouped: Bool = true
+    @AppStorage("sweechCompact")  private var compact: Bool = false
     @State private var showGuide    = false
     @State private var showSettings = false
 
@@ -194,19 +195,22 @@ struct AccountsView: View {
     }
 
     private var singleColumnLayout: some View {
-        List {
-            ForEach(Array(sortedAll.enumerated()), id: \.element.id) { i, account in
-                AccountCard(account: account, tier: tier(for: account, rank: i))
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+        ScrollView {
+            VStack(spacing: 8) {
+                summaryHeader
+                ForEach(Array(sortedAll.enumerated()), id: \.element.id) { i, account in
+                    AccountCard(
+                        account: account,
+                        tier: tier(for: account, rank: i),
+                        onMoveUp:   sortMode == "manual" && i > 0
+                            ? { service.moveAccount(from: IndexSet(integer: i), to: i - 1) } : nil,
+                        onMoveDown: sortMode == "manual" && i < sortedAll.count - 1
+                            ? { service.moveAccount(from: IndexSet(integer: i), to: i + 2) } : nil
+                    )
+                }
             }
-            .onMove { service.moveAccount(from: $0, to: $1) }
+            .padding(12)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     // MARK: Sub-views
@@ -323,6 +327,21 @@ struct AccountsView: View {
             .buttonStyle(.plain)
             .disabled(service.isFetching)
             .help("Reload usage data from all accounts (auto-refreshes every 30s)")
+
+            Button {
+                showSettings.toggle()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Preferences")
+            .popover(isPresented: $showSettings, arrowEdge: .top) {
+                SettingsView(service: service)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -353,20 +372,6 @@ struct AccountsView: View {
             }
 
             Spacer()
-
-            Button {
-                showSettings.toggle()
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
-                    .padding(8)
-            }
-            .buttonStyle(.plain)
-            .help("Preferences — configure menu bar display and defaults")
-            .popover(isPresented: $showSettings, arrowEdge: .bottom) {
-                SettingsView()
-            }
 
             Menu {
                 Button { service.fetch() } label: {
@@ -600,6 +605,8 @@ struct GuideView: View {
 struct AccountCard: View {
     let account: SweechAccount
     var tier: CardTier = .normal
+    var onMoveUp:   (() -> Void)? = nil
+    var onMoveDown: (() -> Void)? = nil
 
     @State private var copied = false
 
@@ -723,6 +730,25 @@ struct AccountCard: View {
 
             // Footer
             HStack(spacing: 12) {
+                if onMoveUp != nil || onMoveDown != nil {
+                    HStack(spacing: 0) {
+                        Button { onMoveUp?() } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(onMoveUp != nil ? Sweech.Color.textMuted.opacity(0.6) : Sweech.Color.textMuted.opacity(0.2))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(onMoveUp == nil)
+                        Button { onMoveDown?() } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(onMoveDown != nil ? Sweech.Color.textMuted.opacity(0.6) : Sweech.Color.textMuted.opacity(0.2))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(onMoveDown == nil)
+                    }
+                }
+
                 HStack(spacing: 4) {
                     Image(systemName: "clock").font(.system(size: 11))
                     Text(account.lastActiveRelative).font(.system(size: 12))
@@ -805,6 +831,7 @@ struct UsageRow: View {
     let resetsAt: Double?
     let capacityNote: String?
 
+    @AppStorage("sweechCompact") private var compact: Bool = false
     @State private var expiryPulse = false
 
     private var used: Int { Int(utilization * 100) }
@@ -918,7 +945,7 @@ struct UsageRow: View {
             }
             .frame(height: 18)
 
-            if messages > 0 || capacityNote != nil || weeklyExpiryNote != nil {
+            if !compact && (messages > 0 || capacityNote != nil || weeklyExpiryNote != nil) {
                 HStack(spacing: 8) {
                     if messages > 0 {
                         Text("\(messages) msgs")
@@ -987,9 +1014,14 @@ struct BucketCard: View {
 // MARK: - Settings View
 
 struct SettingsView: View {
-    @AppStorage("sweechBarLabelMode") private var labelMode: String = "capacity"
-    @AppStorage("sweechSortMode")     private var sortMode: String  = "smart"
-    @AppStorage("sweechGrouped")      private var grouped: Bool     = true
+    @ObservedObject var service: SweechService
+
+    @AppStorage("sweechBarLabelMode")    private var labelMode: String = "capacity"
+    @AppStorage("sweechSortMode")        private var sortMode: String  = "smart"
+    @AppStorage("sweechGrouped")         private var grouped: Bool     = true
+    @AppStorage("sweechRefreshInterval") private var refreshInterval: Int  = 30
+    @AppStorage("sweechNotifications")   private var notificationsEnabled: Bool = true
+    @AppStorage("sweechCompact")         private var compact: Bool     = false
 
     var body: some View {
         ScrollView {
@@ -1051,6 +1083,61 @@ struct SettingsView: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Sweech.Color.textPrimary)
                             Text("Show Claude and Codex accounts in separate columns.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Sweech.Color.textMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(Sweech.Color.core)
+                }
+
+                // Notifications section
+                settingsSection(title: "NOTIFICATIONS") {
+                    Toggle(isOn: $notificationsEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Status change alerts")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                            Text("Notify when an account hits its rate limit or recovers.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Sweech.Color.textMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(Sweech.Color.core)
+                }
+
+                // Refresh interval section
+                settingsSection(title: "AUTO-REFRESH") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Refresh every")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Sweech.Color.textPrimary)
+                        HStack(spacing: 6) {
+                            ForEach([(15, "15s"), (30, "30s"), (60, "1m"), (300, "5m")], id: \.0) { secs, label in
+                                Button { refreshInterval = secs; service.applyRefreshInterval() } label: {
+                                    Text(label)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(refreshInterval == secs ? Sweech.Color.background : Sweech.Color.textMuted)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(refreshInterval == secs ? Sweech.Color.core : Sweech.Color.surfaceHigh)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+
+                // Display section
+                settingsSection(title: "DISPLAY") {
+                    Toggle(isOn: $compact) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Compact mode")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                            Text("Hide message counts and sub-row detail in usage bars.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Sweech.Color.textMuted)
                         }

@@ -45,6 +45,7 @@ interface LaunchState {
   resume: boolean;
   usage: boolean;
   sortMode: 'smart' | 'status' | 'manual';
+  grouped: boolean;
 }
 
 type UsageLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -57,7 +58,7 @@ function loadLastState(): LaunchState {
       return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
     }
   } catch {}
-  return { selectedIndex: 0, yolo: false, resume: false, usage: false, sortMode: 'smart' };
+  return { selectedIndex: 0, yolo: false, resume: false, usage: false, sortMode: 'smart', grouped: true };
 }
 
 function saveState(state: LaunchState): void {
@@ -271,7 +272,10 @@ function sortedWithinGroup(list: LaunchEntry[], mode: string): LaunchEntry[] {
   return [...list].sort((a, b) => entrySmartScore(b) - entrySmartScore(a));
 }
 
-function getSorted(allEntries: LaunchEntry[], mode: string): LaunchEntry[] {
+function getSorted(allEntries: LaunchEntry[], mode: string, grouped: boolean = true): LaunchEntry[] {
+  if (!grouped) {
+    return sortedWithinGroup(allEntries, mode);
+  }
   const claude = allEntries.filter(e => e.command !== 'codex');
   const codex  = allEntries.filter(e => e.command === 'codex');
   return [...sortedWithinGroup(claude, mode), ...sortedWithinGroup(codex, mode)];
@@ -293,21 +297,26 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   const W = 56; // frame width
 
   const sortLabel = state.sortMode === 'status' ? 'status' : state.sortMode === 'manual' ? 'manual' : 'smart';
-  lines.push(chalk.bold('🍭 Sweech') + chalk.dim(`  —  ↑↓ select  s:${sortLabel}  ⏎ launch`));
+  const groupLabel = state.grouped ? 'on' : 'off';
+  lines.push(chalk.bold('🍭 Sweech') + chalk.dim(`  —  ↑↓ select  s:${sortLabel}  g:${groupLabel}  ⏎ launch`));
   lines.push('');
 
-  // Track rank within each CLI group for "use first" badge
-  const claudeGroup = entries.filter(e => e.command !== 'codex');
-  const codexGroup  = entries.filter(e => e.command === 'codex');
+  // Track rank within each group for "use first" badge
   const useFirstSet = new Set<LaunchEntry>();
-  if (claudeGroup[0] && entrySmartScore(claudeGroup[0]) >= 0) useFirstSet.add(claudeGroup[0]);
-  if (codexGroup[0]  && entrySmartScore(codexGroup[0])  >= 0) useFirstSet.add(codexGroup[0]);
+  if (state.grouped) {
+    const claudeGroup = entries.filter(e => e.command !== 'codex');
+    const codexGroup  = entries.filter(e => e.command === 'codex');
+    if (claudeGroup[0] && entrySmartScore(claudeGroup[0]) >= 0) useFirstSet.add(claudeGroup[0]);
+    if (codexGroup[0]  && entrySmartScore(codexGroup[0])  >= 0) useFirstSet.add(codexGroup[0]);
+  } else {
+    if (entries[0] && entrySmartScore(entries[0]) >= 0) useFirstSet.add(entries[0]);
+  }
 
   // Group entries by CLI type, render with section headers
   let lastCliType = '';
   entries.forEach((entry, i) => {
     const cliType = entry.command === 'codex' ? 'codex' : 'claude';
-    if (cliType !== lastCliType) {
+    if (state.grouped && cliType !== lastCliType) {
       const cliLabel = cliType === 'codex' ? 'Codex (OpenAI)' : 'Claude (Anthropic)';
       lines.push(chalk.dim(`  ── ${cliLabel} ${'─'.repeat(Math.max(0, 42 - cliLabel.length))}`));
       lines.push('');
@@ -421,7 +430,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   // Shortcuts
   const key = (k: string) => chalk.bold.white(k);
   const desc = (d: string) => chalk.dim(d);
-  lines.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
+  lines.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
   lines.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}`);
 
   process.stdout.write(lines.join('\n'));
@@ -512,7 +521,7 @@ export async function runLauncher(): Promise<void> {
   const draw = () => {
     // Move to top-left and clear to end of screen — works in alternate buffer
     process.stdout.write('\x1b[H\x1b[J');
-    render(getSorted(entries, state.sortMode), state, usageLoad);
+    render(getSorted(entries, state.sortMode, state.grouped), state, usageLoad);
   };
 
   /** Fetch usage data async, patch entries in-place, redraw. */
@@ -604,10 +613,14 @@ export async function runLauncher(): Promise<void> {
         state.sortMode = next;
         state.selectedIndex = 0;
         draw();
+      } else if (str === 'g' || str === 'G') {
+        state.grouped = !state.grouped;
+        state.selectedIndex = 0;
+        draw();
       } else if (str === 'a' || str === 'A') {
         cleanup(); runSubcommand('add');
       } else if (str === 'e' || str === 'E') {
-        const sortedNow = getSorted(entries, state.sortMode);
+        const sortedNow = getSorted(entries, state.sortMode, state.grouped);
         if (sortedNow[state.selectedIndex].isDefault) return;
         cleanup(); runSubcommand('edit', sortedNow[state.selectedIndex].name);
       } else if (key.name === 'return') {
@@ -637,7 +650,7 @@ export async function runLauncher(): Promise<void> {
     const launch = () => {
       cleanup();
       saveState(state);
-      const entry = getSorted(entries, state.sortMode)[state.selectedIndex];
+      const entry = getSorted(entries, state.sortMode, state.grouped)[state.selectedIndex];
       const preview = buildCommandPreview(entry, state);
       console.log(chalk.gray(`→ ${preview}\n`));
 

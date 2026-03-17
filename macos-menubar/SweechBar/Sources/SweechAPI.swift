@@ -155,10 +155,22 @@ class SweechService: ObservableObject {
     init() {
         loadOrder()
         requestNotificationPermission()
-        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+        setupTimer()
+        fetch()
+    }
+
+    func applyRefreshInterval() {
+        setupTimer()
+        objectWillChange.send()
+    }
+
+    private func setupTimer() {
+        timer?.invalidate()
+        let stored = UserDefaults.standard.integer(forKey: "sweechRefreshInterval")
+        let interval = stored > 0 ? Double(stored) : 30.0
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.fetch()
         }
-        fetch()
     }
 
     private func requestNotificationPermission() {
@@ -166,10 +178,13 @@ class SweechService: ObservableObject {
     }
 
     private func fireStatusChangeNotifications(newAccounts: [SweechAccount]) {
+        let notificationsEnabled = UserDefaults.standard.object(forKey: "sweechNotifications") as? Bool ?? true
         for account in newAccounts {
             let old = previousStatuses[account.commandName]
             let new = account.liveStatus
             guard old != nil, old != new else { continue }
+
+            guard notificationsEnabled else { continue }
 
             let content = UNMutableNotificationContent()
             content.sound = .default
