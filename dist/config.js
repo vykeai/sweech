@@ -50,9 +50,10 @@ exports.SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'];
 exports.CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories', 'rules', 'skills'];
 // Codex-specific shareable files.
 exports.CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'];
-// Codex SQLite databases — NOT shared. They contain per-profile usage state (message counts,
-// session index) in addition to transcripts. Transcripts are already shared via sessions/ symlink.
-exports.CODEX_SHAREABLE_DBS = [];
+// Codex SQLite databases — shared so sessions/transcripts created by one profile are visible
+// in the other. Usage stats (total, last active) come from history.jsonl anyway, and rate
+// limits come from auth.json/API — not from these DBs. Auth stays in auth.json (never shared).
+exports.CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'];
 class ConfigManager {
     constructor() {
         this.configDir = path.join(os.homedir(), '.sweech');
