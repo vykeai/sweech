@@ -26,3 +26,7 @@ settings.json
 Thumbs.db
 .Spotlight-V100
 .Trashes
+
+# macOS app bundles / local builds
+*.app
+macos-menubar/*.app/
