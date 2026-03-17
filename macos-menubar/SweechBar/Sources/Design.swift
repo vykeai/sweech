@@ -17,6 +17,7 @@ enum Sweech {
         static let ok           = SwiftUI.Color(hex: "#34D399")
         static let warning      = SwiftUI.Color(hex: "#FBBF24")
         static let danger       = SwiftUI.Color(hex: "#F87171")
+        static let expiry       = SwiftUI.Color(hex: "#22D3EE")  // cyan — expiring quota alert
     }
 
     enum Gradient {

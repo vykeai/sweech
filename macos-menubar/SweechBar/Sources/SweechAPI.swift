@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import UserNotifications
 
 struct LiveBucket: Codable {
     let label: String
@@ -74,6 +75,22 @@ struct SweechAccount: Codable, Identifiable {
     var reset5hRelative: String? { resetTimeRelative(live?.reset5hAt) }
     var reset7dRelative: String? { resetTimeRelative(live?.reset7dAt) }
 
+    /// Smart priority score: higher = use this account first.
+    /// Rewards accounts with lots of weekly quota that's expiring soon.
+    /// Disqualified (limit_reached / needsReauth) always sort to bottom.
+    var smartScore: Double {
+        if needsReauth == true { return -2 }
+        if liveStatus == "limit_reached" { return -1 }
+        let remaining7d = 1.0 - (live?.utilization7d ?? 0)
+        guard let reset7dAt = live?.reset7dAt else {
+            // No weekly data — score by 5h remaining only
+            return 1.0 - (live?.utilization5h ?? 0)
+        }
+        let hoursUntilReset = max(0.5, Date(timeIntervalSince1970: reset7dAt).timeIntervalSince(Date()) / 3600)
+        // remaining / days_until_reset — more quota + sooner expiry = higher score
+        return remaining7d / (hoursUntilReset / 24.0)
+    }
+
     var lastActiveRelative: String {
         guard let lastActive else { return "never" }
         let formatter = ISO8601DateFormatter()
@@ -111,7 +128,9 @@ class SweechService: ObservableObject {
     @Published var isFetching = false
     @Published var lastError: String?
     @Published var lastFetched: Date?
-    @Published var accountOrder: [String] = []  // commandNames in user order
+    @Published var accountOrder: [String] = []
+
+    private var previousStatuses: [String: String] = [:]  // commandName → liveStatus
 
     var worstStatus: String {
         var worst = "allowed"
@@ -135,10 +154,43 @@ class SweechService: ObservableObject {
 
     init() {
         loadOrder()
+        requestNotificationPermission()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.fetch()
         }
         fetch()
+    }
+
+    private func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func fireStatusChangeNotifications(newAccounts: [SweechAccount]) {
+        for account in newAccounts {
+            let old = previousStatuses[account.commandName]
+            let new = account.liveStatus
+            guard old != nil, old != new else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.sound = .default
+
+            if new == "limit_reached" {
+                content.title = "Rate limit reached — \(account.name)"
+                content.body = "Switch to another account with: sweech u"
+            } else if old == "limit_reached" && new == "allowed" {
+                content.title = "\(account.name) is available again"
+                content.body = "Rate limit window has reset."
+            } else {
+                continue
+            }
+
+            let req = UNNotificationRequest(
+                identifier: "\(account.commandName)-\(new)",
+                content: content, trigger: nil
+            )
+            UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+        }
+        previousStatuses = Dictionary(newAccounts.map { ($0.commandName, $0.liveStatus) }, uniquingKeysWith: { $1 })
     }
 
     func fetch() {
@@ -153,11 +205,11 @@ class SweechService: ObservableObject {
                 case .success(let data):
                     do {
                         let response = try JSONDecoder().decode(UsageResponse.self, from: data)
+                        self.fireStatusChangeNotifications(newAccounts: response.accounts)
                         self.accounts = response.accounts
                         self.isConnected = true
                         self.lastError = nil
                         self.lastFetched = Date()
-                        // Seed order on first load
                         if self.accountOrder.isEmpty {
                             self.accountOrder = response.accounts.map { $0.commandName }
                             self.saveOrder()

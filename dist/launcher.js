@@ -426,18 +426,10 @@ async function runLauncher() {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     let usageLoad = 'idle';
-    let lastLineCount = 0;
     const draw = () => {
-        if (lastLineCount > 0) {
-            // Move up to top of previously drawn area, clear each line
-            process.stdout.write(`\x1b[${lastLineCount}A`);
-            for (let i = 0; i < lastLineCount; i++) {
-                process.stdout.write('\x1b[2K\n');
-            }
-            process.stdout.write(`\x1b[${lastLineCount}A`);
-        }
-        const renderedLines = render(entries, state, usageLoad);
-        lastLineCount = renderedLines.length;
+        // Move to top-left and clear to end of screen — works in alternate buffer
+        process.stdout.write('\x1b[H\x1b[J');
+        render(entries, state, usageLoad);
     };
     /** Fetch usage data async, patch entries in-place, redraw. */
     const fetchUsage = () => {
@@ -493,13 +485,13 @@ async function runLauncher() {
             draw();
         });
     };
-    console.log();
+    // Enter alternate screen + hide cursor — no more scroll jumping
+    process.stdout.write('\x1b[?1049h\x1b[?25l');
     draw();
     return new Promise((resolve) => {
         const onKeypress = (str, key) => {
             if (key.name === 'q' || (key.ctrl && key.name === 'c')) {
                 cleanup();
-                console.log();
                 process.exit(0);
             }
             if (key.name === 'up') {
@@ -550,10 +542,12 @@ async function runLauncher() {
             process.stdin.removeListener('keypress', onKeypress);
             process.stdin.setRawMode(false);
             process.stdin.pause();
+            // Leave alternate screen + restore cursor
+            process.stdout.write('\x1b[?1049l\x1b[?25h');
         };
         const runSubcommand = (cmd, arg) => {
+            cleanup();
             saveState(state);
-            console.log();
             const { spawnSync } = require('child_process');
             const args = [process.argv[1], cmd];
             if (arg)
@@ -563,10 +557,11 @@ async function runLauncher() {
             process.exit(0);
         };
         const launch = () => {
+            cleanup();
             saveState(state);
             const entry = entries[state.selectedIndex];
             const preview = buildCommandPreview(entry, state);
-            console.log(chalk_1.default.gray(`\n→ ${preview}\n`));
+            console.log(chalk_1.default.gray(`→ ${preview}\n`));
             const env = { ...process.env };
             const launchArgs = [];
             if (entry.configDir) {

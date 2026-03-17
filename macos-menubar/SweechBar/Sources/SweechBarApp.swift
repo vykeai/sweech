@@ -17,10 +17,16 @@ struct SweechBarApp: App {
     }
 
     private var menuBarLabel: String {
+        // Show best available account's 5h free % so you can decide at a glance
+        let best = service.accounts
+            .filter { $0.liveStatus != "limit_reached" && $0.needsReauth != true }
+            .sorted { $0.smartScore > $1.smartScore }
+            .first
+        let freeStr = best.map { " \(max(0, 100 - Int($0.utilization5h * 100)))%" } ?? ""
         switch service.worstStatus {
-        case "limit_reached": return "\u{1F36D}\u{1F534}"
-        case "warning": return "\u{1F36D}\u{26A0}\u{FE0F}"
-        default: return "\u{1F36D}"
+        case "limit_reached": return "\u{1F36D}\u{1F534}\(freeStr)"
+        case "warning":       return "\u{1F36D}\u{26A0}\u{FE0F}\(freeStr)"
+        default:              return "\u{1F36D}\(freeStr)"
         }
     }
 

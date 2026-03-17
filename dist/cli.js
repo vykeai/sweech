@@ -661,6 +661,8 @@ const usageCmd = program
     .description('Show account usage windows (5h rolling + 7d) for Claude and Codex accounts')
     .option('--json', 'Output machine-readable JSON')
     .option('--refresh', 'Force-refresh live usage instead of using cached data')
+    .option('--sort <mode>', 'Sort order: smart (default), status, manual', 'smart')
+    .option('--no-group', 'Show all accounts in one list instead of grouped by provider')
     .action(async (opts) => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
@@ -680,33 +682,119 @@ const usageCmd = program
         return;
     }
     console.log(chalk_1.default.bold('\n  sweech · usage\n'));
-    for (const a of accounts) {
-        const planStr = a.meta.plan ? chalk_1.default.cyan(` [${a.meta.plan}]`) : '';
-        const emailStr = a.emailAddress ? chalk_1.default.dim(` · ${a.emailAddress}`) : '';
-        const cliStr = chalk_1.default.dim(` · ${a.cliType}`);
-        console.log(`  ${chalk_1.default.bold(a.name)}${cliStr}${planStr}${emailStr}`);
-        // 5-hour window — prefer live utilization % if available
-        const cap5hStr = a.minutesUntilFirstCapacity !== undefined
-            ? chalk_1.default.dim(` · first capacity in ${a.minutesUntilFirstCapacity}m`)
-            : '';
-        const live5hStr = a.live?.utilization5h !== undefined
-            ? chalk_1.default.dim(` (${Math.round(a.live.utilization5h * 100)}% live)`)
-            : '';
-        console.log(`    5h window:  ${chalk_1.default.white(String(a.messages5h))} messages${live5hStr}${cap5hStr}`);
-        // 7-day window
-        const weeklyStr = a.hoursUntilWeeklyReset !== undefined
-            ? chalk_1.default.dim(` · resets in ${a.hoursUntilWeeklyReset}h`)
-            : chalk_1.default.dim(' · set plan to compute (from subscriptionCreatedAt)');
-        const live7dStr = a.live?.utilization7d !== undefined
-            ? chalk_1.default.dim(` (${Math.round(a.live.utilization7d * 100)}% live)`)
-            : '';
-        console.log(`    7d window:  ${chalk_1.default.white(String(a.messages7d))} messages${live7dStr}${weeklyStr}`);
-        const lastStr = a.lastActive
-            ? chalk_1.default.dim(`  last: ${new Date(a.lastActive).toLocaleString()}`)
-            : '';
-        if (lastStr)
-            console.log(`   ${lastStr}`);
-        console.log();
+    // Scoring helpers
+    const smartScore = (a) => {
+        if (a.needsReauth)
+            return -2;
+        if (a.live?.status === 'limit_reached')
+            return -1;
+        const remaining7d = 1 - (a.live?.utilization7d ?? 0);
+        const reset7dAt = a.live?.reset7dAt;
+        if (!reset7dAt)
+            return 1 - (a.live?.utilization5h ?? 0);
+        const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
+        return remaining7d / (hoursLeft / 24);
+    };
+    const statusRank = (a) => {
+        if (a.needsReauth)
+            return 4;
+        if (a.live?.status === 'limit_reached')
+            return 3;
+        if (a.live?.status === 'warning')
+            return 2;
+        if (a.live?.status === 'allowed')
+            return 0;
+        return 1;
+    };
+    const applySort = (list) => {
+        if (opts.sort === 'status')
+            return [...list].sort((a, b) => statusRank(a) - statusRank(b));
+        if (opts.sort === 'manual')
+            return list;
+        return [...list].sort((a, b) => smartScore(b) - smartScore(a)); // smart
+    };
+    // Group or flat
+    let groups;
+    if (opts.group !== false) {
+        const map = new Map();
+        for (const a of accounts) {
+            const g = a.cliType ?? 'claude';
+            if (!map.has(g))
+                map.set(g, []);
+            map.get(g).push(a);
+        }
+        const groupOrder = ['claude', ...Array.from(map.keys()).filter(k => k !== 'claude').sort()];
+        groups = groupOrder.filter(g => map.has(g)).map(g => ({ name: g, items: applySort(map.get(g)) }));
+    }
+    else {
+        groups = [{ name: '', items: applySort(accounts) }];
+    }
+    const sortLabel = opts.sort === 'status' ? ' · by status' : opts.sort === 'manual' ? ' · manual' : ' · smart';
+    console.log(chalk_1.default.dim(`  sort${sortLabel}${opts.group !== false ? '' : ' · ungrouped'}\n`));
+    for (const { name, items: sorted } of groups) {
+        if (name)
+            console.log(chalk_1.default.bold.dim(`  ── ${name} ──`));
+        for (let i = 0; i < sorted.length; i++) {
+            const a = sorted[i];
+            const planStr = a.meta.plan ? chalk_1.default.cyan(` [${a.meta.plan}]`) : '';
+            const emailStr = a.emailAddress ? chalk_1.default.dim(` · ${a.emailAddress}`) : '';
+            const recommendedStr = i === 0 && smartScore(a) >= 0
+                ? chalk_1.default.cyan(' ⚡ use first')
+                : '';
+            console.log(`  ${chalk_1.default.bold(a.name)}${planStr}${emailStr}${recommendedStr}`);
+            // 5h window
+            const cap5hStr = a.minutesUntilFirstCapacity !== undefined
+                ? chalk_1.default.yellow(` · capacity in ${a.minutesUntilFirstCapacity}m`)
+                : '';
+            const live5hStr = a.live?.utilization5h !== undefined
+                ? ` (${Math.round(a.live.utilization5h * 100)}% used)`
+                : '';
+            const reset5hStr = a.live?.reset5hAt !== undefined
+                ? (() => {
+                    const mins = Math.round((a.live.reset5hAt - Date.now() / 1000) / 60);
+                    if (mins < 30)
+                        return chalk_1.default.red(` · resets in ${mins}m`);
+                    if (mins < 120)
+                        return chalk_1.default.yellow(` · resets in ${mins}m`);
+                    const h = Math.floor(mins / 60), m = mins % 60;
+                    return chalk_1.default.cyan(` · resets in ${h}h ${m}m`);
+                })()
+                : '';
+            console.log(`    5h:   ${chalk_1.default.white(String(a.messages5h))} messages${live5hStr}${reset5hStr}${cap5hStr}`);
+            // week window + expiry alert
+            const reset7dAt = a.live?.reset7dAt;
+            const weeklyResetStr = reset7dAt !== undefined
+                ? (() => {
+                    const h = Math.round((reset7dAt - Date.now() / 1000) / 3600);
+                    const d = Math.floor(h / 24), hr = h % 24;
+                    const label = d > 0 ? `${d}d ${hr}h` : `${h}h`;
+                    return chalk_1.default.cyan(` · resets in ${label}`);
+                })()
+                : a.hoursUntilWeeklyReset !== undefined
+                    ? chalk_1.default.cyan(` · resets in ${a.hoursUntilWeeklyReset}h`)
+                    : chalk_1.default.dim(' · set plan to compute');
+            const live7dStr = a.live?.utilization7d !== undefined
+                ? ` (${Math.round(a.live.utilization7d * 100)}% used)`
+                : '';
+            // Expiry alert: >10% remaining and resetting in <72h
+            let expiryAlertStr = '';
+            if (reset7dAt) {
+                const hoursLeft = (reset7dAt - Date.now() / 1000) / 3600;
+                const remaining = 1 - (a.live?.utilization7d ?? 0);
+                if (remaining > 0.1 && hoursLeft > 0 && hoursLeft < 72) {
+                    const pct = Math.round(remaining * 100);
+                    const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
+                    expiryAlertStr = chalk_1.default.cyan(` ⚡ ${pct}% expiring in ${label}`);
+                }
+            }
+            console.log(`    week: ${chalk_1.default.white(String(a.messages7d))} messages${live7dStr}${weeklyResetStr}${expiryAlertStr}`);
+            const lastStr = a.lastActive
+                ? chalk_1.default.dim(`  last: ${new Date(a.lastActive).toLocaleString()}`)
+                : '';
+            if (lastStr)
+                console.log(`   ${lastStr}`);
+            console.log();
+        }
     }
 });
 usageCmd

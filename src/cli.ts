@@ -694,7 +694,9 @@ const usageCmd = program
   .description('Show account usage windows (5h rolling + 7d) for Claude and Codex accounts')
   .option('--json', 'Output machine-readable JSON')
   .option('--refresh', 'Force-refresh live usage instead of using cached data')
-  .action(async (opts: { json?: boolean; refresh?: boolean }) => {
+  .option('--sort <mode>', 'Sort order: smart (default), status, manual', 'smart')
+  .option('--no-group', 'Show all accounts in one list instead of grouped by provider')
+  .action(async (opts: { json?: boolean; refresh?: boolean; sort: string; group: boolean }) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     const accountList = getKnownAccounts(profiles);
@@ -716,35 +718,112 @@ const usageCmd = program
 
     console.log(chalk.bold('\n  sweech · usage\n'));
 
-    for (const a of accounts) {
-      const planStr = a.meta.plan ? chalk.cyan(` [${a.meta.plan}]`) : '';
-      const emailStr = a.emailAddress ? chalk.dim(` · ${a.emailAddress}`) : '';
-      const cliStr = chalk.dim(` · ${a.cliType}`);
-      console.log(`  ${chalk.bold(a.name)}${cliStr}${planStr}${emailStr}`);
+    // Scoring helpers
+    const smartScore = (a: typeof accounts[0]): number => {
+      if (a.needsReauth) return -2;
+      if (a.live?.status === 'limit_reached') return -1;
+      const remaining7d = 1 - (a.live?.utilization7d ?? 0);
+      const reset7dAt = a.live?.reset7dAt;
+      if (!reset7dAt) return 1 - (a.live?.utilization5h ?? 0);
+      const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
+      return remaining7d / (hoursLeft / 24);
+    };
 
-      // 5-hour window — prefer live utilization % if available
-      const cap5hStr = a.minutesUntilFirstCapacity !== undefined
-        ? chalk.dim(` · first capacity in ${a.minutesUntilFirstCapacity}m`)
-        : '';
-      const live5hStr = a.live?.utilization5h !== undefined
-        ? chalk.dim(` (${Math.round(a.live.utilization5h * 100)}% live)`)
-        : '';
-      console.log(`    5h window:  ${chalk.white(String(a.messages5h))} messages${live5hStr}${cap5hStr}`);
+    const statusRank = (a: typeof accounts[0]): number => {
+      if (a.needsReauth) return 4;
+      if (a.live?.status === 'limit_reached') return 3;
+      if (a.live?.status === 'warning') return 2;
+      if (a.live?.status === 'allowed') return 0;
+      return 1;
+    };
 
-      // 7-day window
-      const weeklyStr = a.hoursUntilWeeklyReset !== undefined
-        ? chalk.dim(` · resets in ${a.hoursUntilWeeklyReset}h`)
-        : chalk.dim(' · set plan to compute (from subscriptionCreatedAt)');
-      const live7dStr = a.live?.utilization7d !== undefined
-        ? chalk.dim(` (${Math.round(a.live.utilization7d * 100)}% live)`)
-        : '';
-      console.log(`    7d window:  ${chalk.white(String(a.messages7d))} messages${live7dStr}${weeklyStr}`);
+    const applySort = (list: typeof accounts): typeof accounts => {
+      if (opts.sort === 'status') return [...list].sort((a, b) => statusRank(a) - statusRank(b));
+      if (opts.sort === 'manual') return list;
+      return [...list].sort((a, b) => smartScore(b) - smartScore(a)); // smart
+    };
 
-      const lastStr = a.lastActive
-        ? chalk.dim(`  last: ${new Date(a.lastActive).toLocaleString()}`)
-        : '';
-      if (lastStr) console.log(`   ${lastStr}`);
-      console.log();
+    // Group or flat
+    let groups: Array<{ name: string; items: typeof accounts }>;
+    if (opts.group !== false) {
+      const map = new Map<string, typeof accounts>();
+      for (const a of accounts) {
+        const g = a.cliType ?? 'claude';
+        if (!map.has(g)) map.set(g, []);
+        map.get(g)!.push(a);
+      }
+      const groupOrder = ['claude', ...Array.from(map.keys()).filter(k => k !== 'claude').sort()];
+      groups = groupOrder.filter(g => map.has(g)).map(g => ({ name: g, items: applySort(map.get(g)!) }));
+    } else {
+      groups = [{ name: '', items: applySort(accounts) }];
+    }
+
+    const sortLabel = opts.sort === 'status' ? ' · by status' : opts.sort === 'manual' ? ' · manual' : ' · smart';
+    console.log(chalk.dim(`  sort${sortLabel}${opts.group !== false ? '' : ' · ungrouped'}\n`));
+
+    for (const { name, items: sorted } of groups) {
+      if (name) console.log(chalk.bold.dim(`  ── ${name} ──`));
+      for (let i = 0; i < sorted.length; i++) {
+        const a = sorted[i];
+        const planStr = a.meta.plan ? chalk.cyan(` [${a.meta.plan}]`) : '';
+        const emailStr = a.emailAddress ? chalk.dim(` · ${a.emailAddress}`) : '';
+        const recommendedStr = i === 0 && smartScore(a) >= 0
+          ? chalk.cyan(' ⚡ use first')
+          : '';
+        console.log(`  ${chalk.bold(a.name)}${planStr}${emailStr}${recommendedStr}`);
+
+        // 5h window
+        const cap5hStr = a.minutesUntilFirstCapacity !== undefined
+          ? chalk.yellow(` · capacity in ${a.minutesUntilFirstCapacity}m`)
+          : '';
+        const live5hStr = a.live?.utilization5h !== undefined
+          ? ` (${Math.round(a.live.utilization5h * 100)}% used)`
+          : '';
+        const reset5hStr = a.live?.reset5hAt !== undefined
+          ? (() => {
+              const mins = Math.round((a.live!.reset5hAt! - Date.now() / 1000) / 60);
+              if (mins < 30) return chalk.red(` · resets in ${mins}m`);
+              if (mins < 120) return chalk.yellow(` · resets in ${mins}m`);
+              const h = Math.floor(mins / 60), m = mins % 60;
+              return chalk.cyan(` · resets in ${h}h ${m}m`);
+            })()
+          : '';
+        console.log(`    5h:   ${chalk.white(String(a.messages5h))} messages${live5hStr}${reset5hStr}${cap5hStr}`);
+
+        // week window + expiry alert
+        const reset7dAt = a.live?.reset7dAt;
+        const weeklyResetStr = reset7dAt !== undefined
+          ? (() => {
+              const h = Math.round((reset7dAt - Date.now() / 1000) / 3600);
+              const d = Math.floor(h / 24), hr = h % 24;
+              const label = d > 0 ? `${d}d ${hr}h` : `${h}h`;
+              return chalk.cyan(` · resets in ${label}`);
+            })()
+          : a.hoursUntilWeeklyReset !== undefined
+            ? chalk.cyan(` · resets in ${a.hoursUntilWeeklyReset}h`)
+            : chalk.dim(' · set plan to compute');
+        const live7dStr = a.live?.utilization7d !== undefined
+          ? ` (${Math.round(a.live.utilization7d * 100)}% used)`
+          : '';
+        // Expiry alert: >10% remaining and resetting in <72h
+        let expiryAlertStr = '';
+        if (reset7dAt) {
+          const hoursLeft = (reset7dAt - Date.now() / 1000) / 3600;
+          const remaining = 1 - (a.live?.utilization7d ?? 0);
+          if (remaining > 0.1 && hoursLeft > 0 && hoursLeft < 72) {
+            const pct = Math.round(remaining * 100);
+            const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
+            expiryAlertStr = chalk.cyan(` ⚡ ${pct}% expiring in ${label}`);
+          }
+        }
+        console.log(`    week: ${chalk.white(String(a.messages7d))} messages${live7dStr}${weeklyResetStr}${expiryAlertStr}`);
+
+        const lastStr = a.lastActive
+          ? chalk.dim(`  last: ${new Date(a.lastActive).toLocaleString()}`)
+          : '';
+        if (lastStr) console.log(`   ${lastStr}`);
+        console.log();
+      }
     }
   });
 
