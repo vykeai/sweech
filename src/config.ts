@@ -37,8 +37,9 @@ export const CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories'
 // Codex-specific shareable files.
 export const CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'] as const;
 
-// Codex SQLite databases — shared for transcript access. Auth stays in auth.json (never shared).
-export const CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'] as const;
+// Codex SQLite databases — NOT shared. They contain per-profile usage state (message counts,
+// session index) in addition to transcripts. Transcripts are already shared via sessions/ symlink.
+export const CODEX_SHAREABLE_DBS: readonly string[] = [] as const;
 
 export class ConfigManager {
   private configDir: string;
