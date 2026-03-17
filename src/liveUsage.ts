@@ -14,7 +14,6 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { execSync, execFileSync } from 'child_process'
-import { refreshOAuthToken } from './oauth'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -138,21 +137,26 @@ async function readOAuthToken(configDir: string): Promise<OAuthEntry | null> {
     // Token expired — try to refresh silently using the stored refresh token
     if (token.refreshToken) {
       try {
-        const refreshed = await refreshOAuthToken({
-          accessToken: token.accessToken,
-          refreshToken: token.refreshToken,
-          expiresAt: token.expiresAt,
-          tokenType: 'Bearer',
-          provider: 'anthropic',
+        const params = new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+          refresh_token: token.refreshToken,
         })
-        // Write refreshed token back to Keychain, preserving any other fields in the payload
+        const res = await fetch('https://platform.claude.com/v1/oauth/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: params.toString(),
+          signal: AbortSignal.timeout(8000),
+        })
+        if (!res.ok) throw new Error('refresh failed')
+        const data = await res.json() as any
         const updatedPayload = {
           ...payload,
           claudeAiOauth: {
             ...(payload.claudeAiOauth as object),
-            accessToken: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken,
-            expiresAt: refreshed.expiresAt,
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token ?? token.refreshToken,
+            expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
           },
         }
         execFileSync('security', [

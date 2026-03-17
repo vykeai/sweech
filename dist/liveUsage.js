@@ -50,7 +50,6 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
-const oauth_1 = require("./oauth");
 // ── Cache ─────────────────────────────────────────────────────────────────────
 const CACHE_FILE = path.join(os.homedir(), '.sweech', 'rate-limit-cache.json');
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -118,21 +117,27 @@ async function readOAuthToken(configDir) {
         // Token expired — try to refresh silently using the stored refresh token
         if (token.refreshToken) {
             try {
-                const refreshed = await (0, oauth_1.refreshOAuthToken)({
-                    accessToken: token.accessToken,
-                    refreshToken: token.refreshToken,
-                    expiresAt: token.expiresAt,
-                    tokenType: 'Bearer',
-                    provider: 'anthropic',
+                const params = new URLSearchParams({
+                    grant_type: 'refresh_token',
+                    client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+                    refresh_token: token.refreshToken,
                 });
-                // Write refreshed token back to Keychain, preserving any other fields in the payload
+                const res = await fetch('https://platform.claude.com/v1/oauth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString(),
+                    signal: AbortSignal.timeout(8000),
+                });
+                if (!res.ok)
+                    throw new Error('refresh failed');
+                const data = await res.json();
                 const updatedPayload = {
                     ...payload,
                     claudeAiOauth: {
                         ...payload.claudeAiOauth,
-                        accessToken: refreshed.accessToken,
-                        refreshToken: refreshed.refreshToken,
-                        expiresAt: refreshed.expiresAt,
+                        accessToken: data.access_token,
+                        refreshToken: data.refresh_token ?? token.refreshToken,
+                        expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
                     },
                 };
                 (0, child_process_1.execFileSync)('security', [

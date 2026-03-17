@@ -268,8 +268,9 @@ function entrySmartScore(e) {
     if (!bar7d)
         return bar5h ? (100 - bar5h.pct) / 100 : 0;
     const remaining7d = (100 - bar7d.pct) / 100;
+    // No reset time = no expiry urgency; treat as if reset is in 7d (the full window)
     if (!bar7d.resetsAt)
-        return remaining7d;
+        return remaining7d / 7;
     const hoursLeft = Math.max(0.5, (bar7d.resetsAt - Date.now() / 1000) / 3600);
     return remaining7d / (hoursLeft / 24);
 }

@@ -53,9 +53,22 @@ describe('entrySmartScore', () => {
     expect(entrySmartScore(e)).toBe(-1);
   });
 
-  test('scores by 5h remaining when no 7d bar', () => {
+  test('no-reset-time account scores lower than account with imminent expiry', () => {
+    // Fresh account: 100% remaining, no reset time → score = 1.0/7 ≈ 0.143
+    const fresh = makeEntry({ name: 'fresh', bars: [bar5h(0), bar7d(0)] }); // 0% used, no resetsAt set by default... actually bar7d sets one
+    // Manually make a bar with no resetsAt
+    const freshNoReset = makeEntry({ name: 'fresh', bars: [
+      { label: 'All models 5h', pct: 0, resetLabel: '', resetsAt: undefined as any, windowMins: 300 },
+      { label: 'All models 7d', pct: 0, resetLabel: '', resetsAt: undefined as any, windowMins: 10080 },
+    ]});
+    // Account with 19% left, resets in 5h → score = 0.81/5h * 24 ≈ 3.89... wait no: remaining=0.19, hoursLeft=5
+    const expiring = makeEntry({ name: 'expiring', bars: [bar5h(0), bar7d(81, HOURS(5))] }); // 19% left
+    expect(entrySmartScore(freshNoReset)).toBeLessThan(entrySmartScore(expiring));
+  });
+
+  test('scores by 5h remaining when no 7d bar at all', () => {
     const e = makeEntry({ name: 'a', bars: [bar5h(40)] });
-    expect(entrySmartScore(e)).toBeCloseTo(0.6); // 60% remaining
+    expect(entrySmartScore(e)).toBeCloseTo(0.6); // 60% remaining (no weekly limit)
   });
 
   test('higher remaining7d → higher score', () => {

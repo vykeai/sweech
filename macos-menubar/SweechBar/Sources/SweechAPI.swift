@@ -83,8 +83,9 @@ struct SweechAccount: Codable, Identifiable {
         if liveStatus == "limit_reached" { return -1 }
         let remaining7d = 1.0 - (live?.utilization7d ?? 0)
         guard let reset7dAt = live?.reset7dAt else {
-            // No weekly data — score by 5h remaining only
-            return 1.0 - (live?.utilization5h ?? 0)
+            // No reset time = no expiry urgency; treat as if reset is in 7d (the full window)
+            let rem = live != nil ? (1.0 - (live?.utilization5h ?? 0)) : remaining7d
+            return rem / 7.0
         }
         let hoursUntilReset = max(0.5, Date(timeIntervalSince1970: reset7dAt).timeIntervalSince(Date()) / 3600)
         // remaining / days_until_reset — more quota + sooner expiry = higher score
