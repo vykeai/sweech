@@ -4,6 +4,12 @@
 
 Sweech is the ultimate CLI tool for managing multiple AI coding assistants. Use Claude, Codex, Qwen, DeepSeek, OpenRouter, and local LLMs - all simultaneously with different command names.
 
+Sweech is also the account control plane for the broader routing stack:
+
+- it owns named local accounts such as `claude-ted`, `claude-rai`, `codex-luke`
+- it tracks account health, rate-limit windows, and refresh state
+- it can recommend which account should be used first when a router such as `omnai` or `cloudy` asks
+
 [![Tests](https://img.shields.io/badge/tests-380%20passing-brightgreen.svg)](https://github.com/vykeai/sweech)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
@@ -205,6 +211,23 @@ Each profile gets its own isolated authentication:
 - `claude` → Your personal account
 - `claude-work` → Your work account
 - No need to log out/in to switch!
+
+### 🧠 Live account recommendation
+
+Sweech now exposes a recommendation endpoint for routers that need the best account right now:
+
+```text
+GET /fed/recommendation?cliType=claude
+GET /fed/recommendation?cliType=codex
+```
+
+Current recommendation policy:
+
+1. exclude accounts already rejected or at hard limit
+2. prefer quota that resets sooner so expiring capacity gets used first
+3. prefer accounts with higher healthy weekly/session utilization
+
+That makes Sweech a living control plane instead of a static alias list. `omnai` and `cloudy` can use this recommendation when you do not pin an explicit account.
 
 ### 🏠 Custom & Local Providers
 

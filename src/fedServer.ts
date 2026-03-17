@@ -17,6 +17,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { ConfigManager } from './config'
 import { getAccountInfo, getKnownAccounts } from './subscriptions'
+import { suggestBestAccount } from './accountSelector'
 
 const packageJsonPath = path.join(__dirname, '../package.json')
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { version: string }
@@ -167,6 +168,13 @@ export function createSweechFedServer(port: number): http.Server {
           })),
         },
       })
+      return
+    }
+
+    if (pathname === '/fed/recommendation') {
+      const cliType = url.searchParams.get('cliType') ?? undefined
+      const recommendation = await suggestBestAccount(cliType ?? undefined, getProfiles())
+      sendJson(res, 200, recommendation ?? null)
       return
     }
 

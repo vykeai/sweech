@@ -57,6 +57,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const config_1 = require("./config");
 const subscriptions_1 = require("./subscriptions");
+const accountSelector_1 = require("./accountSelector");
 const packageJsonPath = path.join(__dirname, '../package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 function sendJson(res, status, body) {
@@ -185,6 +186,12 @@ function createSweechFedServer(port) {
                     })),
                 },
             });
+            return;
+        }
+        if (pathname === '/fed/recommendation') {
+            const cliType = url.searchParams.get('cliType') ?? undefined;
+            const recommendation = await (0, accountSelector_1.suggestBestAccount)(cliType ?? undefined, getProfiles());
+            sendJson(res, 200, recommendation ?? null);
             return;
         }
         sendJson(res, 404, { error: 'Not found' });

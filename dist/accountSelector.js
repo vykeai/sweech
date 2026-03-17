@@ -44,12 +44,14 @@ exports.enumerateAccounts = enumerateAccounts;
 exports.getAvailableAccounts = getAvailableAccounts;
 exports.getAccountsByType = getAccountsByType;
 exports.getBestAccount = getBestAccount;
+exports.suggestBestAccount = suggestBestAccount;
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const child_process_1 = require("child_process");
 const config_1 = require("./config");
 const clis_1 = require("./clis");
+const subscriptions_1 = require("./subscriptions");
 // ─── Helpers ────────────────────────────────────────────────────────
 /** Check whether a CLI binary is reachable on the PATH. */
 function isInstalled(command) {
@@ -138,4 +140,61 @@ function getAccountsByType(cliType, profiles) {
 function getBestAccount(profiles) {
     const accounts = enumerateAccounts(profiles);
     return accounts[0];
+}
+function accountScore(info) {
+    const live = info.live;
+    const status = live?.status;
+    if (status === 'rejected' || status === 'limit_reached')
+        return Number.NEGATIVE_INFINITY;
+    const weeklyUtil = live?.utilization7d ?? 0;
+    const sessionUtil = live?.utilization5h ?? 0;
+    const resetHours = info.hoursUntilWeeklyReset ?? 24 * 365;
+    const resetUrgency = resetHours > 0 ? 1 / resetHours : 10;
+    const firstCapacityMinutes = info.minutesUntilFirstCapacity ?? 0;
+    const capacityPenalty = firstCapacityMinutes > 0 ? Math.min(firstCapacityMinutes / 600, 1) : 0;
+    return (weeklyUtil * 100) + (sessionUtil * 20) + (resetUrgency * 50) - (capacityPenalty * 10);
+}
+function accountReason(info) {
+    const pieces = [];
+    if (info.live?.status)
+        pieces.push(`status=${info.live.status}`);
+    if (info.hoursUntilWeeklyReset !== undefined)
+        pieces.push(`weekly-reset=${info.hoursUntilWeeklyReset.toFixed(1)}h`);
+    if (info.live?.utilization7d !== undefined)
+        pieces.push(`7d=${Math.round(info.live.utilization7d * 100)}%`);
+    if (info.live?.utilization5h !== undefined)
+        pieces.push(`5h=${Math.round(info.live.utilization5h * 100)}%`);
+    if (pieces.length === 0)
+        return 'fallback order';
+    return pieces.join(', ');
+}
+/**
+ * Recommend the best account to use right now.
+ *
+ * Priority:
+ * 1. Exclude accounts already rejected/at hard limit
+ * 2. Prefer quota that resets sooner so expiring capacity gets used first
+ * 3. Prefer accounts with higher weekly/session utilization if they are still healthy
+ */
+async function suggestBestAccount(cliType, profiles) {
+    const resolvedProfiles = profiles ?? new config_1.ConfigManager().getProfiles();
+    const known = (0, subscriptions_1.getKnownAccounts)(resolvedProfiles);
+    const infos = await (0, subscriptions_1.getAccountInfo)(known);
+    const available = getAvailableAccounts(resolvedProfiles);
+    const byCommand = new Map(available.map((entry) => [entry.commandName, entry]));
+    const ranked = infos
+        .filter((info) => !cliType || info.cliType === cliType)
+        .map((info) => {
+        const entry = byCommand.get(info.commandName);
+        if (!entry)
+            return null;
+        return {
+            account: entry,
+            score: accountScore(info),
+            reason: accountReason(info),
+        };
+    })
+        .filter((value) => Boolean(value))
+        .sort((a, b) => b.score - a.score);
+    return ranked[0];
 }
