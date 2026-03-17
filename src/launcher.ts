@@ -592,8 +592,11 @@ export async function runLauncher(): Promise<void> {
       });
   };
 
-  // Enter alternate screen + hide cursor — no more scroll jumping
-  process.stdout.write('\x1b[?1049h\x1b[?25l');
+  // Enter alternate screen + hide cursor.
+  // Enable SGR mouse reporting so scroll wheel arrives as \x1b[<64/65;...M sequences
+  // (which our PassThrough filter drops) rather than being converted to arrow keys
+  // by the terminal's alternate-scroll mode before we ever see them.
+  process.stdout.write('\x1b[?1049h\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?1007l');
   draw();
 
   return new Promise((resolve) => {
@@ -647,8 +650,8 @@ export async function runLauncher(): Promise<void> {
       filtered.removeListener('keypress', onKeypress);
       process.stdin.setRawMode(false);
       process.stdin.pause();
-      // Leave alternate screen + restore cursor
-      process.stdout.write('\x1b[?1049l\x1b[?25h');
+      // Leave alternate screen + restore cursor + disable mouse reporting
+      process.stdout.write('\x1b[?1000l\x1b[?1006l\x1b[?1007h\x1b[?1049l\x1b[?25h');
     };
 
     const runSubcommand = (cmd: string, arg?: string) => {
