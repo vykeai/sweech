@@ -597,16 +597,24 @@ export async function runLauncher(): Promise<void> {
       });
   };
 
-  // Preload cached usage data immediately (no network, just disk cache).
-  // This gives instant bars on launch from the last successful fetch.
+  // Phase 1: Show cached bars immediately (disk read, no network).
+  // Phase 2: Auto-refresh in background with fresh API data.
   getAccountInfo(
     accountList.map(a => ({ name: a.name, commandName: a.commandName })),
   ).then(accounts => {
-    if (usageLoad === 'idle') {
+    if (usageLoad !== 'loading') {
       patchEntries(accounts);
       state.usage = true;
       usageLoad = 'loaded';
       draw();
+      // Auto-refresh: silently fetch fresh data in background
+      getAccountInfo(
+        accountList.map(a => ({ name: a.name, commandName: a.commandName })),
+        { refresh: true },
+      ).then(fresh => {
+        patchEntries(fresh);
+        draw();
+      }).catch(() => {});
     }
   }).catch(() => {});
 
