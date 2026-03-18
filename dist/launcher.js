@@ -343,9 +343,10 @@ function render(entries, state, usageLoad = 'idle') {
         const authBadge = entry.authType ? ` [${entry.authType}]` : '';
         const sharedBadge = entry.sharedWith ? ` [shared ↔ ${entry.sharedWith}]` : '';
         const reauthBadge = entry.needsReauth ? ' ⚠ re-auth' : '';
-        const expiryStr = usageLoad === 'loaded' ? expiryAlert(entry) : '';
+        const hasData = usageLoad === 'loaded' || usageLoad === 'loading';
+        const expiryStr = hasData ? expiryAlert(entry) : '';
         // suppress "use first" text when expiry alert already communicates urgency (avoids double ⚡)
-        const useFirstBadge = usageLoad === 'loaded' && useFirstSet.has(entry) && !expiryStr
+        const useFirstBadge = hasData && useFirstSet.has(entry) && !expiryStr
             ? chalk_1.default.cyan(' ⚡ use first') : '';
         // Provider line
         const providerStr = entry.isDefault
@@ -362,10 +363,7 @@ function render(entries, state, usageLoad = 'idle') {
             lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(infoLine));
             if (state.usage) {
                 const BAR_WIDTH = 20;
-                if (usageLoad === 'loading') {
-                    lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim('fetching usage...'));
-                }
-                else if (usageLoad === 'error') {
+                if (usageLoad === 'error' && entry.bars.length === 0) {
                     lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.red('usage unavailable'));
                 }
                 else {
@@ -379,7 +377,7 @@ function render(entries, state, usageLoad = 'idle') {
                             lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
                         }
                         else if (entry.bars.length === 0 && b === 0) {
-                            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim('no live usage data'));
+                            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim(usageLoad === 'loading' ? 'loading...' : 'no live usage data'));
                         }
                         else {
                             lines.push(chalk_1.default.yellowBright('  ┃'));
@@ -395,10 +393,10 @@ function render(entries, state, usageLoad = 'idle') {
             lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(infoLine));
             if (state.usage) {
                 const BAR_WIDTH = 20;
-                if (usageLoad === 'loading') {
-                    lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim('fetching...'));
+                if (usageLoad === 'error' && entry.bars.length === 0) {
+                    // skip — no data, error state
                 }
-                else if (usageLoad !== 'error') {
+                else {
                     const maxBars = 4;
                     for (let b = 0; b < maxBars; b++) {
                         if (b < entry.bars.length) {
@@ -409,7 +407,7 @@ function render(entries, state, usageLoad = 'idle') {
                             lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
                         }
                         else if (entry.bars.length === 0 && b === 0) {
-                            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim('no live usage data'));
+                            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim(usageLoad === 'loading' ? 'loading...' : ''));
                         }
                         else {
                             lines.push(chalk_1.default.dim('  │'));
@@ -426,12 +424,12 @@ function render(entries, state, usageLoad = 'idle') {
     const yoloBox = state.yolo ? chalk_1.default.red('[✓]') : chalk_1.default.gray('[ ]');
     const resumeBox = state.resume ? chalk_1.default.green('[✓]') : chalk_1.default.gray('[ ]');
     const usageLabel = usageLoad === 'loading'
-        ? chalk_1.default.dim('loading...')
-        : usageLoad === 'loaded' && state.usage
+        ? chalk_1.default.yellow('refreshing...')
+        : state.usage
             ? chalk_1.default.yellow('usage')
             : chalk_1.default.dim('usage');
     lines.push(`  ${yoloBox} ${chalk_1.default.white('yolo')} ${chalk_1.default.dim('(y)')}    ${resumeBox} ${chalk_1.default.white('resume')} ${chalk_1.default.dim('(r)')}    ${usageLabel} ${chalk_1.default.dim('(u)')}`);
-    if (state.usage && usageLoad === 'loaded') {
+    if (state.usage && (usageLoad === 'loaded' || usageLoad === 'loading')) {
         lines.push('');
         lines.push(chalk_1.default.dim('  Bars show burn rate: ') + chalk_1.default.green('green') + chalk_1.default.dim(' = on pace  ') + chalk_1.default.yellow('yellow') + chalk_1.default.dim(' = ahead  ') + chalk_1.default.red('red') + chalk_1.default.dim(' = will hit limit'));
     }
@@ -496,7 +494,6 @@ async function runLauncher() {
         ...unsorted.filter(e => e.command === 'codex' && !e.isDefault),
     ];
     const state = loadLastState();
-    state.usage = false; // always start with usage hidden
     if (state.selectedIndex >= entries.length)
         state.selectedIndex = 0;
     if (!process.stdin.isTTY) {
@@ -523,52 +520,55 @@ async function runLauncher() {
         process.stdout.write('\x1b[H\x1b[J');
         render(getSorted(entries, state.sortMode, state.grouped), state, usageLoad);
     };
-    /** Fetch usage data async, patch entries in-place, redraw. */
-    const fetchUsage = () => {
-        if (usageLoad === 'loading' || usageLoad === 'loaded')
-            return;
-        usageLoad = 'loading';
-        draw();
-        (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })))
-            .then(accounts => {
-            const accountMap = new Map(accounts.map(a => [a.commandName, a]));
-            for (const entry of entries) {
-                const account = accountMap.get(entry.name);
-                if (!account)
-                    continue;
-                entry.lastActive = account.lastActive ? timeAgo(account.lastActive) : '';
-                entry.needsReauth = account.needsReauth || false;
-                entry.authType = resolveAuthType(account, entry.command);
-                entry.dataSizeMB = getDirSize(entry.dataDir);
-                // Rebuild bars
-                entry.bars = [];
-                const live = account.live;
-                if (live?.buckets) {
-                    for (const bucket of live.buckets) {
-                        let lbl = bucket.label;
-                        if (lbl.length > 14)
-                            lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
-                        if (bucket.session) {
-                            entry.bars.push({
-                                label: `${lbl} 5h`,
-                                pct: Math.round(bucket.session.utilization * 100),
-                                resetLabel: formatReset(bucket.session.resetsAt, 300),
-                                resetsAt: bucket.session.resetsAt,
-                                windowMins: 300,
-                            });
-                        }
-                        if (bucket.weekly) {
-                            entry.bars.push({
-                                label: `${lbl} 7d`,
-                                pct: Math.round(bucket.weekly.utilization * 100),
-                                resetLabel: formatReset(bucket.weekly.resetsAt, 10080),
-                                resetsAt: bucket.weekly.resetsAt,
-                                windowMins: 10080,
-                            });
-                        }
+    /** Patch entries in-place from account data. */
+    const patchEntries = (accounts) => {
+        const accountMap = new Map(accounts.map(a => [a.commandName, a]));
+        for (const entry of entries) {
+            const account = accountMap.get(entry.name);
+            if (!account)
+                continue;
+            entry.lastActive = account.lastActive ? timeAgo(account.lastActive) : '';
+            entry.needsReauth = account.needsReauth || false;
+            entry.authType = resolveAuthType(account, entry.command);
+            entry.dataSizeMB = getDirSize(entry.dataDir);
+            entry.bars = [];
+            const live = account.live;
+            if (live?.buckets) {
+                for (const bucket of live.buckets) {
+                    let lbl = bucket.label;
+                    if (lbl.length > 14)
+                        lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
+                    if (bucket.session) {
+                        entry.bars.push({
+                            label: `${lbl} 5h`,
+                            pct: Math.round(bucket.session.utilization * 100),
+                            resetLabel: formatReset(bucket.session.resetsAt, 300),
+                            resetsAt: bucket.session.resetsAt,
+                            windowMins: 300,
+                        });
+                    }
+                    if (bucket.weekly) {
+                        entry.bars.push({
+                            label: `${lbl} 7d`,
+                            pct: Math.round(bucket.weekly.utilization * 100),
+                            resetLabel: formatReset(bucket.weekly.resetsAt, 10080),
+                            resetsAt: bucket.weekly.resetsAt,
+                            windowMins: 10080,
+                        });
                     }
                 }
             }
+        }
+    };
+    /** Fetch live usage data, patch entries, redraw. refresh=true bypasses cache. */
+    const fetchUsage = (refresh = false) => {
+        if (usageLoad === 'loading')
+            return;
+        usageLoad = 'loading';
+        draw();
+        (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })), { refresh })
+            .then(accounts => {
+            patchEntries(accounts);
             usageLoad = 'loaded';
             draw();
         })
@@ -577,6 +577,16 @@ async function runLauncher() {
             draw();
         });
     };
+    // Preload cached usage data immediately (no network, just disk cache).
+    // This gives instant bars on launch from the last successful fetch.
+    (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName }))).then(accounts => {
+        if (usageLoad === 'idle') {
+            patchEntries(accounts);
+            state.usage = true;
+            usageLoad = 'loaded';
+            draw();
+        }
+    }).catch(() => { });
     // Enter alternate screen + hide cursor.
     // Enable SGR mouse reporting so scroll wheel arrives as \x1b[<64/65;...M sequences
     // (which our PassThrough filter drops) rather than being converted to arrow keys
@@ -606,17 +616,10 @@ async function runLauncher() {
                 draw();
             }
             else if (str === 'u' || str === 'U') {
-                if (usageLoad === 'idle') {
-                    // First press: start fetch and show
-                    state.usage = true;
-                    fetchUsage();
-                }
-                else if (usageLoad === 'loaded') {
-                    // Subsequent presses: toggle visibility
-                    state.usage = !state.usage;
-                    draw();
-                }
-                // If loading: ignore (already in progress)
+                // Force-refresh live usage data (bypass cache)
+                state.usage = true;
+                usageLoad = 'idle'; // reset so fetchUsage doesn't bail
+                fetchUsage(true);
             }
             else if (str === 's' || str === 'S') {
                 const modes = ['smart', 'status', 'manual'];

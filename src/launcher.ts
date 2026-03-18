@@ -331,9 +331,10 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
     const authBadge = entry.authType ? ` [${entry.authType}]` : '';
     const sharedBadge = entry.sharedWith ? ` [shared ↔ ${entry.sharedWith}]` : '';
     const reauthBadge = entry.needsReauth ? ' ⚠ re-auth' : '';
-    const expiryStr = usageLoad === 'loaded' ? expiryAlert(entry) : '';
+    const hasData = usageLoad === 'loaded' || usageLoad === 'loading';
+    const expiryStr = hasData ? expiryAlert(entry) : '';
     // suppress "use first" text when expiry alert already communicates urgency (avoids double ⚡)
-    const useFirstBadge = usageLoad === 'loaded' && useFirstSet.has(entry) && !expiryStr
+    const useFirstBadge = hasData && useFirstSet.has(entry) && !expiryStr
       ? chalk.cyan(' ⚡ use first') : '';
 
     // Provider line
@@ -353,9 +354,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
 
       if (state.usage) {
         const BAR_WIDTH = 20;
-        if (usageLoad === 'loading') {
-          lines.push(chalk.yellowBright('  ┃ ') + chalk.dim('fetching usage...'));
-        } else if (usageLoad === 'error') {
+        if (usageLoad === 'error' && entry.bars.length === 0) {
           lines.push(chalk.yellowBright('  ┃ ') + chalk.red('usage unavailable'));
         } else {
           const maxBars = 4;
@@ -367,7 +366,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
               const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
               lines.push(chalk.yellowBright('  ┃ ') + chalk.gray(`${label} `) + barStr + reset);
             } else if (entry.bars.length === 0 && b === 0) {
-              lines.push(chalk.yellowBright('  ┃ ') + chalk.dim('no live usage data'));
+              lines.push(chalk.yellowBright('  ┃ ') + chalk.dim(usageLoad === 'loading' ? 'loading...' : 'no live usage data'));
             } else {
               lines.push(chalk.yellowBright('  ┃'));
             }
@@ -383,9 +382,9 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
 
       if (state.usage) {
         const BAR_WIDTH = 20;
-        if (usageLoad === 'loading') {
-          lines.push(chalk.dim('  │ ') + chalk.dim('fetching...'));
-        } else if (usageLoad !== 'error') {
+        if (usageLoad === 'error' && entry.bars.length === 0) {
+          // skip — no data, error state
+        } else {
           const maxBars = 4;
           for (let b = 0; b < maxBars; b++) {
             if (b < entry.bars.length) {
@@ -395,7 +394,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
               const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
               lines.push(chalk.dim('  │ ') + chalk.gray(`${label} `) + barStr + reset);
             } else if (entry.bars.length === 0 && b === 0) {
-              lines.push(chalk.dim('  │ ') + chalk.dim('no live usage data'));
+              lines.push(chalk.dim('  │ ') + chalk.dim(usageLoad === 'loading' ? 'loading...' : ''));
             } else {
               lines.push(chalk.dim('  │'));
             }
@@ -413,13 +412,13 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   const yoloBox = state.yolo ? chalk.red('[✓]') : chalk.gray('[ ]');
   const resumeBox = state.resume ? chalk.green('[✓]') : chalk.gray('[ ]');
   const usageLabel = usageLoad === 'loading'
-    ? chalk.dim('loading...')
-    : usageLoad === 'loaded' && state.usage
+    ? chalk.yellow('refreshing...')
+    : state.usage
       ? chalk.yellow('usage')
       : chalk.dim('usage');
   lines.push(`  ${yoloBox} ${chalk.white('yolo')} ${chalk.dim('(y)')}    ${resumeBox} ${chalk.white('resume')} ${chalk.dim('(r)')}    ${usageLabel} ${chalk.dim('(u)')}`);
 
-  if (state.usage && usageLoad === 'loaded') {
+  if (state.usage && (usageLoad === 'loaded' || usageLoad === 'loading')) {
     lines.push('');
     lines.push(chalk.dim('  Bars show burn rate: ') + chalk.green('green') + chalk.dim(' = on pace  ') + chalk.yellow('yellow') + chalk.dim(' = ahead  ') + chalk.red('red') + chalk.dim(' = will hit limit'));
   }
@@ -509,7 +508,6 @@ export async function runLauncher(): Promise<void> {
   ];
 
   const state = loadLastState();
-  state.usage = false; // always start with usage hidden
   if (state.selectedIndex >= entries.length) state.selectedIndex = 0;
 
   if (!process.stdin.isTTY) {
@@ -539,50 +537,57 @@ export async function runLauncher(): Promise<void> {
     render(getSorted(entries, state.sortMode, state.grouped), state, usageLoad);
   };
 
-  /** Fetch usage data async, patch entries in-place, redraw. */
-  const fetchUsage = () => {
-    if (usageLoad === 'loading' || usageLoad === 'loaded') return;
+  /** Patch entries in-place from account data. */
+  const patchEntries = (accounts: AccountInfo[]) => {
+    const accountMap = new Map(accounts.map(a => [a.commandName, a]));
+    for (const entry of entries) {
+      const account = accountMap.get(entry.name);
+      if (!account) continue;
+      entry.lastActive = account.lastActive ? timeAgo(account.lastActive) : '';
+      entry.needsReauth = account.needsReauth || false;
+      entry.authType = resolveAuthType(account, entry.command);
+      entry.dataSizeMB = getDirSize(entry.dataDir);
+      entry.bars = [];
+      const live = account.live;
+      if (live?.buckets) {
+        for (const bucket of live.buckets) {
+          let lbl = bucket.label;
+          if (lbl.length > 14) lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
+          if (bucket.session) {
+            entry.bars.push({
+              label: `${lbl} 5h`,
+              pct: Math.round(bucket.session.utilization * 100),
+              resetLabel: formatReset(bucket.session.resetsAt, 300),
+              resetsAt: bucket.session.resetsAt,
+              windowMins: 300,
+            });
+          }
+          if (bucket.weekly) {
+            entry.bars.push({
+              label: `${lbl} 7d`,
+              pct: Math.round(bucket.weekly.utilization * 100),
+              resetLabel: formatReset(bucket.weekly.resetsAt, 10080),
+              resetsAt: bucket.weekly.resetsAt,
+              windowMins: 10080,
+            });
+          }
+        }
+      }
+    }
+  };
+
+  /** Fetch live usage data, patch entries, redraw. refresh=true bypasses cache. */
+  const fetchUsage = (refresh = false) => {
+    if (usageLoad === 'loading') return;
     usageLoad = 'loading';
     draw();
 
-    getAccountInfo(accountList.map(a => ({ name: a.name, commandName: a.commandName })))
+    getAccountInfo(
+      accountList.map(a => ({ name: a.name, commandName: a.commandName })),
+      { refresh },
+    )
       .then(accounts => {
-        const accountMap = new Map(accounts.map(a => [a.commandName, a]));
-        for (const entry of entries) {
-          const account = accountMap.get(entry.name);
-          if (!account) continue;
-          entry.lastActive = account.lastActive ? timeAgo(account.lastActive) : '';
-          entry.needsReauth = account.needsReauth || false;
-          entry.authType = resolveAuthType(account, entry.command);
-          entry.dataSizeMB = getDirSize(entry.dataDir);
-          // Rebuild bars
-          entry.bars = [];
-          const live = account.live;
-          if (live?.buckets) {
-            for (const bucket of live.buckets) {
-              let lbl = bucket.label;
-              if (lbl.length > 14) lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
-              if (bucket.session) {
-                entry.bars.push({
-                  label: `${lbl} 5h`,
-                  pct: Math.round(bucket.session.utilization * 100),
-                  resetLabel: formatReset(bucket.session.resetsAt, 300),
-                  resetsAt: bucket.session.resetsAt,
-                  windowMins: 300,
-                });
-              }
-              if (bucket.weekly) {
-                entry.bars.push({
-                  label: `${lbl} 7d`,
-                  pct: Math.round(bucket.weekly.utilization * 100),
-                  resetLabel: formatReset(bucket.weekly.resetsAt, 10080),
-                  resetsAt: bucket.weekly.resetsAt,
-                  windowMins: 10080,
-                });
-              }
-            }
-          }
-        }
+        patchEntries(accounts);
         usageLoad = 'loaded';
         draw();
       })
@@ -591,6 +596,19 @@ export async function runLauncher(): Promise<void> {
         draw();
       });
   };
+
+  // Preload cached usage data immediately (no network, just disk cache).
+  // This gives instant bars on launch from the last successful fetch.
+  getAccountInfo(
+    accountList.map(a => ({ name: a.name, commandName: a.commandName })),
+  ).then(accounts => {
+    if (usageLoad === 'idle') {
+      patchEntries(accounts);
+      state.usage = true;
+      usageLoad = 'loaded';
+      draw();
+    }
+  }).catch(() => {});
 
   // Enter alternate screen + hide cursor.
   // Enable SGR mouse reporting so scroll wheel arrives as \x1b[<64/65;...M sequences
@@ -615,16 +633,10 @@ export async function runLauncher(): Promise<void> {
       } else if (str === 'r' || str === 'R') {
         state.resume = !state.resume; draw();
       } else if (str === 'u' || str === 'U') {
-        if (usageLoad === 'idle') {
-          // First press: start fetch and show
-          state.usage = true;
-          fetchUsage();
-        } else if (usageLoad === 'loaded') {
-          // Subsequent presses: toggle visibility
-          state.usage = !state.usage;
-          draw();
-        }
-        // If loading: ignore (already in progress)
+        // Force-refresh live usage data (bypass cache)
+        state.usage = true;
+        usageLoad = 'idle'; // reset so fetchUsage doesn't bail
+        fetchUsage(true);
       } else if (str === 's' || str === 'S') {
         const modes: Array<'smart' | 'status' | 'manual'> = ['smart', 'status', 'manual'];
         const next = modes[(modes.indexOf(state.sortMode) + 1) % modes.length];
