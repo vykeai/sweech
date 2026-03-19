@@ -306,13 +306,16 @@ function expiryAlert(e) {
     return chalk_1.default.cyan(` ⚡ ${pct}% expiring in ${label}`);
 }
 function render(entries, state, usageLoad = 'idle') {
-    const lines = [];
+    const header = [];
+    const body = [];
+    const footer = [];
     const entryStartLines = [];
     const W = 56; // frame width
+    // ── Header (pinned top) ──
     const sortLabel = state.sortMode === 'status' ? 'status' : state.sortMode === 'manual' ? 'manual' : 'smart';
     const groupLabel = state.grouped ? 'on' : 'off';
-    lines.push(chalk_1.default.bold('🍭 Sweech') + chalk_1.default.dim(`  —  ↑↓ select  s:${sortLabel}  g:${groupLabel}  ⏎ launch`));
-    lines.push('');
+    header.push(chalk_1.default.bold('🍭 Sweech') + chalk_1.default.dim(`  —  ↑↓ select  s:${sortLabel}  g:${groupLabel}  ⏎ launch`));
+    header.push(chalk_1.default.dim('  ─────────────────────────────────────────────────'));
     // "use first" badge: only meaningful in smart sort (in other modes rank-0 is arbitrary)
     const useFirstSet = new Set();
     if (state.sortMode === 'smart') {
@@ -329,15 +332,15 @@ function render(entries, state, usageLoad = 'idle') {
                 useFirstSet.add(entries[0]);
         }
     }
-    // Group entries by CLI type, render with section headers
+    // ── Body (scrollable entries) ──
     let lastCliType = '';
     entries.forEach((entry, i) => {
-        entryStartLines.push(lines.length);
+        entryStartLines.push(body.length);
         const cliType = entry.command === 'codex' ? 'codex' : 'claude';
         if (state.grouped && cliType !== lastCliType) {
             const cliLabel = cliType === 'codex' ? 'Codex (OpenAI)' : 'Claude (Anthropic)';
-            lines.push(chalk_1.default.dim(`  ── ${cliLabel} ${'─'.repeat(Math.max(0, 42 - cliLabel.length))}`));
-            lines.push('');
+            body.push(chalk_1.default.dim(`  ── ${cliLabel} ${'─'.repeat(Math.max(0, 42 - cliLabel.length))}`));
+            body.push('');
             lastCliType = cliType;
         }
         const selected = i === state.selectedIndex;
@@ -347,7 +350,6 @@ function render(entries, state, usageLoad = 'idle') {
         const reauthBadge = entry.needsReauth ? ' ⚠ re-auth' : '';
         const hasData = usageLoad === 'loaded' || usageLoad === 'loading';
         const expiryStr = hasData ? expiryAlert(entry) : '';
-        // suppress "use first" text when expiry alert already communicates urgency (avoids double ⚡)
         const useFirstBadge = hasData && useFirstSet.has(entry) && !expiryStr
             ? chalk_1.default.cyan(' ⚡ use first') : '';
         // Provider line
@@ -359,14 +361,13 @@ function render(entries, state, usageLoad = 'idle') {
         const lastStr = entry.lastActive ? ` · last: ${entry.lastActive}` : '';
         const infoLine = `${providerStr}${modelStr} · ${dirStr} · ${entry.dataSizeMB}${lastStr}`;
         if (selected) {
-            // ── Framed selected entry ──
-            lines.push(chalk_1.default.yellowBright(`  ┏${'━'.repeat(W)}┓`));
-            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.yellowBright.bold(entry.name) + chalk_1.default.yellowBright(authBadge) + (sharedBadge ? chalk_1.default.magenta(sharedBadge) : '') + (reauthBadge ? chalk_1.default.red(reauthBadge) : '') + useFirstBadge + expiryStr);
-            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(infoLine));
+            body.push(chalk_1.default.yellowBright(`  ┏${'━'.repeat(W)}┓`));
+            body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.yellowBright.bold(entry.name) + chalk_1.default.yellowBright(authBadge) + (sharedBadge ? chalk_1.default.magenta(sharedBadge) : '') + (reauthBadge ? chalk_1.default.red(reauthBadge) : '') + useFirstBadge + expiryStr);
+            body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(infoLine));
             if (state.usage) {
                 const BAR_WIDTH = 20;
                 if (usageLoad === 'error' && entry.bars.length === 0) {
-                    lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.red('usage unavailable'));
+                    body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.red('usage unavailable'));
                 }
                 else {
                     const maxBars = 4;
@@ -376,27 +377,26 @@ function render(entries, state, usageLoad = 'idle') {
                             const label = ub.label.padEnd(14);
                             const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
                             const reset = ub.resetLabel ? chalk_1.default.dim(`  ${ub.resetLabel}`) : '';
-                            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
+                            body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
                         }
                         else if (entry.bars.length === 0 && b === 0) {
-                            lines.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim(usageLoad === 'loading' ? 'loading...' : 'no live usage data'));
+                            body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.dim(usageLoad === 'loading' ? 'loading...' : 'no live usage data'));
                         }
                         else {
-                            lines.push(chalk_1.default.yellowBright('  ┃'));
+                            body.push(chalk_1.default.yellowBright('  ┃'));
                         }
                     }
                 }
             }
-            lines.push(chalk_1.default.yellowBright(`  ┗${'━'.repeat(W)}┛`));
+            body.push(chalk_1.default.yellowBright(`  ┗${'━'.repeat(W)}┛`));
         }
         else {
-            // ── Unselected entry ──
-            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.bold.white(entry.name) + chalk_1.default.dim(authBadge) + (sharedBadge ? chalk_1.default.magenta(sharedBadge) : '') + (reauthBadge ? chalk_1.default.red(reauthBadge) : '') + useFirstBadge + expiryStr);
-            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(infoLine));
+            body.push(chalk_1.default.dim('  │ ') + chalk_1.default.bold.white(entry.name) + chalk_1.default.dim(authBadge) + (sharedBadge ? chalk_1.default.magenta(sharedBadge) : '') + (reauthBadge ? chalk_1.default.red(reauthBadge) : '') + useFirstBadge + expiryStr);
+            body.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(infoLine));
             if (state.usage) {
                 const BAR_WIDTH = 20;
                 if (usageLoad === 'error' && entry.bars.length === 0) {
-                    // skip — no data, error state
+                    // skip
                 }
                 else {
                     const maxBars = 4;
@@ -406,23 +406,22 @@ function render(entries, state, usageLoad = 'idle') {
                             const label = ub.label.padEnd(14);
                             const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
                             const reset = ub.resetLabel ? chalk_1.default.dim(`  ${ub.resetLabel}`) : '';
-                            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
+                            body.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(`${label} `) + barStr + reset);
                         }
                         else if (entry.bars.length === 0 && b === 0) {
-                            lines.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim(usageLoad === 'loading' ? 'loading...' : ''));
+                            body.push(chalk_1.default.dim('  │ ') + chalk_1.default.dim(usageLoad === 'loading' ? 'loading...' : ''));
                         }
                         else {
-                            lines.push(chalk_1.default.dim('  │'));
+                            body.push(chalk_1.default.dim('  │'));
                         }
                     }
                 }
             }
         }
-        lines.push('');
+        body.push('');
     });
-    // Separator + toggles
-    lines.push(chalk_1.default.dim('  ─────────────────────────────────────────────────'));
-    lines.push('');
+    // ── Footer (pinned bottom) ──
+    footer.push(chalk_1.default.dim('  ─────────────────────────────────────────────────'));
     const yoloBox = state.yolo ? chalk_1.default.red('[✓]') : chalk_1.default.gray('[ ]');
     const resumeBox = state.resume ? chalk_1.default.green('[✓]') : chalk_1.default.gray('[ ]');
     const usageLabel = usageLoad === 'loading'
@@ -430,23 +429,15 @@ function render(entries, state, usageLoad = 'idle') {
         : state.usage
             ? chalk_1.default.yellow('usage')
             : chalk_1.default.dim('usage');
-    lines.push(`  ${yoloBox} ${chalk_1.default.white('yolo')} ${chalk_1.default.dim('(y)')}    ${resumeBox} ${chalk_1.default.white('resume')} ${chalk_1.default.dim('(r)')}    ${usageLabel} ${chalk_1.default.dim('(u)')}`);
-    if (state.usage && (usageLoad === 'loaded' || usageLoad === 'loading')) {
-        lines.push('');
-        lines.push(chalk_1.default.dim('  Bars show burn rate: ') + chalk_1.default.green('green') + chalk_1.default.dim(' = on pace  ') + chalk_1.default.yellow('yellow') + chalk_1.default.dim(' = ahead  ') + chalk_1.default.red('red') + chalk_1.default.dim(' = will hit limit'));
-    }
-    lines.push('');
-    // Command preview
-    const entry = entries[state.selectedIndex];
-    const preview = buildCommandPreview(entry, state);
-    lines.push(chalk_1.default.white('  → ') + chalk_1.default.bold.cyan(preview));
-    lines.push('');
-    // Shortcuts
+    footer.push(`  ${yoloBox} ${chalk_1.default.white('yolo')} ${chalk_1.default.dim('(y)')}    ${resumeBox} ${chalk_1.default.white('resume')} ${chalk_1.default.dim('(r)')}    ${usageLabel} ${chalk_1.default.dim('(u)')}`);
+    const selEntry = entries[state.selectedIndex];
+    const preview = buildCommandPreview(selEntry, state);
+    footer.push(chalk_1.default.white('  → ') + chalk_1.default.bold.cyan(preview));
     const key = (k) => chalk_1.default.bold.white(k);
     const desc = (d) => chalk_1.default.dim(d);
-    lines.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
-    lines.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}`);
-    return { lines, entryStartLines };
+    footer.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
+    footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}`);
+    return { header, body, footer, entryStartLines };
 }
 /** Build a placeholder entry from static data only — no I/O, instant. */
 function buildStaticEntry(name, command, configDir, label, yoloFlag, resumeFlag, isDefault, opts) {
@@ -518,30 +509,29 @@ async function runLauncher() {
     let usageLoad = 'idle';
     let scrollOffset = 0;
     const draw = () => {
-        const { lines, entryStartLines } = render(getSorted(entries, state.sortMode, state.grouped), state, usageLoad);
+        const { header, body, footer, entryStartLines } = render(getSorted(entries, state.sortMode, state.grouped), state, usageLoad);
         const rows = process.stdout.rows || 40;
-        // Auto-scroll to keep selected entry visible
+        const bodyRows = Math.max(1, rows - header.length - footer.length);
+        // Auto-scroll body to keep selected entry visible
         if (entryStartLines.length > 0) {
             const selStart = entryStartLines[state.selectedIndex] ?? 0;
-            const selEnd = (entryStartLines[state.selectedIndex + 1] ?? lines.length) - 1;
-            // Scroll up if selected entry is above viewport
+            const selEnd = (entryStartLines[state.selectedIndex + 1] ?? body.length) - 1;
             if (selStart < scrollOffset)
                 scrollOffset = selStart;
-            // Scroll down if selected entry is below viewport
-            if (selEnd >= scrollOffset + rows)
-                scrollOffset = selEnd - rows + 1;
+            if (selEnd >= scrollOffset + bodyRows)
+                scrollOffset = selEnd - bodyRows + 1;
         }
-        scrollOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, lines.length - rows)));
-        const visible = lines.slice(scrollOffset, scrollOffset + rows);
-        // Show scroll indicators
+        scrollOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, body.length - bodyRows)));
+        const visibleBody = body.slice(scrollOffset, scrollOffset + bodyRows);
+        // Scroll indicators
         if (scrollOffset > 0) {
-            visible[0] = chalk_1.default.dim('  ▲ scroll up (↑)');
+            visibleBody[0] = chalk_1.default.dim('  ▲ more above');
         }
-        if (scrollOffset + rows < lines.length) {
-            visible[visible.length - 1] = chalk_1.default.dim('  ▼ scroll down (↓)');
+        if (scrollOffset + bodyRows < body.length) {
+            visibleBody[visibleBody.length - 1] = chalk_1.default.dim('  ▼ more below');
         }
         process.stdout.write('\x1b[H\x1b[J');
-        process.stdout.write(visible.join('\n'));
+        process.stdout.write([...header, ...visibleBody, ...footer].join('\n'));
     };
     /** Patch entries in-place from account data. */
     const patchEntries = (accounts) => {
