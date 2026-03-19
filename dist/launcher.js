@@ -307,6 +307,7 @@ function expiryAlert(e) {
 }
 function render(entries, state, usageLoad = 'idle') {
     const lines = [];
+    const entryStartLines = [];
     const W = 56; // frame width
     const sortLabel = state.sortMode === 'status' ? 'status' : state.sortMode === 'manual' ? 'manual' : 'smart';
     const groupLabel = state.grouped ? 'on' : 'off';
@@ -331,6 +332,7 @@ function render(entries, state, usageLoad = 'idle') {
     // Group entries by CLI type, render with section headers
     let lastCliType = '';
     entries.forEach((entry, i) => {
+        entryStartLines.push(lines.length);
         const cliType = entry.command === 'codex' ? 'codex' : 'claude';
         if (state.grouped && cliType !== lastCliType) {
             const cliLabel = cliType === 'codex' ? 'Codex (OpenAI)' : 'Claude (Anthropic)';
@@ -444,8 +446,7 @@ function render(entries, state, usageLoad = 'idle') {
     const desc = (d) => chalk_1.default.dim(d);
     lines.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
     lines.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}`);
-    process.stdout.write(lines.join('\n'));
-    return lines;
+    return { lines, entryStartLines };
 }
 /** Build a placeholder entry from static data only — no I/O, instant. */
 function buildStaticEntry(name, command, configDir, label, yoloFlag, resumeFlag, isDefault, opts) {
@@ -515,10 +516,32 @@ async function runLauncher() {
         filtered.write(buf);
     });
     let usageLoad = 'idle';
+    let scrollOffset = 0;
     const draw = () => {
-        // Move to top-left and clear to end of screen — works in alternate buffer
+        const { lines, entryStartLines } = render(getSorted(entries, state.sortMode, state.grouped), state, usageLoad);
+        const rows = process.stdout.rows || 40;
+        // Auto-scroll to keep selected entry visible
+        if (entryStartLines.length > 0) {
+            const selStart = entryStartLines[state.selectedIndex] ?? 0;
+            const selEnd = (entryStartLines[state.selectedIndex + 1] ?? lines.length) - 1;
+            // Scroll up if selected entry is above viewport
+            if (selStart < scrollOffset)
+                scrollOffset = selStart;
+            // Scroll down if selected entry is below viewport
+            if (selEnd >= scrollOffset + rows)
+                scrollOffset = selEnd - rows + 1;
+        }
+        scrollOffset = Math.max(0, Math.min(scrollOffset, Math.max(0, lines.length - rows)));
+        const visible = lines.slice(scrollOffset, scrollOffset + rows);
+        // Show scroll indicators
+        if (scrollOffset > 0) {
+            visible[0] = chalk_1.default.dim('  ▲ scroll up (↑)');
+        }
+        if (scrollOffset + rows < lines.length) {
+            visible[visible.length - 1] = chalk_1.default.dim('  ▼ scroll down (↓)');
+        }
         process.stdout.write('\x1b[H\x1b[J');
-        render(getSorted(entries, state.sortMode, state.grouped), state, usageLoad);
+        process.stdout.write(visible.join('\n'));
     };
     /** Patch entries in-place from account data. */
     const patchEntries = (accounts) => {
