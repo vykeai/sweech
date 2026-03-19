@@ -703,6 +703,15 @@ export async function runLauncher(): Promise<void> {
 
       const { spawnSync } = require('child_process');
       const result = spawnSync(entry.command, launchArgs, { env, stdio: 'inherit' });
+
+      // If resume failed (no conversation to continue), fall back to a fresh session
+      if (result.status !== 0 && state.resume) {
+        const freshArgs = launchArgs.filter(a => !entry.resumeFlag.split(' ').includes(a));
+        console.log(chalk.dim('No conversation to resume — starting fresh session\n'));
+        const retry = spawnSync(entry.command, freshArgs, { env, stdio: 'inherit' });
+        process.exit(retry.status || 0);
+      }
+
       process.exit(result.status || 0);
     };
 
