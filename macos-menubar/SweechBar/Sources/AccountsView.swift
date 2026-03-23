@@ -705,19 +705,19 @@ struct AccountCard: View {
             } else {
                 Text("All models")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Sweech.Color.glow)
+                    .foregroundStyle(Sweech.Color.textPrimary.opacity(0.7))
 
                 // Column labels — USED / LEFT — aligned above the % columns
                 HStack(spacing: 6) {
                     Color.clear.frame(width: 34, height: 1)
                     Text("USED")
                         .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.4))
+                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
                         .frame(width: 46, alignment: .trailing)
                     Color.clear.frame(height: 1) // flexible bar spacer
                     Text("LEFT")
                         .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.4))
+                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
                         .frame(width: 46, alignment: .leading)
                     Color.clear.frame(width: 76, height: 1)
                 }
@@ -738,7 +738,7 @@ struct AccountCard: View {
                     resetsAt: account.live?.reset5hAt,
                     capacityNote: account.minutesUntilFirstCapacity.map { $0 > 0 ? "capacity in \($0)m" : nil } ?? nil
                 )
-                .opacity(0.7)
+                .opacity(0.85)
 
                 if account.live?.isStale == true {
                     HStack(spacing: 3) {
@@ -1017,7 +1017,7 @@ struct BucketCard: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(bucket.label)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Sweech.Color.glow)
+                .foregroundStyle(Sweech.Color.textPrimary.opacity(0.7))
                 .help("Usage bucket: \(bucket.label) — separate rate limit pool for this model tier")
 
             if let weekly = bucket.weekly {
@@ -1028,7 +1028,7 @@ struct BucketCard: View {
             if let session = bucket.session {
                 UsageRow(label: "5h", messages: 0, utilization: session.utilization,
                          resetIn: resetRelative(session.resetsAt), resetsAt: session.resetsAt, capacityNote: nil)
-                    .opacity(0.7)
+                    .opacity(0.85)
             }
         }
         .padding(8)
