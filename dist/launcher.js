@@ -431,7 +431,7 @@ function render(entries, state, usageLoad = 'idle') {
     const key = (k) => chalk_1.default.bold.white(k);
     const desc = (d) => chalk_1.default.dim(d);
     footer.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
-    footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}`);
+    footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}`);
     return { header, body, footer, entryStartLines };
 }
 /** Build a placeholder entry from static data only — no I/O, instant. */
@@ -542,9 +542,12 @@ async function runLauncher() {
             entry.bars = [];
             const live = account.live;
             if (live?.buckets) {
-                // Sort: "All models" first, specific model buckets after
+                // Sort: "All models" first; filter extras unless toggled on
                 const sortedBuckets = [...live.buckets].sort((a, b) => (a.label === 'All models' ? 0 : 1) - (b.label === 'All models' ? 0 : 1));
-                for (const bucket of sortedBuckets) {
+                const visibleBuckets = state.extraBuckets
+                    ? sortedBuckets
+                    : sortedBuckets.filter(b => b.label === 'All models' || live.buckets.length === 1);
+                for (const bucket of visibleBuckets) {
                     let lbl = bucket.label;
                     if (lbl.length > 14)
                         lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
@@ -649,6 +652,14 @@ async function runLauncher() {
             else if (str === 'g' || str === 'G') {
                 state.grouped = !state.grouped;
                 state.selectedIndex = 0;
+                draw();
+            }
+            else if (str === 'm' || str === 'M') {
+                state.extraBuckets = !state.extraBuckets;
+                // Re-patch bars with new filter
+                if (usageLoad === 'loaded') {
+                    (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName }))).then(accounts => { patchEntries(accounts); draw(); }).catch(() => { });
+                }
                 draw();
             }
             else if (str === 'a' || str === 'A') {

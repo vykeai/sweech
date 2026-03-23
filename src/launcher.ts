@@ -47,6 +47,7 @@ interface LaunchState {
   usage: boolean;
   sortMode: 'smart' | 'status' | 'manual';
   grouped: boolean;
+  extraBuckets?: boolean;
 }
 
 type UsageLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -436,7 +437,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   const key = (k: string) => chalk.bold.white(k);
   const desc = (d: string) => chalk.dim(d);
   footer.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
-  footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}`);
+  footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}`);
 
   return { header, body, footer, entryStartLines };
 }
@@ -575,11 +576,14 @@ export async function runLauncher(): Promise<void> {
       entry.bars = [];
       const live = account.live;
       if (live?.buckets) {
-        // Sort: "All models" first, specific model buckets after
+        // Sort: "All models" first; filter extras unless toggled on
         const sortedBuckets = [...live.buckets].sort((a, b) =>
           (a.label === 'All models' ? 0 : 1) - (b.label === 'All models' ? 0 : 1)
         );
-        for (const bucket of sortedBuckets) {
+        const visibleBuckets = state.extraBuckets
+          ? sortedBuckets
+          : sortedBuckets.filter(b => b.label === 'All models' || live.buckets.length === 1);
+        for (const bucket of visibleBuckets) {
           let lbl = bucket.label;
           if (lbl.length > 14) lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
           // Weekly first (more important), then 5h
@@ -686,6 +690,15 @@ export async function runLauncher(): Promise<void> {
       } else if (str === 'g' || str === 'G') {
         state.grouped = !state.grouped;
         state.selectedIndex = 0;
+        draw();
+      } else if (str === 'm' || str === 'M') {
+        state.extraBuckets = !state.extraBuckets;
+        // Re-patch bars with new filter
+        if (usageLoad === 'loaded') {
+          getAccountInfo(
+            accountList.map(a => ({ name: a.name, commandName: a.commandName })),
+          ).then(accounts => { patchEntries(accounts); draw(); }).catch(() => {});
+        }
         draw();
       } else if (str === 'a' || str === 'A') {
         cleanup(); runSubcommand('add');

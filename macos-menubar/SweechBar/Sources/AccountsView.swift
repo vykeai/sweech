@@ -613,6 +613,7 @@ struct AccountCard: View {
     var onMoveDown: (() -> Void)? = nil
 
     @State private var copied = false
+    @AppStorage("sweechShowExtraBuckets") private var showExtraBuckets: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -697,7 +698,8 @@ struct AccountCard: View {
             // Usage rows — "All models" first, specific model buckets after
             if account.buckets.count > 1 {
                 let sorted = account.buckets.sorted { a, _ in a.label == "All models" }
-                ForEach(Array(sorted.enumerated()), id: \.offset) { _, bucket in
+                let visible = showExtraBuckets ? sorted : sorted.filter { $0.label == "All models" }
+                ForEach(Array(visible.enumerated()), id: \.offset) { _, bucket in
                     BucketCard(bucket: bucket)
                 }
             } else {
@@ -1042,6 +1044,7 @@ struct SettingsView: View {
     @AppStorage("sweechRefreshInterval") private var refreshInterval: Int  = 30
     @AppStorage("sweechNotifications")   private var notificationsEnabled: Bool = true
     @AppStorage("sweechCompact")         private var compact: Bool     = false
+    @AppStorage("sweechShowExtraBuckets") private var showExtraBuckets: Bool = false
 
     var body: some View {
         ScrollView {
@@ -1103,6 +1106,22 @@ struct SettingsView: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Sweech.Color.textPrimary)
                             Text("Show Claude and Codex accounts in separate columns.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Sweech.Color.textMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(Sweech.Color.core)
+                }
+
+                // Usage detail
+                settingsSection(title: "USAGE") {
+                    Toggle(isOn: $showExtraBuckets) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Show additional model usage")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                            Text("Show per-model rate limits (e.g. Codex Spark) in addition to the aggregate 'All models' bucket.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Sweech.Color.textMuted)
                         }
