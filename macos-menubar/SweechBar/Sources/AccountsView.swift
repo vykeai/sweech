@@ -703,6 +703,10 @@ struct AccountCard: View {
                     BucketCard(bucket: bucket)
                 }
             } else {
+                Text("All models")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Sweech.Color.glow)
+
                 // Column labels — USED / LEFT — aligned above the % columns
                 HStack(spacing: 6) {
                     Color.clear.frame(width: 34, height: 1)
