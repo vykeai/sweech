@@ -694,9 +694,10 @@ struct AccountCard: View {
                 .help("OAuth token expired. Run: sweech auth \(account.commandName)")
             }
 
-            // Usage rows
+            // Usage rows — "All models" first, specific model buckets after
             if account.buckets.count > 1 {
-                ForEach(Array(account.buckets.enumerated()), id: \.offset) { _, bucket in
+                let sorted = account.buckets.sorted { a, _ in a.label == "All models" }
+                ForEach(Array(sorted.enumerated()), id: \.offset) { _, bucket in
                     BucketCard(bucket: bucket)
                 }
             } else {

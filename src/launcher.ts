@@ -575,7 +575,11 @@ export async function runLauncher(): Promise<void> {
       entry.bars = [];
       const live = account.live;
       if (live?.buckets) {
-        for (const bucket of live.buckets) {
+        // Sort: "All models" first, specific model buckets after
+        const sortedBuckets = [...live.buckets].sort((a, b) =>
+          (a.label === 'All models' ? 0 : 1) - (b.label === 'All models' ? 0 : 1)
+        );
+        for (const bucket of sortedBuckets) {
           let lbl = bucket.label;
           if (lbl.length > 14) lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
           // Weekly first (more important), then 5h
