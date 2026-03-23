@@ -18,6 +18,7 @@ interface UsageBar {
   resetLabel: string;    // e.g. "resets in 3h 17m"
   resetsAt?: number;     // epoch seconds
   windowMins: number;    // 300 (5h) or 10080 (7d)
+  bucketGroup?: string;  // bucket label — used to render separators between groups
 }
 
 export interface LaunchEntry {
@@ -309,9 +310,16 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   const W = 56; // frame width
 
   // ── Header (pinned top) ──
-  const sortLabel = state.sortMode === 'status' ? 'status' : state.sortMode === 'manual' ? 'manual' : 'smart';
+  const sortLabel = state.sortMode === 'smart'
+    ? chalk.cyan.bold('⚡smart')
+    : state.sortMode === 'status'
+      ? chalk.dim('status')
+      : chalk.dim('manual');
   const groupLabel = state.grouped ? 'on' : 'off';
-  header.push(chalk.bold('🍭 Sweech') + chalk.dim(`  —  ↑↓ select  s:${sortLabel}  g:${groupLabel}  ⏎ launch`));
+  header.push(chalk.bold('🍭 Sweech') + chalk.dim('  —  ↑↓ select  ') + `s:${sortLabel}` + chalk.dim(`  g:${groupLabel}  ⏎ launch`));
+  if (state.sortMode === 'smart') {
+    header.push(chalk.dim('  prioritises expiring weekly usage — don\'t waste what resets soonest'));
+  }
   header.push(chalk.dim('  ─────────────────────────────────────────────────'));
 
   // "use first" badge: only meaningful in smart sort (in other modes rank-0 is arbitrary)
@@ -358,31 +366,43 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
     const lastStr = entry.lastActive ? ` · last: ${entry.lastActive}` : '';
     const infoLine = `${providerStr}${modelStr} · ${dirStr} · ${entry.dataSizeMB}${lastStr}`;
 
+    /** Render usage bars for an entry with weekly emphasis and bucket separators. */
+    const renderBars = (entry: LaunchEntry, prefix: string) => {
+      const BAR_WIDTH = 20;
+      if (usageLoad === 'error' && entry.bars.length === 0) {
+        body.push(prefix + chalk.red('usage unavailable'));
+        return;
+      }
+      if (entry.bars.length === 0) {
+        body.push(prefix + chalk.dim(usageLoad === 'loading' ? 'loading...' : 'no live usage data'));
+        return;
+      }
+      let lastGroup = '';
+      for (const ub of entry.bars) {
+        // Separator between bucket groups (e.g. "All models" vs "GPT-5.3-Codex-Spark")
+        if (ub.bucketGroup && lastGroup && ub.bucketGroup !== lastGroup) {
+          body.push(prefix + chalk.dim('─'.repeat(40)));
+        }
+        lastGroup = ub.bucketGroup || '';
+        const isWeekly = ub.windowMins === 10080;
+        const label = ub.label.padEnd(14);
+        const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
+        const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
+        if (isWeekly) {
+          body.push(prefix + chalk.white(`${label} `) + barStr + reset);
+        } else {
+          body.push(prefix + chalk.gray(`${label} `) + barStr + reset);
+        }
+      }
+    };
+
     if (selected) {
       body.push(chalk.yellowBright(`  ┏${'━'.repeat(W)}┓`));
       body.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
       body.push(chalk.yellowBright('  ┃ ') + chalk.gray(infoLine));
 
       if (state.usage) {
-        const BAR_WIDTH = 20;
-        if (usageLoad === 'error' && entry.bars.length === 0) {
-          body.push(chalk.yellowBright('  ┃ ') + chalk.red('usage unavailable'));
-        } else {
-          const maxBars = 4;
-          for (let b = 0; b < maxBars; b++) {
-            if (b < entry.bars.length) {
-              const ub = entry.bars[b];
-              const label = ub.label.padEnd(14);
-              const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
-              const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
-              body.push(chalk.yellowBright('  ┃ ') + chalk.gray(`${label} `) + barStr + reset);
-            } else if (entry.bars.length === 0 && b === 0) {
-              body.push(chalk.yellowBright('  ┃ ') + chalk.dim(usageLoad === 'loading' ? 'loading...' : 'no live usage data'));
-            } else {
-              body.push(chalk.yellowBright('  ┃'));
-            }
-          }
-        }
+        renderBars(entry, chalk.yellowBright('  ┃ '));
       }
 
       body.push(chalk.yellowBright(`  ┗${'━'.repeat(W)}┛`));
@@ -391,25 +411,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
       body.push(chalk.dim('  │ ') + chalk.gray(infoLine));
 
       if (state.usage) {
-        const BAR_WIDTH = 20;
-        if (usageLoad === 'error' && entry.bars.length === 0) {
-          // skip
-        } else {
-          const maxBars = 4;
-          for (let b = 0; b < maxBars; b++) {
-            if (b < entry.bars.length) {
-              const ub = entry.bars[b];
-              const label = ub.label.padEnd(14);
-              const barStr = renderBar(ub.pct, BAR_WIDTH, ub);
-              const reset = ub.resetLabel ? chalk.dim(`  ${ub.resetLabel}`) : '';
-              body.push(chalk.dim('  │ ') + chalk.gray(`${label} `) + barStr + reset);
-            } else if (entry.bars.length === 0 && b === 0) {
-              body.push(chalk.dim('  │ ') + chalk.dim(usageLoad === 'loading' ? 'loading...' : ''));
-            } else {
-              body.push(chalk.dim('  │'));
-            }
-          }
-        }
+        renderBars(entry, chalk.dim('  │ '));
       }
     }
     body.push('');
@@ -576,15 +578,7 @@ export async function runLauncher(): Promise<void> {
         for (const bucket of live.buckets) {
           let lbl = bucket.label;
           if (lbl.length > 14) lbl = lbl.replace('GPT-5.3-Codex-', '').replace('GPT-', '');
-          if (bucket.session) {
-            entry.bars.push({
-              label: `${lbl} 5h`,
-              pct: Math.round(bucket.session.utilization * 100),
-              resetLabel: formatReset(bucket.session.resetsAt, 300),
-              resetsAt: bucket.session.resetsAt,
-              windowMins: 300,
-            });
-          }
+          // Weekly first (more important), then 5h
           if (bucket.weekly) {
             entry.bars.push({
               label: `${lbl} 7d`,
@@ -592,6 +586,17 @@ export async function runLauncher(): Promise<void> {
               resetLabel: formatReset(bucket.weekly.resetsAt, 10080),
               resetsAt: bucket.weekly.resetsAt,
               windowMins: 10080,
+              bucketGroup: lbl,
+            });
+          }
+          if (bucket.session) {
+            entry.bars.push({
+              label: `${lbl} 5h`,
+              pct: Math.round(bucket.session.utilization * 100),
+              resetLabel: formatReset(bucket.session.resetsAt, 300),
+              resetsAt: bucket.session.resetsAt,
+              windowMins: 300,
+              bucketGroup: lbl,
             });
           }
         }

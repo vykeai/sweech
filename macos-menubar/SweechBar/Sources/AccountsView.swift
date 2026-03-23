@@ -715,14 +715,6 @@ struct AccountCard: View {
                     Color.clear.frame(width: 76, height: 1)
                 }
                 UsageRow(
-                    label: "5h",
-                    messages: account.messages5hDisplay,
-                    utilization: account.utilization5h,
-                    resetIn: account.reset5hRelative,
-                    resetsAt: account.live?.reset5hAt,
-                    capacityNote: account.minutesUntilFirstCapacity.map { $0 > 0 ? "capacity in \($0)m" : nil } ?? nil
-                )
-                UsageRow(
                     label: "week",
                     messages: account.messages7dDisplay,
                     utilization: account.utilization7d,
@@ -730,6 +722,16 @@ struct AccountCard: View {
                     resetsAt: account.live?.reset7dAt,
                     capacityNote: nil
                 )
+                .fontWeight(.medium)
+                UsageRow(
+                    label: "5h",
+                    messages: account.messages5hDisplay,
+                    utilization: account.utilization5h,
+                    resetIn: account.reset5hRelative,
+                    resetsAt: account.live?.reset5hAt,
+                    capacityNote: account.minutesUntilFirstCapacity.map { $0 > 0 ? "capacity in \($0)m" : nil } ?? nil
+                )
+                .opacity(0.7)
 
                 if account.live?.isStale == true {
                     HStack(spacing: 3) {
@@ -1011,13 +1013,15 @@ struct BucketCard: View {
                 .foregroundStyle(Sweech.Color.glow)
                 .help("Usage bucket: \(bucket.label) — separate rate limit pool for this model tier")
 
-            if let session = bucket.session {
-                UsageRow(label: "5h", messages: 0, utilization: session.utilization,
-                         resetIn: resetRelative(session.resetsAt), resetsAt: session.resetsAt, capacityNote: nil)
-            }
             if let weekly = bucket.weekly {
                 UsageRow(label: "week", messages: 0, utilization: weekly.utilization,
                          resetIn: resetRelative(weekly.resetsAt), resetsAt: weekly.resetsAt, capacityNote: nil)
+                    .fontWeight(.medium)
+            }
+            if let session = bucket.session {
+                UsageRow(label: "5h", messages: 0, utilization: session.utilization,
+                         resetIn: resetRelative(session.resetsAt), resetsAt: session.resetsAt, capacityNote: nil)
+                    .opacity(0.7)
             }
         }
         .padding(8)
