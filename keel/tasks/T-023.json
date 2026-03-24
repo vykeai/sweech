@@ -1,0 +1,31 @@
+{
+  "id": "T-023",
+  "title": "SweechBar animated card transitions",
+  "wave": "wave-3",
+  "space": "space-menubar",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "Cards appear/disappear without animation when sort changes. Add smooth transitions.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Cards cross-fade when sort mode changes",
+    "New cards slide in from edge",
+    "Removed cards fade out",
+    "Animation duration matches Sweech.Animation.medium"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "T-028",
+  "title": "Auto-update mechanism",
+  "wave": "wave-4",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "sweech update exists but needs polish. Add version check on startup, changelog display.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Check for new version once per day on startup",
+    "Show one-line update notice if available",
+    "sweech update shows changelog diff",
+    "SweechBar shows update badge"
+  ]
+}

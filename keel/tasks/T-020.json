@@ -1,0 +1,30 @@
+{
+  "id": "T-020",
+  "title": "SweechBar click card to launch with profile selection",
+  "wave": "wave-3",
+  "space": "space-menubar",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "Clicking the launch button should offer options: launch fresh, continue last, launch with yolo mode.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Context menu on launch button: Fresh / Continue / Yolo",
+    "Each option opens Terminal with correct flags",
+    "Keyboard shortcut: Enter launches top recommended account"
+  ]
+}

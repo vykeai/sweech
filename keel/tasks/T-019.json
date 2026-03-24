@@ -1,0 +1,31 @@
+{
+  "id": "T-019",
+  "title": "SweechBar global hotkey to toggle popover",
+  "wave": "wave-3",
+  "space": "space-menubar",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "Register a global keyboard shortcut (e.g. Cmd+Shift+S) to toggle the menu bar popover from anywhere.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Configurable hotkey in settings",
+    "Toggle opens/closes popover",
+    "Works from any app",
+    "Default: Cmd+Shift+S"
+  ]
+}

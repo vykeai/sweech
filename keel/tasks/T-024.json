@@ -1,0 +1,31 @@
+{
+  "id": "T-024",
+  "title": "SweechBar mini-mode",
+  "wave": "wave-3",
+  "space": "space-menubar",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "A compact popover mode showing only the top 2 recommended accounts with minimal detail.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Toggle between full and mini mode in settings",
+    "Mini shows top 2 accounts with usage bars only",
+    "Click to expand to full mode",
+    "Remembers preference"
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "T-031",
+  "title": "README overhaul",
+  "wave": "wave-4",
+  "space": "space-infra",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "Update README with current features, screenshots, installation options.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "GIF/screenshot of launcher TUI",
+    "Screenshot of SweechBar",
+    "Install instructions (npm, Homebrew, GitHub)",
+    "Feature comparison table",
+    "Contributing guide"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "T-015",
+  "title": "sweech compare command",
+  "wave": "wave-2",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "Side-by-side comparison of two profiles using charts.usageChart().",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "sweech compare <a> <b> shows usage bars side by side",
+    "Shows plan differences",
+    "Shows usage velocity differences"
+  ]
+}

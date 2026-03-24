@@ -1,0 +1,31 @@
+{
+  "id": "T-009",
+  "title": "Doctor command: credential freshness check",
+  "wave": "wave-1",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "Doctor should verify OAuth tokens are not expired and API keys are valid.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Check OAuth token expiry in Keychain",
+    "Warn if token expires within 24h",
+    "Test API connectivity with a lightweight call",
+    "Report which profiles need re-auth"
+  ]
+}

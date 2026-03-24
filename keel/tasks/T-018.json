@@ -1,0 +1,30 @@
+{
+  "id": "T-018",
+  "title": "Add audit log API endpoint and alerting",
+  "wave": "wave-2",
+  "space": "space-api",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "Audit log exists as jsonl file but not exposed via API or alerts.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "GET /fed/audit returns recent audit entries",
+    "Filter by action type and date range",
+    "Optional webhook on suspicious activity"
+  ]
+}

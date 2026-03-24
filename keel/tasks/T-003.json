@@ -1,0 +1,30 @@
+{
+  "id": "T-003",
+  "title": "Fix silent error swallowing in token refresh",
+  "wave": "wave-1",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "Replace .catch(() => {}) with proper error logging in tokenRefresh.ts and launcher.ts background fetches.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "All .catch(() => {}) replaced with logged errors",
+    "Errors written to stderr",
+    "No user-visible output change on success path"
+  ]
+}

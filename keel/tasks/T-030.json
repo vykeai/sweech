@@ -1,0 +1,31 @@
+{
+  "id": "T-030",
+  "title": "CI pipeline (GitHub Actions)",
+  "wave": "wave-4",
+  "space": "space-infra",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "Set up CI for automated testing on every push and PR.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Runs npm test on push to main and develop",
+    "Runs swift build for SweechBar",
+    "Fails PR if tests fail",
+    "Caches node_modules and .build"
+  ]
+}

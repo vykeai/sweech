@@ -1,0 +1,30 @@
+{
+  "id": "T-016",
+  "title": "Federation peer discovery and sync",
+  "wave": "wave-2",
+  "space": "space-api",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "Federation peers declared but peering not functional. Implement peer add/remove/sync.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "sweech peers add connects to remote sweech serve",
+    "Peer status shown in sweech serve dashboard",
+    "Cross-machine profile recommendations via federation"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "id": "T-017",
+  "title": "Implement profile templates",
+  "wave": "wave-2",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "templates.ts exists but no templates shipped. Create default templates for common setups.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Built-in templates: claude-pro, claude-max, codex-pro, multi-account",
+    "sweech add --template <name> uses template",
+    "sweech templates list shows available templates",
+    "Custom templates saved to ~/.sweech/templates/"
+  ]
+}

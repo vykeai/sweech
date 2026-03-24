@@ -1,0 +1,31 @@
+{
+  "id": "T-025",
+  "title": "SweechBar notification center widget",
+  "wave": "wave-3",
+  "space": "space-menubar",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "macOS widget showing current usage status in Notification Center.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Small widget: top account + usage bar",
+    "Medium widget: top 3 accounts",
+    "Updates on same interval as menu bar",
+    "WidgetKit implementation"
+  ]
+}

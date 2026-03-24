@@ -1,0 +1,31 @@
+{
+  "id": "T-014",
+  "title": "sweech usage sparkline history",
+  "wave": "wave-2",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "charts.ts has sparkline() but no historical data. Collect hourly usage snapshots for trend display.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Store hourly utilization snapshots in ~/.sweech/history.json",
+    "sweech usage --history shows 24h sparkline per profile",
+    "Sparkline renders in launcher TUI with m key",
+    "Auto-prune history older than 7 days"
+  ]
+}

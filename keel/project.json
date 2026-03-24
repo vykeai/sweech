@@ -1,0 +1,16 @@
+{
+  "slug": "sweech",
+  "name": "sweech",
+  "status": "active",
+  "platforms": ["cli", "macos-menubar"],
+  "integrations": {
+    "cloudy": true,
+    "sentinel": true,
+    "runecode": true
+  },
+  "createdAt": "2026-03-24T10:00:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "color": "#A78BFA",
+  "tagline": "AI CLI switcher — isolated profile dirs per provider. 600 tests, AES-256 backups.",
+  "schema": 1
+}

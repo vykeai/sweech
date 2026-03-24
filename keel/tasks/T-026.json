@@ -1,0 +1,32 @@
+{
+  "id": "T-026",
+  "title": "npm publish setup",
+  "wave": "wave-4",
+  "space": "space-infra",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "Prepare package for npm registry publication. Currently install-only from GitHub.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "package.json has correct fields for npm publish",
+    "npm pack produces clean tarball",
+    ".npmignore excludes dev files",
+    "Prepublish script runs build + test",
+    "README has npm install instructions"
+  ]
+}

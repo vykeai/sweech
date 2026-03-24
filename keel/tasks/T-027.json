@@ -1,0 +1,31 @@
+{
+  "id": "T-027",
+  "title": "Homebrew formula",
+  "wave": "wave-4",
+  "space": "space-infra",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "Create Homebrew formula for easy macOS installation.",
+  "createdAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T17:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "context": [],
+  "acceptanceCriteria": [
+    "Formula installs sweech and SweechBar.app",
+    "brew install sweech works",
+    "Cask for SweechBar",
+    "Version pinned to GitHub release tag"
+  ]
+}
