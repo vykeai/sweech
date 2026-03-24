@@ -131,7 +131,7 @@ export function getBestAccount(profiles?: ProfileConfig[]): AccountEntry | undef
   return accounts[0];
 }
 
-function accountScore(info: AccountInfo): number {
+export function accountScore(info: AccountInfo): number {
   const live = info.live;
   const status = live?.status;
   if (status === 'rejected' || status === 'limit_reached') return Number.NEGATIVE_INFINITY;
@@ -146,7 +146,7 @@ function accountScore(info: AccountInfo): number {
   return (weeklyUtil * 100) + (sessionUtil * 20) + (resetUrgency * 50) - (capacityPenalty * 10);
 }
 
-function accountReason(info: AccountInfo): string {
+export function accountReason(info: AccountInfo): string {
   const pieces: string[] = [];
   if (info.live?.status) pieces.push(`status=${info.live.status}`);
   if (info.hoursUntilWeeklyReset !== undefined) pieces.push(`weekly-reset=${info.hoursUntilWeeklyReset.toFixed(1)}h`);

@@ -317,6 +317,29 @@ function render(entries, state, usageLoad = 'idle') {
     const footer = [];
     const entryStartLines = [];
     const W = 56; // frame width
+    // ── Help overlay ──
+    if (state.helpVisible) {
+        const k = (s) => chalk_1.default.bold.white(s.padEnd(10));
+        const d = (s) => chalk_1.default.dim(s);
+        header.push('');
+        header.push(chalk_1.default.bold('  ── Keyboard Shortcuts ──'));
+        header.push('');
+        body.push(`  ${k('↑↓')}${d('Select profile')}`);
+        body.push(`  ${k('Enter')}${d('Launch selected profile')}`);
+        body.push(`  ${k('y')}${d('Toggle yolo mode (skip permissions)')}`);
+        body.push(`  ${k('r')}${d('Toggle resume (continue last session)')}`);
+        body.push(`  ${k('u')}${d('Force-refresh usage data')}`);
+        body.push(`  ${k('s')}${d('Cycle sort mode (smart → status → manual)')}`);
+        body.push(`  ${k('g')}${d('Toggle grouping (by provider / flat)')}`);
+        body.push(`  ${k('m')}${d('Toggle model bucket display')}`);
+        body.push(`  ${k('a')}${d('Add new profile')}`);
+        body.push(`  ${k('e')}${d('Edit selected profile')}`);
+        body.push(`  ${k('?')}${d('Toggle this help')}`);
+        body.push(`  ${k('q/Esc')}${d('Quit')}`);
+        body.push('');
+        footer.push(chalk_1.default.dim('  Press ? to close'));
+        return { header, body, footer, entryStartLines };
+    }
     // ── Header (pinned top) ──
     const sortLabel = state.sortMode === 'smart'
         ? chalk_1.default.cyan.bold('⚡smart')
@@ -667,6 +690,19 @@ async function runLauncher() {
                     (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName }))).then(accounts => { patchEntries(accounts); draw(); }).catch(() => { });
                 }
                 draw();
+            }
+            else if (str === '?') {
+                state.helpVisible = !state.helpVisible;
+                draw();
+            }
+            else if (key.name === 'escape') {
+                if (state.helpVisible) {
+                    state.helpVisible = false;
+                    draw();
+                    return;
+                }
+                cleanup();
+                process.exit(0);
             }
             else if (str === 'a' || str === 'A') {
                 cleanup();

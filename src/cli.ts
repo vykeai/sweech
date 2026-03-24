@@ -369,7 +369,7 @@ program
 program
   .command('show <command-name>')
   .description('Show detailed information about a provider')
-  .action((commandName: string) => {
+  .action(async (commandName: string) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     const aliasManager = new AliasManager();
@@ -401,10 +401,44 @@ program
     console.log(chalk.cyan('Created:'), new Date(profile.createdAt).toLocaleDateString());
 
     if (stat) {
+      const timeAgo = (iso: string): string => {
+        const diff = Date.now() - new Date(iso).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 60) return `${mins}m ago`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours}h ago`;
+        return `${Math.floor(hours / 24)}d ago`;
+      };
       console.log();
       console.log(chalk.bold('Usage:'));
-      console.log(chalk.gray('  Total uses:'), stat.totalUses);
-      console.log(chalk.gray('  Last used:'), new Date(stat.lastUsed).toLocaleString());
+      console.log(chalk.gray('  Total launches:'), stat.totalUses);
+      console.log(chalk.gray('  Last used:'), timeAgo(stat.lastUsed));
+    }
+
+    // Show live rate limits if available
+    const { getAccountInfo, getKnownAccounts } = require('./subscriptions');
+    const accountList = getKnownAccounts(profiles);
+    const acctRef = accountList.find((a: any) => a.commandName === profile.commandName);
+    if (acctRef) {
+      try {
+        const [acctInfo] = await getAccountInfo([acctRef]);
+        if (acctInfo?.live) {
+          const { asciiBar } = require('./charts');
+          const barColor = (r: number) => r <= 0.5 ? chalk.green : r <= 0.8 ? chalk.yellow : chalk.red;
+          console.log();
+          console.log(chalk.bold('Live rate limits:'));
+          if (acctInfo.live.utilization5h !== undefined) {
+            console.log('  ' + asciiBar({ label: '  5h', value: acctInfo.live.utilization5h, max: 1, width: 25, color: barColor(acctInfo.live.utilization5h) }));
+          }
+          if (acctInfo.live.utilization7d !== undefined) {
+            console.log('  ' + asciiBar({ label: 'week', value: acctInfo.live.utilization7d, max: 1, width: 25, color: barColor(acctInfo.live.utilization7d) }));
+          }
+          if (acctInfo.live.status) {
+            const statusColor = acctInfo.live.status === 'allowed' ? chalk.green : acctInfo.live.status === 'limit_reached' ? chalk.red : chalk.yellow;
+            console.log(chalk.gray('  Status:'), statusColor(acctInfo.live.status));
+          }
+        }
+      } catch {}
     }
 
     // Show aliases pointing to this command

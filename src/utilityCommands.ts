@@ -74,6 +74,8 @@ export async function runDoctor(): Promise<void> {
   const profiles = config.getProfiles();
   const binDir = config.getBinDir();
   const symlinkIssues: HealthIssue[] = [];
+  const largeProfiles: string[] = [];
+  let healthyProfileCount = 0;
 
   // Check Node.js
   console.log(chalk.bold('Environment:'));
@@ -119,6 +121,23 @@ export async function runDoctor(): Promise<void> {
     }
   });
 
+  // Check usage cache staleness
+  console.log(chalk.bold('\nUsage Cache:'));
+  const cachePath = path.join(os.homedir(), '.sweech', 'rate-limit-cache.json');
+  if (fs.existsSync(cachePath)) {
+    const cacheStats = fs.statSync(cachePath);
+    const cacheAgeMs = Date.now() - cacheStats.mtimeMs;
+    const cacheAgeHours = Math.floor(cacheAgeMs / (1000 * 60 * 60));
+    if (cacheAgeMs > 24 * 60 * 60 * 1000) {
+      console.log(chalk.yellow(`  ⚠ Usage cache is stale (last updated ${cacheAgeHours}h ago) — run \`sweech usage --refresh\``));
+    } else {
+      const agoLabel = cacheAgeHours > 0 ? `${cacheAgeHours}h ago` : 'just now';
+      console.log(chalk.green(`  ✓ Usage cache is fresh (updated ${agoLabel})`));
+    }
+  } else {
+    console.log(chalk.gray(`  ✗ No usage cache found — run \`sweech usage\` to populate`));
+  }
+
   // Check profiles
   console.log(chalk.bold(`\nProfiles (${profiles.length}):`));
   if (profiles.length === 0) {
@@ -140,7 +159,9 @@ export async function runDoctor(): Promise<void> {
         ? chalk.magenta(` [shared ↔ ${profile.sharedWith}]`)
         : '';
 
-      if (wrapperExecutable && configExists) {
+      const profileHealthy = wrapperExecutable && configExists;
+      if (profileHealthy) {
+        healthyProfileCount++;
         console.log(chalk.green(`  ✓ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
       } else {
         console.log(chalk.yellow(`  ⚠ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
@@ -152,6 +173,19 @@ export async function runDoctor(): Promise<void> {
         if (!configExists) {
           console.log(chalk.gray(`    Missing config file`));
         }
+      }
+
+      // Check profile data directory size
+      try {
+        const { stdout } = await execFileAsync('du', ['-sk', profileDir], { timeout: 5000 });
+        const sizeKB = parseInt(stdout.split('\t')[0], 10);
+        if (!isNaN(sizeKB) && sizeKB > 5 * 1024 * 1024) { // 5GB in KB
+          const sizeGB = (sizeKB / (1024 * 1024)).toFixed(1);
+          console.log(chalk.yellow(`    ⚠ Profile data is large (${sizeGB} GB)`));
+          largeProfiles.push(profile.commandName);
+        }
+      } catch {
+        // du not available or dir doesn't exist — skip size check
       }
 
       // Check symlinks for profiles that share data with a master profile
@@ -223,9 +257,27 @@ export async function runDoctor(): Promise<void> {
     }
   }
 
+  // Profile health summary
+  if (profiles.length > 0) {
+    console.log(chalk.bold('\nProfile Summary:'));
+    const totalProfiles = profiles.length;
+    const summaryColor = healthyProfileCount === totalProfiles
+      ? chalk.green
+      : healthyProfileCount > 0
+        ? chalk.yellow
+        : chalk.red;
+    console.log(summaryColor(`  ${healthyProfileCount} of ${totalProfiles} profiles healthy`));
+    if (largeProfiles.length > 0) {
+      console.log(chalk.yellow(`  ${largeProfiles.length} profile${largeProfiles.length > 1 ? 's' : ''} over 5 GB: ${largeProfiles.join(', ')}`));
+    }
+  }
+
   // Summary
+  const cacheStale = fs.existsSync(cachePath) && (Date.now() - fs.statSync(cachePath).mtimeMs > 24 * 60 * 60 * 1000);
   const hasIssues = !isInPath(binDir) ||
     symlinkIssues.length > 0 ||
+    largeProfiles.length > 0 ||
+    cacheStale ||
     profiles.some(p => {
       const wrapperPath = path.join(binDir, p.commandName);
       return !fs.existsSync(wrapperPath);

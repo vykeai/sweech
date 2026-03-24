@@ -373,7 +373,7 @@ program
 program
     .command('show <command-name>')
     .description('Show detailed information about a provider')
-    .action((commandName) => {
+    .action(async (commandName) => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
     const aliasManager = new aliases_1.AliasManager();
@@ -400,10 +400,46 @@ program
     console.log(chalk_1.default.cyan('Config dir:'), config.getProfileDir(profile.commandName));
     console.log(chalk_1.default.cyan('Created:'), new Date(profile.createdAt).toLocaleDateString());
     if (stat) {
+        const timeAgo = (iso) => {
+            const diff = Date.now() - new Date(iso).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 60)
+                return `${mins}m ago`;
+            const hours = Math.floor(mins / 60);
+            if (hours < 24)
+                return `${hours}h ago`;
+            return `${Math.floor(hours / 24)}d ago`;
+        };
         console.log();
         console.log(chalk_1.default.bold('Usage:'));
-        console.log(chalk_1.default.gray('  Total uses:'), stat.totalUses);
-        console.log(chalk_1.default.gray('  Last used:'), new Date(stat.lastUsed).toLocaleString());
+        console.log(chalk_1.default.gray('  Total launches:'), stat.totalUses);
+        console.log(chalk_1.default.gray('  Last used:'), timeAgo(stat.lastUsed));
+    }
+    // Show live rate limits if available
+    const { getAccountInfo, getKnownAccounts } = require('./subscriptions');
+    const accountList = getKnownAccounts(profiles);
+    const acctRef = accountList.find((a) => a.commandName === profile.commandName);
+    if (acctRef) {
+        try {
+            const [acctInfo] = await getAccountInfo([acctRef]);
+            if (acctInfo?.live) {
+                const { asciiBar } = require('./charts');
+                const barColor = (r) => r <= 0.5 ? chalk_1.default.green : r <= 0.8 ? chalk_1.default.yellow : chalk_1.default.red;
+                console.log();
+                console.log(chalk_1.default.bold('Live rate limits:'));
+                if (acctInfo.live.utilization5h !== undefined) {
+                    console.log('  ' + asciiBar({ label: '  5h', value: acctInfo.live.utilization5h, max: 1, width: 25, color: barColor(acctInfo.live.utilization5h) }));
+                }
+                if (acctInfo.live.utilization7d !== undefined) {
+                    console.log('  ' + asciiBar({ label: 'week', value: acctInfo.live.utilization7d, max: 1, width: 25, color: barColor(acctInfo.live.utilization7d) }));
+                }
+                if (acctInfo.live.status) {
+                    const statusColor = acctInfo.live.status === 'allowed' ? chalk_1.default.green : acctInfo.live.status === 'limit_reached' ? chalk_1.default.red : chalk_1.default.yellow;
+                    console.log(chalk_1.default.gray('  Status:'), statusColor(acctInfo.live.status));
+                }
+            }
+        }
+        catch { }
     }
     // Show aliases pointing to this command
     const aliases = aliasManager.getAliases();

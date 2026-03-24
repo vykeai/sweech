@@ -613,6 +613,7 @@ struct AccountCard: View {
     var onMoveDown: (() -> Void)? = nil
 
     @State private var copied = false
+    @State private var isHovered = false
     @AppStorage("sweechShowExtraBuckets") private var showExtraBuckets: Bool = false
 
     var body: some View {
@@ -812,9 +813,15 @@ struct AccountCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(tier.borderColor, lineWidth: tier.borderWidth)
+                .strokeBorder(
+                    tier.borderColor.opacity(isHovered ? 1.0 : 0.85),
+                    lineWidth: tier.borderWidth
+                )
         )
-        .shadow(color: tier.glowColor, radius: tier.glowRadius, x: 0, y: 0)
+        .shadow(color: tier.glowColor, radius: isHovered ? tier.glowRadius + 2 : tier.glowRadius, x: 0, y: 0)
+        .scaleEffect(isHovered ? 1.01 : 1.0)
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .onHover { isHovered = $0 }
     }
 }
 

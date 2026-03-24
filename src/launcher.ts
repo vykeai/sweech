@@ -48,6 +48,7 @@ interface LaunchState {
   sortMode: 'smart' | 'status' | 'manual';
   grouped: boolean;
   extraBuckets?: boolean;
+  helpVisible?: boolean;
 }
 
 type UsageLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -314,6 +315,30 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
   const footer: string[] = [];
   const entryStartLines: number[] = [];
   const W = 56; // frame width
+
+  // ── Help overlay ──
+  if (state.helpVisible) {
+    const k = (s: string) => chalk.bold.white(s.padEnd(10));
+    const d = (s: string) => chalk.dim(s);
+    header.push('');
+    header.push(chalk.bold('  ── Keyboard Shortcuts ──'));
+    header.push('');
+    body.push(`  ${k('↑↓')}${d('Select profile')}`);
+    body.push(`  ${k('Enter')}${d('Launch selected profile')}`);
+    body.push(`  ${k('y')}${d('Toggle yolo mode (skip permissions)')}`);
+    body.push(`  ${k('r')}${d('Toggle resume (continue last session)')}`);
+    body.push(`  ${k('u')}${d('Force-refresh usage data')}`);
+    body.push(`  ${k('s')}${d('Cycle sort mode (smart → status → manual)')}`);
+    body.push(`  ${k('g')}${d('Toggle grouping (by provider / flat)')}`);
+    body.push(`  ${k('m')}${d('Toggle model bucket display')}`);
+    body.push(`  ${k('a')}${d('Add new profile')}`);
+    body.push(`  ${k('e')}${d('Edit selected profile')}`);
+    body.push(`  ${k('?')}${d('Toggle this help')}`);
+    body.push(`  ${k('q/Esc')}${d('Quit')}`);
+    body.push('');
+    footer.push(chalk.dim('  Press ? to close'));
+    return { header, body, footer, entryStartLines };
+  }
 
   // ── Header (pinned top) ──
   const sortLabel = state.sortMode === 'smart'
@@ -705,6 +730,12 @@ export async function runLauncher(): Promise<void> {
           ).then(accounts => { patchEntries(accounts); draw(); }).catch(() => {});
         }
         draw();
+      } else if (str === '?') {
+        state.helpVisible = !state.helpVisible;
+        draw();
+      } else if (key.name === 'escape') {
+        if (state.helpVisible) { state.helpVisible = false; draw(); return; }
+        cleanup(); process.exit(0);
       } else if (str === 'a' || str === 'A') {
         cleanup(); runSubcommand('add');
       } else if (str === 'e' || str === 'E') {
