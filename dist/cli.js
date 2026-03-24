@@ -65,6 +65,16 @@ const fs = __importStar(require("fs"));
 const packageJsonPath = path.join(__dirname, '../package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 const version = packageJson.version;
+// ── Dynamic completion handler (must run before Commander) ────────────────────
+const completeIdx = process.argv.indexOf('--complete');
+if (completeIdx !== -1) {
+    const line = process.argv[completeIdx + 1] || '';
+    const completions = (0, completion_1.handleComplete)(line);
+    if (completions.length > 0) {
+        process.stdout.write(completions.join('\n') + '\n');
+    }
+    process.exit(0);
+}
 const program = new commander_1.Command();
 program
     .name('sweech')

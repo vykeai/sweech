@@ -13,7 +13,7 @@ import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
 import { backupSweetch, restoreSweetch, backupClaude } from './backup';
 import { UsageTracker } from './usage';
 import { AliasManager } from './aliases';
-import { generateBashCompletion, generateZshCompletion } from './completion';
+import { generateBashCompletion, generateZshCompletion, handleComplete } from './completion';
 import { confirmChatBackupBeforeRemoval, backupChatHistory } from './chatBackup';
 import { isDefaultCLIDirectory } from './reset';
 import { runDoctor, runPath, runTest, runEdit, runClone, runRename } from './utilityCommands';
@@ -30,6 +30,17 @@ import * as fs from 'fs';
 const packageJsonPath = path.join(__dirname, '../package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 const version = packageJson.version;
+
+// ── Dynamic completion handler (must run before Commander) ────────────────────
+const completeIdx = process.argv.indexOf('--complete');
+if (completeIdx !== -1) {
+  const line = process.argv[completeIdx + 1] || '';
+  const completions = handleComplete(line);
+  if (completions.length > 0) {
+    process.stdout.write(completions.join('\n') + '\n');
+  }
+  process.exit(0);
+}
 
 const program = new Command();
 
@@ -923,7 +934,23 @@ const usageCmd = program
         const recommendedStr = i === 0 && smartScore(a) >= 0
           ? chalk.cyan(' ⚡ use first')
           : '';
-        console.log(`  ${chalk.bold(a.name)}${planStr}${emailStr}${recommendedStr}`);
+        // Token status indicator for OAuth accounts
+        let tokenStr = '';
+        if (a.tokenStatus === 'refreshed') {
+          tokenStr = chalk.green(' 🔑 token refreshed');
+        } else if (a.tokenStatus === 'expired') {
+          tokenStr = chalk.red(' 🔑 token expired');
+        } else if (a.tokenStatus === 'valid' && a.tokenExpiresAt) {
+          const hoursLeft = Math.max(0, (a.tokenExpiresAt - Date.now()) / 3600000);
+          if (hoursLeft < 1) {
+            tokenStr = chalk.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
+          } else if (hoursLeft < 24) {
+            tokenStr = chalk.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+          }
+        } else if (a.tokenStatus === 'no_token' && a.cliType === 'claude') {
+          tokenStr = chalk.dim(' 🔑 no token');
+        }
+        console.log(`  ${chalk.bold(a.name)}${planStr}${emailStr}${recommendedStr}${tokenStr}`);
 
         // 5h window
         const cap5hStr = a.minutesUntilFirstCapacity !== undefined
