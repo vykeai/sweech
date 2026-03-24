@@ -879,7 +879,7 @@ const usageCmd = program
         if (reset7dAt) {
           const hoursLeft = (reset7dAt - Date.now() / 1000) / 3600;
           const remaining = 1 - (a.live?.utilization7d ?? 0);
-          if (remaining > 0.1 && hoursLeft > 0 && hoursLeft < 72) {
+          if (remaining >= 0.05 && hoursLeft > 0 && hoursLeft < 72) {
             const pct = Math.round(remaining * 100);
             const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
             expiryAlertStr = chalk.cyan(` ⚡ ${pct}% expiring in ${label}`);

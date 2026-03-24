@@ -4,7 +4,7 @@ import AppKit
 // MARK: - Card Tier
 
 enum CardTier {
-    case useFirst(urgent: Bool) // rank 0 — urgent=true if expiry <72h with >10% remaining
+    case useFirst(urgent: Bool) // rank 0 — urgent=true if expiry <72h with ≥5% remaining
     case useNext                // rank 1
     case normal                 // rank 2+
     case limitReached
@@ -72,7 +72,7 @@ enum CardTier {
         switch self {
         case .useFirst(let urgent):
             return urgent
-                ? "Use this account NOW — it has >10% weekly quota remaining but resets in under 72h. Unused quota will be wasted."
+                ? "Use this account NOW — it has ≥5% weekly quota remaining but resets in under 72h. Unused quota will be wasted."
                 : "Top-ranked account by smart sort — best ratio of remaining quota to time until reset."
         case .useNext:
             return "Second-best choice — use after the 'use first' account is exhausted or at its limit."
@@ -127,7 +127,7 @@ struct AccountsView: View {
     private func hasExpiryUrgency(_ a: SweechAccount) -> Bool {
         guard let epoch = a.live?.reset7dAt else { return false }
         let hoursLeft = Date(timeIntervalSince1970: epoch).timeIntervalSince(Date()) / 3600
-        return (1.0 - a.utilization7d) > 0.1 && hoursLeft > 0 && hoursLeft < 72
+        return (1.0 - a.utilization7d) >= 0.05 && hoursLeft > 0 && hoursLeft < 72
     }
 
     private func tier(for account: SweechAccount, rank: Int) -> CardTier {
@@ -452,7 +452,7 @@ struct GuideView: View {
                     tierRow(color: Sweech.Color.ok, width: 1.5,
                             label: "use first", desc: "Best account — top smart score, no urgent expiry")
                     tierRow(color: Sweech.Color.warning, width: 1.5,
-                            label: "use first ⚡", desc: ">10% weekly quota expiring in <72h — use it or lose it")
+                            label: "use first ⚡", desc: "≥5% weekly quota expiring in <72h — use it or lose it")
                     tierRow(color: Sweech.Color.accent, width: 1.0,
                             label: "use next", desc: "Second-best choice by smart sort")
                     tierRow(color: Sweech.Color.core.opacity(0.3), width: 0.5,
@@ -913,7 +913,7 @@ struct UsageRow: View {
         guard secsLeft > 0 else { return nil }
         let hoursLeft = secsLeft / 3600
         let rem = 1.0 - utilization
-        guard rem > 0.1 && hoursLeft < 72 else { return nil }
+        guard rem >= 0.05 && hoursLeft < 72 else { return nil }
         let pct = Int(rem * 100)
         return hoursLeft < 24
             ? "⚡ \(pct)% expiring in \(Int(hoursLeft))h"

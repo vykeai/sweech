@@ -225,9 +225,14 @@ describe('expiryAlert', () => {
     expect(expiryAlert(e)).toBe('');
   });
 
-  test('returns empty string when remaining ≤ 10%', () => {
-    const e = makeEntry({ name: 'a', bars: [bar7d(92, HOURS(10))] }); // 8% remaining
+  test('returns empty string when remaining < 5%', () => {
+    const e = makeEntry({ name: 'a', bars: [bar7d(97, HOURS(10))] }); // 3% remaining
     expect(expiryAlert(e)).toBe('');
+  });
+
+  test('shows alert when remaining is 5-10% (above new threshold)', () => {
+    const e = makeEntry({ name: 'a', bars: [bar7d(92, HOURS(10))] }); // 8% remaining
+    expect(expiryAlert(e)).not.toBe('');
   });
 
   test('returns empty string when reset > 72h away', () => {

@@ -295,7 +295,7 @@ export function expiryAlert(e: LaunchEntry): string {
   if (!bar7d?.resetsAt) return '';
   const hoursLeft = (bar7d.resetsAt - Date.now() / 1000) / 3600;
   const remaining = (100 - bar7d.pct) / 100;
-  if (remaining <= 0.1 || hoursLeft <= 0 || hoursLeft >= 72) return '';
+  if (remaining < 0.05 || hoursLeft <= 0 || hoursLeft >= 72) return '';
   const pct = Math.round(remaining * 100);
   const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
   return chalk.cyan(` ⚡ ${pct}% expiring in ${label}`);
