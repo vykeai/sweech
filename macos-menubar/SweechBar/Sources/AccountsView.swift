@@ -127,7 +127,7 @@ struct AccountsView: View {
     private func hasExpiryUrgency(_ a: SweechAccount) -> Bool {
         guard let epoch = a.live?.reset7dAt else { return false }
         let hoursLeft = Date(timeIntervalSince1970: epoch).timeIntervalSince(Date()) / 3600
-        return (1.0 - a.utilization7d) >= 0.05 && hoursLeft > 0 && hoursLeft < 72
+        return (1.0 - a.utilization7d) > 0 && hoursLeft > 0 && hoursLeft < 72
     }
 
     private func tier(for account: SweechAccount, rank: Int) -> CardTier {
@@ -967,7 +967,7 @@ struct UsageRow: View {
         guard secsLeft > 0 else { return nil }
         let hoursLeft = secsLeft / 3600
         let rem = 1.0 - utilization
-        guard rem >= 0.05 && hoursLeft < 72 else { return nil }
+        guard rem > 0 && hoursLeft < 72 else { return nil }
         let pct = Int(rem * 100)
         return hoursLeft < 24
             ? "⚡ \(pct)% expiring in \(Int(hoursLeft))h"

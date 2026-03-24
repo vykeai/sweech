@@ -70,14 +70,14 @@ describe('expiryAlert edge cases', () => {
   });
 
   test('returns empty string when remaining is exactly 0%', () => {
-    // 100% used → 0% remaining → below 5% threshold
+    // 100% used → 0% remaining → nothing to use
     const e = makeEntry({ name: 'a', bars: [bar7d(100, HOURS(10))] });
     expect(expiryAlert(e)).toBe('');
   });
 
-  test('returns empty string at remaining exactly 4% (below 5%)', () => {
+  test('returns alert at remaining 4% (any remaining > 0 shows alert)', () => {
     const e = makeEntry({ name: 'a', bars: [bar7d(96, HOURS(10))] });
-    expect(expiryAlert(e)).toBe('');
+    expect(expiryAlert(e)).not.toBe('');
   });
 
   test('returns alert at remaining exactly 5%', () => {
@@ -150,7 +150,7 @@ describe('entrySmartScore edge cases', () => {
   test('handles 7d bar at 100% (fully used)', () => {
     const e = makeEntry({ name: 'a', bars: [bar5h(0), bar7d(100, HOURS(10))] });
     const score = entrySmartScore(e);
-    // 0% remaining → below 5% threshold, no tier boost. baseScore = 0/daysLeft = 0
+    // 0% remaining → no tier boost (remaining must be > 0). baseScore = 0/daysLeft = 0
     expect(score).toBe(0);
   });
 

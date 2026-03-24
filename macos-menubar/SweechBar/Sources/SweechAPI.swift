@@ -118,7 +118,7 @@ struct SweechAccount: Codable, Identifiable {
         let baseScore = remaining7d / daysLeft
         // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
         // rank above non-expiring ones — "don't waste what resets soonest"
-        if hoursUntilReset < 72 && remaining7d >= 0.05 { return 100 + baseScore }
+        if hoursUntilReset < 72 && remaining7d > 0 { return 100 + baseScore }
         return baseScore
     }
 

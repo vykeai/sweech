@@ -95,14 +95,20 @@ describe('entrySmartScore', () => {
     expect(entrySmartScore(expiring)).toBeGreaterThan(entrySmartScore(notExpiring));
   });
 
-  test('tier boost only applies when remaining >= 5%', () => {
-    // 3% remaining, resets in 12h → below 5% threshold, no tier boost
-    const almostEmpty = makeEntry({ name: 'empty', bars: [bar5h(0), bar7d(97, HOURS(12))] });
-    // 80% remaining, resets in 4 days → not expiring, no tier boost
+  test('tier boost applies to any remaining capacity > 0%', () => {
+    // 3% remaining, resets in 12h → gets tier boost (100 + baseScore)
+    const expiring = makeEntry({ name: 'expiring', bars: [bar5h(0), bar7d(97, HOURS(12))] });
+    // 80% remaining, resets in 4 days → no tier boost (> 72h)
     const plenty = makeEntry({ name: 'plenty', bars: [bar5h(0), bar7d(20, HOURS(96))] });
-    // almostEmpty score: 0.03 / (12/24) = 0.06 (no boost — below 5%)
-    // plenty score: 0.8 / (96/24) = 0.2 (no boost)
-    expect(entrySmartScore(plenty)).toBeGreaterThan(entrySmartScore(almostEmpty));
+    expect(entrySmartScore(expiring)).toBeGreaterThan(entrySmartScore(plenty));
+  });
+
+  test('tier boost does NOT apply when remaining is exactly 0%', () => {
+    // 0% remaining, resets in 12h → no tier boost, nothing to use
+    const empty = makeEntry({ name: 'empty', bars: [bar5h(0), bar7d(100, HOURS(12))] });
+    // 80% remaining, resets in 4 days → no tier boost (> 72h), but has capacity
+    const plenty = makeEntry({ name: 'plenty', bars: [bar5h(0), bar7d(20, HOURS(96))] });
+    expect(entrySmartScore(plenty)).toBeGreaterThan(entrySmartScore(empty));
   });
 
   test('returns 0 for entry with no bars', () => {
@@ -225,13 +231,13 @@ describe('expiryAlert', () => {
     expect(expiryAlert(e)).toBe('');
   });
 
-  test('returns empty string when remaining < 5%', () => {
-    const e = makeEntry({ name: 'a', bars: [bar7d(97, HOURS(10))] }); // 3% remaining
+  test('returns empty string when remaining is 0%', () => {
+    const e = makeEntry({ name: 'a', bars: [bar7d(100, HOURS(10))] }); // 0% remaining
     expect(expiryAlert(e)).toBe('');
   });
 
-  test('shows alert when remaining is 5-10% (above new threshold)', () => {
-    const e = makeEntry({ name: 'a', bars: [bar7d(92, HOURS(10))] }); // 8% remaining
+  test('shows alert when remaining is low but > 0% (e.g. 3%)', () => {
+    const e = makeEntry({ name: 'a', bars: [bar7d(97, HOURS(10))] }); // 3% remaining
     expect(expiryAlert(e)).not.toBe('');
   });
 

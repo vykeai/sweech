@@ -272,7 +272,7 @@ export function entrySmartScore(e: LaunchEntry): number {
   const baseScore = remaining7d / daysLeft;
   // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
   // rank above non-expiring ones — "don't waste what resets soonest"
-  if (hoursLeft < 72 && remaining7d >= 0.05) return 100 + baseScore;
+  if (hoursLeft < 72 && remaining7d > 0) return 100 + baseScore;
   return baseScore;
 }
 
@@ -301,7 +301,7 @@ export function expiryAlert(e: LaunchEntry): string {
   if (!bar7d?.resetsAt) return '';
   const hoursLeft = (bar7d.resetsAt - Date.now() / 1000) / 3600;
   const remaining = (100 - bar7d.pct) / 100;
-  if (remaining < 0.05 || hoursLeft <= 0 || hoursLeft >= 72) return '';
+  if (remaining <= 0 || hoursLeft <= 0 || hoursLeft >= 72) return '';
   const pct = Math.round(remaining * 100);
   const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
   return chalk.cyan(` ⚡ ${pct}% expiring in ${label}`);

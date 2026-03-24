@@ -35,7 +35,7 @@ struct SweechBarApp: App {
                     guard let epoch = a.live?.reset7dAt else { return nil }
                     let hoursLeft = Date(timeIntervalSince1970: epoch).timeIntervalSince(Date()) / 3600
                     let rem = 1.0 - a.utilization7d
-                    guard rem >= 0.05 && hoursLeft > 0 && hoursLeft < 72 else { return nil }
+                    guard rem > 0 && hoursLeft > 0 && hoursLeft < 72 else { return nil }
                     return (Int(rem * 100), rem / (hoursLeft / 24))
                 }
                 .max(by: { $0.urgency < $1.urgency })
