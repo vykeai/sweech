@@ -85,6 +85,26 @@ describe('entrySmartScore', () => {
     expect(entrySmartScore(urgent)).toBeGreaterThan(entrySmartScore(relaxed));
   });
 
+  test('expiring profile beats non-expiring even with less remaining capacity', () => {
+    // codex-ted scenario: 32% remaining, resets in 36h (within 72h → expiring)
+    const expiring = makeEntry({ name: 'expiring', bars: [bar5h(0), bar7d(68, HOURS(36))] });
+    // codex-pole scenario: 100% remaining, resets in 109h (> 72h → not expiring)
+    const notExpiring = makeEntry({ name: 'not-expiring', bars: [bar5h(0), bar7d(0, HOURS(109))] });
+    // Without the tier boost, notExpiring would have a similar or higher waste rate.
+    // With the tier boost, the expiring profile should always win.
+    expect(entrySmartScore(expiring)).toBeGreaterThan(entrySmartScore(notExpiring));
+  });
+
+  test('tier boost only applies when remaining >= 5%', () => {
+    // 3% remaining, resets in 12h → below 5% threshold, no tier boost
+    const almostEmpty = makeEntry({ name: 'empty', bars: [bar5h(0), bar7d(97, HOURS(12))] });
+    // 80% remaining, resets in 4 days → not expiring, no tier boost
+    const plenty = makeEntry({ name: 'plenty', bars: [bar5h(0), bar7d(20, HOURS(96))] });
+    // almostEmpty score: 0.03 / (12/24) = 0.06 (no boost — below 5%)
+    // plenty score: 0.8 / (96/24) = 0.2 (no boost)
+    expect(entrySmartScore(plenty)).toBeGreaterThan(entrySmartScore(almostEmpty));
+  });
+
   test('returns 0 for entry with no bars', () => {
     const e = makeEntry({ name: 'a' });
     expect(entrySmartScore(e)).toBe(0);

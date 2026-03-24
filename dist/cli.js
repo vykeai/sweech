@@ -663,6 +663,7 @@ const usageCmd = program
     .option('--refresh', 'Force-refresh live usage instead of using cached data')
     .option('--sort <mode>', 'Sort order: smart (default), status, manual', 'smart')
     .option('--no-group', 'Show all accounts in one list instead of grouped by provider')
+    .option('-m, --models', 'Show per-model bucket breakdowns (e.g. Sonnet only, Codex Spark)')
     .action(async (opts) => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
@@ -691,9 +692,15 @@ const usageCmd = program
         const remaining7d = 1 - (a.live?.utilization7d ?? 0);
         const reset7dAt = a.live?.reset7dAt;
         if (!reset7dAt)
-            return 1 - (a.live?.utilization5h ?? 0);
+            return remaining7d / 7;
         const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
-        return remaining7d / (hoursLeft / 24);
+        const daysLeft = hoursLeft / 24;
+        const baseScore = remaining7d / daysLeft;
+        // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
+        // rank above non-expiring ones — "don't waste what resets soonest"
+        if (hoursLeft < 72 && remaining7d >= 0.05)
+            return 100 + baseScore;
+        return baseScore;
     };
     const statusRank = (a) => {
         if (a.needsReauth)
@@ -788,6 +795,29 @@ const usageCmd = program
                 }
             }
             console.log(`    week: ${chalk_1.default.white(String(a.messages7d))} messages${live7dStr}${weeklyResetStr}${expiryAlertStr}`);
+            // Per-model bucket breakdowns (--models flag)
+            if (opts.models && a.live?.buckets && a.live.buckets.length > 1) {
+                const sorted = [...a.live.buckets].sort((x, y) => (x.label === 'All models' ? 0 : 1) - (y.label === 'All models' ? 0 : 1));
+                for (const bucket of sorted) {
+                    if (bucket.label === 'All models')
+                        continue; // already shown above
+                    console.log(chalk_1.default.dim(`    ── ${bucket.label} ──`));
+                    if (bucket.session) {
+                        const u = Math.round(bucket.session.utilization * 100);
+                        const r = bucket.session.resetsAt
+                            ? (() => { const m = Math.round((bucket.session.resetsAt - Date.now() / 1000) / 60); return m < 60 ? chalk_1.default.cyan(` · resets in ${m}m`) : chalk_1.default.cyan(` · resets in ${Math.floor(m / 60)}h ${m % 60}m`); })()
+                            : '';
+                        console.log(`      5h:   ${u}% used${r}`);
+                    }
+                    if (bucket.weekly) {
+                        const u = Math.round(bucket.weekly.utilization * 100);
+                        const r = bucket.weekly.resetsAt
+                            ? (() => { const h = Math.round((bucket.weekly.resetsAt - Date.now() / 1000) / 3600); const d = Math.floor(h / 24); return d > 0 ? chalk_1.default.cyan(` · resets in ${d}d ${h % 24}h`) : chalk_1.default.cyan(` · resets in ${h}h`); })()
+                            : '';
+                        console.log(`      week: ${u}% used${r}`);
+                    }
+                }
+            }
             const lastStr = a.lastActive
                 ? chalk_1.default.dim(`  last: ${new Date(a.lastActive).toLocaleString()}`)
                 : '';

@@ -87,11 +87,15 @@ struct SweechAccount: Codable, Identifiable {
         let remaining7d = 1.0 - (live.utilization7d ?? 0)
         guard let reset7dAt = live.reset7dAt else {
             // No reset time = no expiry urgency; treat as if reset is in 7d (the full window)
-            return (1.0 - (live.utilization5h ?? 0)) / 7.0
+            return remaining7d / 7.0
         }
         let hoursUntilReset = max(0.5, Date(timeIntervalSince1970: reset7dAt).timeIntervalSince(Date()) / 3600)
-        // remaining / days_until_reset — more quota + sooner expiry = higher score
-        return remaining7d / (hoursUntilReset / 24.0)
+        let daysLeft = hoursUntilReset / 24.0
+        let baseScore = remaining7d / daysLeft
+        // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
+        // rank above non-expiring ones — "don't waste what resets soonest"
+        if hoursUntilReset < 72 && remaining7d >= 0.05 { return 100 + baseScore }
+        return baseScore
     }
 
     var lastActiveRelative: String {
@@ -134,6 +138,8 @@ class SweechService: ObservableObject {
     @Published var accountOrder: [String] = []
 
     private var previousStatuses: [String: String] = [:]  // commandName → liveStatus
+    private var previousUtilizations: [String: Double] = [:]  // commandName → utilization7d
+    private var consecutiveFailures = 0
 
     var worstStatus: String {
         var worst = "allowed"
@@ -182,31 +188,76 @@ class SweechService: ObservableObject {
 
     private func fireStatusChangeNotifications(newAccounts: [SweechAccount]) {
         let notificationsEnabled = UserDefaults.standard.object(forKey: "sweechNotifications") as? Bool ?? true
+
         for account in newAccounts {
+            guard notificationsEnabled else { break }
+
+            // Status change notifications (limit_reached ↔ allowed)
             let old = previousStatuses[account.commandName]
             let new = account.liveStatus
-            guard old != nil, old != new else { continue }
+            if let old, old != new {
+                let content = UNMutableNotificationContent()
+                content.sound = .default
 
-            guard notificationsEnabled else { continue }
+                if new == "limit_reached" {
+                    content.title = "Rate limit reached — \(account.name)"
+                    content.body = "Switch to another account with: sweech u"
+                } else if old == "limit_reached" && new == "allowed" {
+                    content.title = "\(account.name) is available again"
+                    content.body = "Rate limit window has reset."
+                } else {
+                    // skip non-interesting transitions
+                    previousStatuses[account.commandName] = new
+                    continue
+                }
 
-            let content = UNMutableNotificationContent()
-            content.sound = .default
-
-            if new == "limit_reached" {
-                content.title = "Rate limit reached — \(account.name)"
-                content.body = "Switch to another account with: sweech u"
-            } else if old == "limit_reached" && new == "allowed" {
-                content.title = "\(account.name) is available again"
-                content.body = "Rate limit window has reset."
-            } else {
-                continue
+                let req = UNNotificationRequest(
+                    identifier: "\(account.commandName)-\(new)",
+                    content: content, trigger: nil
+                )
+                UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
             }
 
-            let req = UNNotificationRequest(
-                identifier: "\(account.commandName)-\(new)",
-                content: content, trigger: nil
-            )
-            UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+            // Usage threshold notifications (crossing 70% or 90%)
+            let prevUtil = previousUtilizations[account.commandName] ?? 0
+            let curUtil = account.utilization7d
+            for threshold in [0.7, 0.9] {
+                if prevUtil < threshold && curUtil >= threshold {
+                    let pct = Int(curUtil * 100)
+                    let remaining = max(0, 100 - pct)
+                    let content = UNMutableNotificationContent()
+                    content.sound = .default
+                    content.title = "\(account.name) — \(pct)% weekly used"
+                    content.body = "\(remaining)% of weekly quota remaining. Consider switching to another account."
+                    let req = UNNotificationRequest(
+                        identifier: "\(account.commandName)-threshold-\(Int(threshold * 100))",
+                        content: content, trigger: nil
+                    )
+                    UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+                }
+            }
+
+            // Expiry warning: >20% remaining, resets in <6h
+            if let reset7d = account.live?.reset7dAt {
+                let hoursLeft = Date(timeIntervalSince1970: reset7d).timeIntervalSince(Date()) / 3600
+                let remaining = 1.0 - curUtil
+                if hoursLeft > 0 && hoursLeft < 6 && remaining > 0.2 {
+                    let prevReset = previousUtilizations[account.commandName]
+                    // Only fire once per session — use a different ID per hour range
+                    let hourBucket = Int(hoursLeft)
+                    let id = "\(account.commandName)-expiry-\(hourBucket)"
+                    let content = UNMutableNotificationContent()
+                    content.sound = .default
+                    content.title = "\(account.name) — \(Int(remaining * 100))% expiring in \(hourBucket)h"
+                    content.body = "Weekly quota resets soon. Use it now or it's wasted."
+                    let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+                    if prevReset != nil {
+                        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+                    }
+                }
+            }
+
+            previousUtilizations[account.commandName] = curUtil
         }
         previousStatuses = Dictionary(newAccounts.map { ($0.commandName, $0.liveStatus) }, uniquingKeysWith: { $1 })
     }
@@ -228,6 +279,7 @@ class SweechService: ObservableObject {
                         self.isConnected = true
                         self.lastError = nil
                         self.lastFetched = Date()
+                        self.consecutiveFailures = 0
                         if self.accountOrder.isEmpty {
                             self.accountOrder = response.accounts.map { $0.commandName }
                             self.saveOrder()
@@ -240,6 +292,12 @@ class SweechService: ObservableObject {
                     NSLog("SweechBar fetch error: %@", error.localizedDescription)
                     self.isConnected = false
                     self.lastError = error.localizedDescription
+                    self.consecutiveFailures += 1
+                    // Auto-restart daemon after 3 consecutive failures
+                    if self.consecutiveFailures == 3 {
+                        NSLog("SweechBar: 3 consecutive failures, auto-restarting daemon...")
+                        self.restartDaemon()
+                    }
                 }
             }
         }
@@ -254,6 +312,24 @@ class SweechService: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async {
             _ = Self.runSweech(["serve", "--uninstall"])
             _ = Self.runSweech(["serve", "--install"])
+        }
+    }
+
+    // MARK: - Launch in Terminal
+
+    static func launchInTerminal(commandName: String) {
+        let script = """
+        tell application "Terminal"
+            activate
+            do script "\(commandName)"
+        end tell
+        """
+        DispatchQueue.global(qos: .userInitiated).async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            proc.arguments = ["-e", script]
+            try? proc.run()
+            proc.waitUntilExit()
         }
     }
 
@@ -302,12 +378,12 @@ class SweechService: ObservableObject {
     }
 
     private static func findBinary() -> String? {
-        // Walk up from __FILE__ to find the built binary
-        let candidates = [
-            NSString("~/dev/sweech/macos-menubar/SweechBar/.build/debug/SweechBar").expandingTildeInPath,
-            NSString("~/dev/sweech/macos-menubar/SweechBar/.build/release/SweechBar").expandingTildeInPath,
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        // Use the running app's own bundle path
+        if let bundlePath = Bundle.main.executablePath,
+           FileManager.default.isExecutableFile(atPath: bundlePath) {
+            return bundlePath
+        }
+        return nil
     }
 
     private func loadOrder() {
@@ -320,21 +396,14 @@ class SweechService: ObservableObject {
     }
 
     private static func runSweech(_ args: [String]) -> Result<Data, Error> {
-        let nodeCandidates = ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"]
-        guard let nodePath = nodeCandidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
-            return .failure(NSError(domain: "SweechBar", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "node not found"]))
-        }
-
-        let sweechScript = NSString("~/dev/sweech/dist/cli.js").expandingTildeInPath
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: nodePath)
-        proc.arguments = [sweechScript] + args
         var env = ProcessInfo.processInfo.environment
         let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", NSString("~/bin").expandingTildeInPath]
         let currentPath = env["PATH"] ?? "/usr/bin:/bin"
         env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        proc.arguments = ["sweech"] + args
         proc.environment = env
 
         let pipe = Pipe()

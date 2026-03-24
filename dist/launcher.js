@@ -272,7 +272,13 @@ function entrySmartScore(e) {
     if (!bar7d.resetsAt)
         return remaining7d / 7;
     const hoursLeft = Math.max(0.5, (bar7d.resetsAt - Date.now() / 1000) / 3600);
-    return remaining7d / (hoursLeft / 24);
+    const daysLeft = hoursLeft / 24;
+    const baseScore = remaining7d / daysLeft;
+    // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
+    // rank above non-expiring ones — "don't waste what resets soonest"
+    if (hoursLeft < 72 && remaining7d >= 0.05)
+        return 100 + baseScore;
+    return baseScore;
 }
 function sortedWithinGroup(list, mode) {
     if (mode === 'manual')

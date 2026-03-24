@@ -786,6 +786,24 @@ struct AccountCard: View {
                 .help("Total messages ever sent through this account")
 
                 Spacer()
+
+                Button {
+                    SweechService.launchInTerminal(commandName: account.commandName)
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 9))
+                        Text("launch")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundStyle(Sweech.Color.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Sweech.Color.accent.opacity(0.1))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Open \(account.commandName) in Terminal.app")
             }
             .foregroundStyle(Sweech.Color.textMuted.opacity(0.65))
         }
