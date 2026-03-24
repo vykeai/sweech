@@ -562,30 +562,29 @@ program
 
     const resolvedName = aliasManager.resolveAlias(commandName);
     const profile = profiles.find(p => p.commandName === resolvedName);
-    const cli = profile ? getCLI(profile.cliType) : getCLI(resolvedName);
+    const cliConfig = profile ? getCLI(profile.cliType) : getCLI(resolvedName);
 
-    if (!profile && !cli) {
+    if (!profile && !cliConfig) {
       console.error(chalk.red(`Profile '${commandName}' not found`));
       process.exit(1);
     }
-
-    const cliConfig = profile ? getCLI(profile.cliType)! : cli!;
+    const cli = cliConfig!; // safe: guarded above
     const profileDir = profile
       ? config.getProfileDir(profile.commandName)
-      : path.join(require('os').homedir(), `.${cliConfig.name}`);
+      : path.join(require('os').homedir(), `.${cli.name}`);
 
     // Passthrough args (everything after the profile name)
     const passthroughArgs = cmd.args.slice(1);
 
     // Set config dir env var and exec the CLI
-    const env = { ...process.env, [cliConfig.configDirEnvVar]: profileDir };
+    const env = { ...process.env, [cli.configDirEnvVar]: profileDir };
     // Strip nesting vars per AGENTS.md
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
 
     try {
       const { execFileSync } = require('child_process');
-      execFileSync(cliConfig.command, passthroughArgs, { env, stdio: 'inherit' });
+      execFileSync(cli.command, passthroughArgs, { env, stdio: 'inherit' });
     } catch (error: any) {
       process.exit(error.status ?? 1);
     }
@@ -621,15 +620,16 @@ program
       const token = await getOAuthToken(profile.cliType, profile.provider);
       const envVars = oauthTokenToEnv(token, profile.cliType);
 
-      // Update profile settings.json with new auth token
+      // Update profile settings.json with new auth token (create if missing)
       const profileDir = config.getProfileDir(resolvedName);
+      fs.mkdirSync(profileDir, { recursive: true });
       const settingsPath = path.join(profileDir, 'settings.json');
-      if (fs.existsSync(settingsPath)) {
-        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-        if (!settings.env) settings.env = {};
-        Object.assign(settings.env, envVars);
-        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-      }
+      const settings = fs.existsSync(settingsPath)
+        ? JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
+        : { env: {} };
+      if (!settings.env) settings.env = {};
+      Object.assign(settings.env, envVars);
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
       console.log(chalk.green(`\n  ✓ Successfully re-authenticated ${resolvedName}\n`));
       if (token.expiresAt) {
