@@ -128,14 +128,52 @@ program
     .command('list')
     .alias('ls')
     .description('List all configured providers')
-    .action(() => {
+    .action(async () => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
     const { execFileSync } = require('child_process');
     const os = require('os');
     const fs = require('fs');
-    console.log(chalk_1.default.bold('\n🍭 Providers:\n'));
-    // Show detected default CLIs
+    // Helper: format a timestamp as a relative string (e.g. "2h ago", "3d ago")
+    const relativeTime = (isoStr) => {
+        if (!isoStr)
+            return chalk_1.default.dim('never');
+        const diffMs = Date.now() - new Date(isoStr).getTime();
+        if (diffMs < 0)
+            return chalk_1.default.dim('just now');
+        const mins = Math.floor(diffMs / 60000);
+        if (mins < 1)
+            return chalk_1.default.dim('just now');
+        if (mins < 60)
+            return chalk_1.default.dim(`${mins}m ago`);
+        const hours = Math.floor(mins / 60);
+        if (hours < 24)
+            return chalk_1.default.dim(`${hours}h ago`);
+        const days = Math.floor(hours / 24);
+        if (days < 30)
+            return chalk_1.default.dim(`${days}d ago`);
+        const months = Math.floor(days / 30);
+        return chalk_1.default.dim(`${months}mo ago`);
+    };
+    // Helper: colored status dot based on live status
+    const statusDot = (live, needsReauth) => {
+        if (needsReauth)
+            return chalk_1.default.red('●');
+        if (!live?.status)
+            return chalk_1.default.gray('●');
+        switch (live.status) {
+            case 'allowed': return chalk_1.default.green('●');
+            case 'allowed_warning':
+            case 'warning': return chalk_1.default.yellow('●');
+            case 'rejected':
+            case 'limit_reached': return chalk_1.default.red('●');
+            default: return chalk_1.default.gray('●');
+        }
+    };
+    // Collect all account refs for getAccountInfo
+    const accountRefs = [];
+    // Default CLIs
+    const installedDefaults = [];
     for (const cli of Object.values(clis_1.SUPPORTED_CLIS)) {
         let installed = false;
         try {
@@ -143,38 +181,61 @@ program
             installed = true;
         }
         catch { }
-        if (!installed)
-            continue;
+        if (installed) {
+            installedDefaults.push(cli);
+            accountRefs.push({ name: cli.command, commandName: cli.name, cliType: cli.name, isDefault: true });
+        }
+    }
+    // Sweech-managed profiles
+    for (const profile of profiles) {
+        accountRefs.push({ name: profile.name, commandName: profile.commandName, cliType: profile.cliType });
+    }
+    // Fetch account info (status, lastActive) for all accounts
+    const accountInfoMap = new Map();
+    try {
+        const infos = await (0, subscriptions_1.getAccountInfo)(accountRefs);
+        for (const info of infos) {
+            accountInfoMap.set(info.commandName, info);
+        }
+    }
+    catch { /* proceed without live data */ }
+    console.log(chalk_1.default.bold('\n  sweech · profiles\n'));
+    // Show detected default CLIs
+    for (const cli of installedDefaults) {
         const configDir = path.join(os.homedir(), `.${cli.name}`);
         const hasConfig = fs.existsSync(configDir);
         const sharingProfiles = profiles.filter(p => p.sharedWith === cli.command);
         const reverseTag = sharingProfiles.length > 0
-            ? chalk_1.default.gray(` (← shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
+            ? chalk_1.default.dim(` (shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
             : '';
-        console.log(chalk_1.default.cyan('▸'), chalk_1.default.bold(cli.command) + chalk_1.default.gray(' [default]') + reverseTag);
-        console.log(chalk_1.default.gray('  CLI:'), cli.displayName);
-        console.log(chalk_1.default.gray('  Config:'), hasConfig ? `~/.${cli.name}/` : chalk_1.default.yellow('not configured'));
-        console.log();
+        const info = accountInfoMap.get(cli.name);
+        const dot = statusDot(info?.live, info?.needsReauth);
+        const planStr = info?.meta?.plan ? chalk_1.default.cyan(` [${info.meta.plan}]`) : '';
+        const lastStr = relativeTime(info?.lastActive);
+        const configTag = hasConfig ? '' : chalk_1.default.yellow(' (not configured)');
+        console.log(`  ${dot} ${chalk_1.default.bold(cli.command)}${chalk_1.default.gray(' [default]')}${planStr}${configTag}  ${lastStr}${reverseTag}`);
     }
     // Show sweech-managed profiles
-    profiles.forEach(profile => {
+    for (const profile of profiles) {
         const provider = (0, providers_1.getProvider)(profile.provider);
         const cli = (0, clis_1.getCLI)(profile.cliType || 'claude');
-        const sharedTag = profile.sharedWith ? chalk_1.default.magenta(` [shared ↔ ${profile.sharedWith}]`) : '';
+        const info = accountInfoMap.get(profile.commandName);
+        const dot = statusDot(info?.live, info?.needsReauth);
+        const sharedTag = profile.sharedWith ? chalk_1.default.magenta(` [shared -> ${profile.sharedWith}]`) : '';
         const sharingProfiles = profiles.filter(p => p.sharedWith === profile.commandName);
         const reverseTag = sharingProfiles.length > 0
-            ? chalk_1.default.gray(` (← shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
+            ? chalk_1.default.dim(` (shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
             : '';
-        console.log(chalk_1.default.cyan('▸'), chalk_1.default.bold(profile.commandName) + sharedTag + reverseTag);
-        console.log(chalk_1.default.gray('  CLI:'), cli?.displayName || profile.cliType);
-        console.log(chalk_1.default.gray('  Provider:'), provider?.displayName || profile.provider);
-        console.log(chalk_1.default.gray('  Model:'), profile.model || 'default');
-        console.log(chalk_1.default.gray('  Created:'), new Date(profile.createdAt).toLocaleDateString());
-        console.log();
-    });
-    if (profiles.length === 0) {
-        console.log(chalk_1.default.gray('No additional profiles configured. Run'), chalk_1.default.bold('sweech add'), chalk_1.default.gray('to create one.\n'));
+        const providerStr = chalk_1.default.dim(` ${provider?.displayName || profile.provider}`);
+        const modelStr = profile.model ? chalk_1.default.dim(` · ${profile.model}`) : '';
+        const planStr = info?.meta?.plan ? chalk_1.default.cyan(` [${info.meta.plan}]`) : '';
+        const lastStr = relativeTime(info?.lastActive);
+        console.log(`  ${dot} ${chalk_1.default.bold(profile.commandName)}${planStr}${providerStr}${modelStr}${sharedTag}  ${lastStr}${reverseTag}`);
     }
+    if (installedDefaults.length === 0 && profiles.length === 0) {
+        console.log(chalk_1.default.gray('  No profiles configured. Run'), chalk_1.default.bold('sweech add'), chalk_1.default.gray('to create one.'));
+    }
+    console.log();
 });
 // Remove provider command
 program
