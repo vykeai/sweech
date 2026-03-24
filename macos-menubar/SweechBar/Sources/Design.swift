@@ -26,6 +26,18 @@ enum Sweech {
             center: .top, startRadius: 0, endRadius: 300
         )
     }
+
+    enum Animation {
+        static let fast = SwiftUI.Animation.easeInOut(duration: 0.15)
+        static let medium = SwiftUI.Animation.easeInOut(duration: 0.25)
+        static let slow = SwiftUI.Animation.easeInOut(duration: 0.5)
+    }
+
+    enum Spacing {
+        static let cardPadding: CGFloat = 12
+        static let sectionGap: CGFloat = 10
+        static let cardRadius: CGFloat = 12
+    }
 }
 
 extension SwiftUI.Color {

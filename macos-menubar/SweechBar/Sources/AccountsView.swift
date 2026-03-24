@@ -167,6 +167,17 @@ struct AccountsView: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(width: hasBothTypes && grouped ? 680 : 360)
+        .background(KeyboardShortcuts(
+            onRefresh: { service.fetch() },
+            onCycleSort: {
+                let modes = ["smart", "status", "manual"]
+                let idx = modes.firstIndex(of: sortMode) ?? 0
+                sortMode = modes[(idx + 1) % modes.count]
+            },
+            onToggleGroup: { grouped.toggle() },
+            onToggleGuide: { showGuide.toggle() },
+            onToggleSettings: { showSettings.toggle() }
+        ))
     }
 
     // MARK: Layouts
@@ -507,14 +518,26 @@ struct GuideView: View {
                 }
 
                 guideSection(
-                    icon: "terminal", iconColor: Sweech.Color.textMuted,
-                    title: "Quick Reference"
+                    icon: "keyboard", iconColor: Sweech.Color.accent,
+                    title: "Keyboard Shortcuts"
                 ) {
-                    cliRow(cmd: "sweech use <name>", desc: "Switch active account")
-                    cliRow(cmd: "sweech u",          desc: "Instant launcher (tap account to switch)")
-                    cliRow(cmd: "sweech auth <name>",desc: "Re-authenticate expired token")
-                    cliRow(cmd: "sweech usage",      desc: "View usage in terminal")
-                    cliRow(cmd: "sweech ls",         desc: "List all configured accounts")
+                    cliRow(cmd: "r", desc: "Refresh usage data")
+                    cliRow(cmd: "s", desc: "Cycle sort mode")
+                    cliRow(cmd: "g", desc: "Toggle grouped/flat layout")
+                    cliRow(cmd: "?", desc: "Toggle this guide")
+                    cliRow(cmd: ",", desc: "Toggle settings")
+                }
+
+                guideSection(
+                    icon: "terminal", iconColor: Sweech.Color.textMuted,
+                    title: "CLI Quick Reference"
+                ) {
+                    cliRow(cmd: "sweech",             desc: "Interactive launcher")
+                    cliRow(cmd: "sweech usage",       desc: "View usage in terminal")
+                    cliRow(cmd: "sweech usage -m",    desc: "Show per-model breakdown")
+                    cliRow(cmd: "sweech auth <name>", desc: "Re-authenticate expired token")
+                    cliRow(cmd: "sweech ls",          desc: "List all configured accounts")
+                    cliRow(cmd: "sweech doctor",      desc: "Health check")
                 }
             }
             .padding(16)
@@ -1285,5 +1308,50 @@ struct SettingsView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Keyboard Shortcuts
+
+/// Invisible NSView-backed responder that captures key events for the popover.
+struct KeyboardShortcuts: NSViewRepresentable {
+    var onRefresh: () -> Void
+    var onCycleSort: () -> Void
+    var onToggleGroup: () -> Void
+    var onToggleGuide: () -> Void
+    var onToggleSettings: () -> Void
+
+    func makeNSView(context: Context) -> KeyCatcherView {
+        let view = KeyCatcherView()
+        view.handler = context.coordinator
+        DispatchQueue.main.async { view.window?.makeFirstResponder(view) }
+        return view
+    }
+
+    func updateNSView(_ nsView: KeyCatcherView, context: Context) {
+        nsView.handler = context.coordinator
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    class Coordinator {
+        let parent: KeyboardShortcuts
+        init(_ parent: KeyboardShortcuts) { self.parent = parent }
+    }
+
+    class KeyCatcherView: NSView {
+        var handler: Coordinator?
+        override var acceptsFirstResponder: Bool { true }
+        override func keyDown(with event: NSEvent) {
+            guard let handler else { super.keyDown(with: event); return }
+            switch event.charactersIgnoringModifiers {
+            case "r": handler.parent.onRefresh()
+            case "s": handler.parent.onCycleSort()
+            case "g": handler.parent.onToggleGroup()
+            case "?": handler.parent.onToggleGuide()
+            case ",": handler.parent.onToggleSettings()
+            default: super.keyDown(with: event)
+            }
+        }
     }
 }
