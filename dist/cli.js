@@ -239,18 +239,42 @@ program
 // Info command
 program
     .command('info')
-    .description('Show sweetch configuration info')
-    .action(() => {
+    .description('Show sweech configuration info')
+    .option('--json', 'Output as JSON')
+    .action((opts) => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
-    console.log(chalk_1.default.bold('\n🍭 Sweetch Configuration:\n'));
-    console.log(chalk_1.default.cyan('Version:'), '0.1.0');
-    console.log(chalk_1.default.cyan('Config directory:'), config.getBinDir().replace('/bin', ''));
-    console.log(chalk_1.default.cyan('Wrapper scripts:'), config.getBinDir());
-    console.log(chalk_1.default.cyan('Profiles:'), profiles.length);
-    console.log(chalk_1.default.cyan('Default Claude:'), path.join(require('os').homedir(), '.claude'));
-    console.log();
-    console.log(chalk_1.default.gray('💡 Run'), chalk_1.default.bold('sweetch list'), chalk_1.default.gray('to see all providers'));
+    const os = require('os');
+    const configDir = config.getBinDir().replace('/bin', '');
+    const binDir = config.getBinDir();
+    const cacheFile = path.join(os.homedir(), '.sweech', 'rate-limit-cache.json');
+    let cacheAge = null;
+    try {
+        const stat = fs.statSync(cacheFile);
+        const mins = Math.floor((Date.now() - stat.mtimeMs) / 60000);
+        cacheAge = mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+    }
+    catch { }
+    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex');
+    const codexProfiles = profiles.filter(p => p.cliType === 'codex');
+    if (opts.json) {
+        process.stdout.write(JSON.stringify({
+            version: packageJson.version,
+            configDir, binDir, cacheAge,
+            profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length },
+            platform: process.platform, node: process.version,
+        }, null, 2) + '\n');
+        return;
+    }
+    console.log(chalk_1.default.bold('\n🍭 sweech\n'));
+    console.log(chalk_1.default.cyan('  Version:'), packageJson.version);
+    console.log(chalk_1.default.cyan('  Node:'), process.version);
+    console.log(chalk_1.default.cyan('  Platform:'), process.platform);
+    console.log(chalk_1.default.cyan('  Config:'), configDir);
+    console.log(chalk_1.default.cyan('  Wrappers:'), binDir);
+    console.log(chalk_1.default.cyan('  Profiles:'), `${profiles.length} total (${claudeProfiles.length} Claude, ${codexProfiles.length} Codex)`);
+    if (cacheAge)
+        console.log(chalk_1.default.cyan('  Cache:'), `updated ${cacheAge}`);
     console.log();
 });
 // Update wrappers command (hidden, for maintenance)

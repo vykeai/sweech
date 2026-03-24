@@ -227,18 +227,43 @@ program
 // Info command
 program
   .command('info')
-  .description('Show sweetch configuration info')
-  .action(() => {
+  .description('Show sweech configuration info')
+  .option('--json', 'Output as JSON')
+  .action((opts: { json?: boolean }) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
-    console.log(chalk.bold('\n🍭 Sweetch Configuration:\n'));
-    console.log(chalk.cyan('Version:'), '0.1.0');
-    console.log(chalk.cyan('Config directory:'), config.getBinDir().replace('/bin', ''));
-    console.log(chalk.cyan('Wrapper scripts:'), config.getBinDir());
-    console.log(chalk.cyan('Profiles:'), profiles.length);
-    console.log(chalk.cyan('Default Claude:'), path.join(require('os').homedir(), '.claude'));
-    console.log();
-    console.log(chalk.gray('💡 Run'), chalk.bold('sweetch list'), chalk.gray('to see all providers'));
+    const os = require('os');
+    const configDir = config.getBinDir().replace('/bin', '');
+    const binDir = config.getBinDir();
+    const cacheFile = path.join(os.homedir(), '.sweech', 'rate-limit-cache.json');
+    let cacheAge: string | null = null;
+    try {
+      const stat = fs.statSync(cacheFile);
+      const mins = Math.floor((Date.now() - stat.mtimeMs) / 60000);
+      cacheAge = mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+    } catch {}
+
+    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex');
+    const codexProfiles = profiles.filter(p => p.cliType === 'codex');
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        version: packageJson.version,
+        configDir, binDir, cacheAge,
+        profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length },
+        platform: process.platform, node: process.version,
+      }, null, 2) + '\n');
+      return;
+    }
+
+    console.log(chalk.bold('\n🍭 sweech\n'));
+    console.log(chalk.cyan('  Version:'), packageJson.version);
+    console.log(chalk.cyan('  Node:'), process.version);
+    console.log(chalk.cyan('  Platform:'), process.platform);
+    console.log(chalk.cyan('  Config:'), configDir);
+    console.log(chalk.cyan('  Wrappers:'), binDir);
+    console.log(chalk.cyan('  Profiles:'), `${profiles.length} total (${claudeProfiles.length} Claude, ${codexProfiles.length} Codex)`);
+    if (cacheAge) console.log(chalk.cyan('  Cache:'), `updated ${cacheAge}`);
     console.log();
   });
 
