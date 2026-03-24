@@ -256,6 +256,8 @@ function buildEntry(name, command, configDir, label, yoloFlag, resumeFlag, isDef
         needsReauth: account.needsReauth || false,
         lastActive,
         bars,
+        tokenStatus: account.tokenStatus,
+        tokenExpiresAt: account.tokenExpiresAt,
     };
 }
 function entrySmartScore(e) {
@@ -388,6 +390,29 @@ function render(entries, state, usageLoad = 'idle') {
         const expiryStr = hasData ? expiryAlert(entry) : '';
         const useFirstBadge = hasData && useFirstSet.has(entry) && !expiryStr
             ? chalk_1.default.cyan(' ⚡ use first') : '';
+        // Token status indicator
+        let tokenStr = '';
+        if (entry.tokenStatus === 'refreshed') {
+            tokenStr = chalk_1.default.green(' 🔑 token ok');
+        }
+        else if (entry.tokenStatus === 'expired') {
+            tokenStr = chalk_1.default.red(' 🔑 expired');
+        }
+        else if (entry.tokenStatus === 'valid' && entry.tokenExpiresAt) {
+            const hoursLeft = Math.max(0, (entry.tokenExpiresAt - Date.now()) / 3600000);
+            if (hoursLeft < 1) {
+                tokenStr = chalk_1.default.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
+            }
+            else if (hoursLeft < 24) {
+                tokenStr = chalk_1.default.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+            }
+            else {
+                tokenStr = chalk_1.default.dim(' 🔑 token ok');
+            }
+        }
+        else if (entry.tokenStatus === 'no_token' && entry.command !== 'codex') {
+            tokenStr = chalk_1.default.dim(' 🔑 no token');
+        }
         // Provider line
         const providerStr = entry.isDefault
             ? (entry.command === 'codex' ? 'OpenAI' : 'Anthropic')
@@ -429,7 +454,7 @@ function render(entries, state, usageLoad = 'idle') {
         if (selected) {
             body.push(chalk_1.default.yellowBright(`  ┏${'━'.repeat(W)}┓`));
             body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.yellowBright.bold(entry.name) + chalk_1.default.yellowBright(authBadge) + (sharedBadge ? chalk_1.default.magenta(sharedBadge) : '') + (reauthBadge ? chalk_1.default.red(reauthBadge) : '') + useFirstBadge + expiryStr);
-            body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(infoLine));
+            body.push(chalk_1.default.yellowBright('  ┃ ') + chalk_1.default.gray(infoLine) + (hasData ? tokenStr : ''));
             if (state.usage) {
                 renderBars(entry, chalk_1.default.yellowBright('  ┃ '));
             }
@@ -437,7 +462,7 @@ function render(entries, state, usageLoad = 'idle') {
         }
         else {
             body.push(chalk_1.default.dim('  │ ') + chalk_1.default.bold.white(entry.name) + chalk_1.default.dim(authBadge) + (sharedBadge ? chalk_1.default.magenta(sharedBadge) : '') + (reauthBadge ? chalk_1.default.red(reauthBadge) : '') + useFirstBadge + expiryStr);
-            body.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(infoLine));
+            body.push(chalk_1.default.dim('  │ ') + chalk_1.default.gray(infoLine) + (hasData ? tokenStr : ''));
             if (state.usage) {
                 renderBars(entry, chalk_1.default.dim('  │ '));
             }

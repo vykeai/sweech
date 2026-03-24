@@ -42,6 +42,13 @@ export interface LiveRateLimitData {
   /** True when this is cached data returned because a fresh fetch failed */
   isStale?: boolean
 
+  /** OAuth token status: "valid" | "refreshed" | "expired" | "no_token" */
+  tokenStatus?: string
+  /** When the token was last refreshed (ms epoch), if it was refreshed during this fetch */
+  tokenRefreshedAt?: number
+  /** Token expiry time (ms epoch), if known */
+  tokenExpiresAt?: number
+
   // Legacy fields for backward compat with existing code
   /** @deprecated use buckets[0].session.utilization */
   utilization5h?: number
@@ -126,22 +133,35 @@ interface OAuthEntry {
   expiresAt?: number
 }
 
-async function readOAuthToken(configDir: string): Promise<OAuthEntry | null> {
-  if (process.platform !== 'darwin') return null
+interface OAuthReadResult {
+  token: OAuthEntry | null
+  /** "valid" | "refreshed" | "expired" | "no_token" */
+  tokenStatus: string
+  /** Set when status is "refreshed" — the moment the refresh completed */
+  tokenRefreshedAt?: number
+  /** Token expiry timestamp (ms), if known */
+  tokenExpiresAt?: number
+}
+
+async function readOAuthToken(configDir: string): Promise<OAuthReadResult> {
+  if (process.platform !== 'darwin') return { token: null, tokenStatus: 'no_token' }
   const service = keychainServiceName(configDir)
+  const profileName = path.basename(configDir)
   try {
     const username = process.env.USER || os.userInfo().username
     const raw = execSync(
       `security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`,
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     ).trim()
-    if (!raw) return null
+    if (!raw) return { token: null, tokenStatus: 'no_token' }
     const payload = JSON.parse(raw) as Record<string, unknown>
     const token = payload.claudeAiOauth as OAuthEntry | undefined
-    if (!token?.accessToken) return null
+    if (!token?.accessToken) return { token: null, tokenStatus: 'no_token' }
 
     // Token still valid
-    if (!token.expiresAt || token.expiresAt >= Date.now() + 60_000) return token
+    if (!token.expiresAt || token.expiresAt >= Date.now() + 60_000) {
+      return { token, tokenStatus: 'valid', tokenExpiresAt: token.expiresAt }
+    }
 
     // Token expired — try to refresh silently using the stored refresh token
     if (token.refreshToken) {
@@ -174,16 +194,22 @@ async function readOAuthToken(configDir: string): Promise<OAuthEntry | null> {
           '-s', service,
           '-w', JSON.stringify(updatedPayload),
         ], { stdio: 'ignore' })
-        return updatedPayload.claudeAiOauth as OAuthEntry
-      } catch {
-        // Refresh failed — token is truly expired, needs manual re-auth
-        return null
+        const refreshed = updatedPayload.claudeAiOauth as OAuthEntry
+        return {
+          token: refreshed,
+          tokenStatus: 'refreshed',
+          tokenRefreshedAt: Date.now(),
+          tokenExpiresAt: refreshed.expiresAt,
+        }
+      } catch (err: any) {
+        console.error(`[sweech] token refresh failed for ${profileName}:`, err?.message ?? err)
+        return { token: null, tokenStatus: 'expired' }
       }
     }
 
-    return null // expired with no refresh token
+    return { token: null, tokenStatus: 'expired' } // expired with no refresh token
   } catch {
-    return null
+    return { token: null, tokenStatus: 'no_token' }
   }
 }
 
@@ -349,11 +375,21 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
   }
 
   // Claude: use OAuth token + Anthropic API headers
-  const token = await readOAuthToken(configDir)
-  if (!token) return getStaleCache(configDir)
+  const result = await readOAuthToken(configDir)
+  if (!result.token) {
+    const stale = getStaleCache(configDir)
+    if (stale) { stale.tokenStatus = result.tokenStatus; return stale }
+    return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus }
+  }
 
-  const data = await fetchRateLimitHeaders(token.accessToken)
-  if (data) { setCached(configDir, data); return data }
+  const data = await fetchRateLimitHeaders(result.token.accessToken)
+  if (data) {
+    data.tokenStatus = result.tokenStatus
+    data.tokenRefreshedAt = result.tokenRefreshedAt
+    data.tokenExpiresAt = result.tokenExpiresAt
+    setCached(configDir, data)
+    return data
+  }
 
   return getStaleCache(configDir)
 }
@@ -368,11 +404,21 @@ export async function refreshLiveUsage(configDir: string, cliType?: string): Pro
     return getStaleCache(configDir)
   }
 
-  const token = await readOAuthToken(configDir)
-  if (!token) return getStaleCache(configDir)
+  const result = await readOAuthToken(configDir)
+  if (!result.token) {
+    const stale = getStaleCache(configDir)
+    if (stale) { stale.tokenStatus = result.tokenStatus; return stale }
+    return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus }
+  }
 
-  const data = await fetchRateLimitHeaders(token.accessToken)
-  if (data) { setCached(configDir, data); return data }
+  const data = await fetchRateLimitHeaders(result.token.accessToken)
+  if (data) {
+    data.tokenStatus = result.tokenStatus
+    data.tokenRefreshedAt = result.tokenRefreshedAt
+    data.tokenExpiresAt = result.tokenExpiresAt
+    setCached(configDir, data)
+    return data
+  }
 
   return getStaleCache(configDir)
 }

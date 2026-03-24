@@ -107,20 +107,22 @@ function keychainServiceName(configDir) {
 }
 async function readOAuthToken(configDir) {
     if (process.platform !== 'darwin')
-        return null;
+        return { token: null, tokenStatus: 'no_token' };
     const service = keychainServiceName(configDir);
+    const profileName = path.basename(configDir);
     try {
         const username = process.env.USER || os.userInfo().username;
         const raw = (0, child_process_1.execSync)(`security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
         if (!raw)
-            return null;
+            return { token: null, tokenStatus: 'no_token' };
         const payload = JSON.parse(raw);
         const token = payload.claudeAiOauth;
         if (!token?.accessToken)
-            return null;
+            return { token: null, tokenStatus: 'no_token' };
         // Token still valid
-        if (!token.expiresAt || token.expiresAt >= Date.now() + 60000)
-            return token;
+        if (!token.expiresAt || token.expiresAt >= Date.now() + 60000) {
+            return { token, tokenStatus: 'valid', tokenExpiresAt: token.expiresAt };
+        }
         // Token expired — try to refresh silently using the stored refresh token
         if (token.refreshToken) {
             try {
@@ -153,17 +155,23 @@ async function readOAuthToken(configDir) {
                     '-s', service,
                     '-w', JSON.stringify(updatedPayload),
                 ], { stdio: 'ignore' });
-                return updatedPayload.claudeAiOauth;
+                const refreshed = updatedPayload.claudeAiOauth;
+                return {
+                    token: refreshed,
+                    tokenStatus: 'refreshed',
+                    tokenRefreshedAt: Date.now(),
+                    tokenExpiresAt: refreshed.expiresAt,
+                };
             }
-            catch {
-                // Refresh failed — token is truly expired, needs manual re-auth
-                return null;
+            catch (err) {
+                console.error(`[sweech] token refresh failed for ${profileName}:`, err?.message ?? err);
+                return { token: null, tokenStatus: 'expired' };
             }
         }
-        return null; // expired with no refresh token
+        return { token: null, tokenStatus: 'expired' }; // expired with no refresh token
     }
     catch {
-        return null;
+        return { token: null, tokenStatus: 'no_token' };
     }
 }
 // ── API call ──────────────────────────────────────────────────────────────────
@@ -318,11 +326,20 @@ async function getLiveUsage(configDir, cliType) {
         return getStaleCache(configDir);
     }
     // Claude: use OAuth token + Anthropic API headers
-    const token = await readOAuthToken(configDir);
-    if (!token)
-        return getStaleCache(configDir);
-    const data = await fetchRateLimitHeaders(token.accessToken);
+    const result = await readOAuthToken(configDir);
+    if (!result.token) {
+        const stale = getStaleCache(configDir);
+        if (stale) {
+            stale.tokenStatus = result.tokenStatus;
+            return stale;
+        }
+        return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus };
+    }
+    const data = await fetchRateLimitHeaders(result.token.accessToken);
     if (data) {
+        data.tokenStatus = result.tokenStatus;
+        data.tokenRefreshedAt = result.tokenRefreshedAt;
+        data.tokenExpiresAt = result.tokenExpiresAt;
         setCached(configDir, data);
         return data;
     }
@@ -340,11 +357,20 @@ async function refreshLiveUsage(configDir, cliType) {
         }
         return getStaleCache(configDir);
     }
-    const token = await readOAuthToken(configDir);
-    if (!token)
-        return getStaleCache(configDir);
-    const data = await fetchRateLimitHeaders(token.accessToken);
+    const result = await readOAuthToken(configDir);
+    if (!result.token) {
+        const stale = getStaleCache(configDir);
+        if (stale) {
+            stale.tokenStatus = result.tokenStatus;
+            return stale;
+        }
+        return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus };
+    }
+    const data = await fetchRateLimitHeaders(result.token.accessToken);
     if (data) {
+        data.tokenStatus = result.tokenStatus;
+        data.tokenRefreshedAt = result.tokenRefreshedAt;
+        data.tokenExpiresAt = result.tokenExpiresAt;
         setCached(configDir, data);
         return data;
     }

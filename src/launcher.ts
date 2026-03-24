@@ -38,6 +38,10 @@ export interface LaunchEntry {
   needsReauth: boolean;
   lastActive: string;
   bars: UsageBar[];     // session, all models, sonnet only
+  /** OAuth token status: "valid" | "refreshed" | "expired" | "no_token" */
+  tokenStatus?: string;
+  /** Token expiry time (ms epoch) */
+  tokenExpiresAt?: number;
 }
 
 interface LaunchState {
@@ -249,6 +253,8 @@ function buildEntry(
     needsReauth: account.needsReauth || false,
     lastActive,
     bars,
+    tokenStatus: account.tokenStatus,
+    tokenExpiresAt: account.tokenExpiresAt,
   };
 }
 
@@ -388,6 +394,25 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
     const useFirstBadge = hasData && useFirstSet.has(entry) && !expiryStr
       ? chalk.cyan(' ⚡ use first') : '';
 
+    // Token status indicator
+    let tokenStr = '';
+    if (entry.tokenStatus === 'refreshed') {
+      tokenStr = chalk.green(' 🔑 token ok');
+    } else if (entry.tokenStatus === 'expired') {
+      tokenStr = chalk.red(' 🔑 expired');
+    } else if (entry.tokenStatus === 'valid' && entry.tokenExpiresAt) {
+      const hoursLeft = Math.max(0, (entry.tokenExpiresAt - Date.now()) / 3600000);
+      if (hoursLeft < 1) {
+        tokenStr = chalk.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
+      } else if (hoursLeft < 24) {
+        tokenStr = chalk.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+      } else {
+        tokenStr = chalk.dim(' 🔑 token ok');
+      }
+    } else if (entry.tokenStatus === 'no_token' && entry.command !== 'codex') {
+      tokenStr = chalk.dim(' 🔑 no token');
+    }
+
     // Provider line
     const providerStr = entry.isDefault
       ? (entry.command === 'codex' ? 'OpenAI' : 'Anthropic')
@@ -430,7 +455,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
     if (selected) {
       body.push(chalk.yellowBright(`  ┏${'━'.repeat(W)}┓`));
       body.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
-      body.push(chalk.yellowBright('  ┃ ') + chalk.gray(infoLine));
+      body.push(chalk.yellowBright('  ┃ ') + chalk.gray(infoLine) + (hasData ? tokenStr : ''));
 
       if (state.usage) {
         renderBars(entry, chalk.yellowBright('  ┃ '));
@@ -439,7 +464,7 @@ function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoad
       body.push(chalk.yellowBright(`  ┗${'━'.repeat(W)}┛`));
     } else {
       body.push(chalk.dim('  │ ') + chalk.bold.white(entry.name) + chalk.dim(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
-      body.push(chalk.dim('  │ ') + chalk.gray(infoLine));
+      body.push(chalk.dim('  │ ') + chalk.gray(infoLine) + (hasData ? tokenStr : ''));
 
       if (state.usage) {
         renderBars(entry, chalk.dim('  │ '));

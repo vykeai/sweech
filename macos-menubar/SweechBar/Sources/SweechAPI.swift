@@ -23,6 +23,9 @@ struct LiveData: Codable {
     let reset7dAt: Double?
     let representativeClaim: String?
     let isStale: Bool?
+    let tokenStatus: String?
+    let tokenRefreshedAt: Double?
+    let tokenExpiresAt: Double?
 }
 
 struct SweechAccount: Codable, Identifiable {
@@ -40,6 +43,9 @@ struct SweechAccount: Codable, Identifiable {
     let lastActive: String?
     let needsReauth: Bool?
     let live: LiveData?
+    let tokenStatus: String?
+    let tokenRefreshedAt: Double?
+    let tokenExpiresAt: Double?
 
     struct AccountMeta: Codable {
         let plan: String?
@@ -62,6 +68,24 @@ struct SweechAccount: Codable, Identifiable {
     var planType: String? { live?.planType ?? meta?.plan }
 
     var buckets: [LiveBucket] { live?.buckets ?? [] }
+
+    /// True if the token was refreshed within the last 60 seconds
+    var wasRecentlyRefreshed: Bool {
+        guard let ts = tokenRefreshedAt else { return false }
+        return Date().timeIntervalSince1970 * 1000 - ts < 60_000
+    }
+
+    /// Human-readable token expiry, e.g. "2h 15m"
+    var tokenExpiryRelative: String? {
+        guard let epoch = tokenExpiresAt else { return nil }
+        // tokenExpiresAt is in milliseconds
+        let interval = epoch / 1000 - Date().timeIntervalSince1970
+        if interval <= 0 { return "expired" }
+        if interval < 3600 { return "\(Int(interval / 60))m" }
+        let h = Int(interval / 3600)
+        let m = Int((interval.truncatingRemainder(dividingBy: 3600)) / 60)
+        return "\(h)h \(m)m"
+    }
 
     func resetTimeRelative(_ epoch: Double?) -> String? {
         guard let epoch else { return nil }

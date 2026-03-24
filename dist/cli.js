@@ -912,7 +912,27 @@ const usageCmd = program
             const recommendedStr = i === 0 && smartScore(a) >= 0
                 ? chalk_1.default.cyan(' ⚡ use first')
                 : '';
-            console.log(`  ${chalk_1.default.bold(a.name)}${planStr}${emailStr}${recommendedStr}`);
+            // Token status indicator for OAuth accounts
+            let tokenStr = '';
+            if (a.tokenStatus === 'refreshed') {
+                tokenStr = chalk_1.default.green(' 🔑 token refreshed');
+            }
+            else if (a.tokenStatus === 'expired') {
+                tokenStr = chalk_1.default.red(' 🔑 token expired');
+            }
+            else if (a.tokenStatus === 'valid' && a.tokenExpiresAt) {
+                const hoursLeft = Math.max(0, (a.tokenExpiresAt - Date.now()) / 3600000);
+                if (hoursLeft < 1) {
+                    tokenStr = chalk_1.default.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
+                }
+                else if (hoursLeft < 24) {
+                    tokenStr = chalk_1.default.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+                }
+            }
+            else if (a.tokenStatus === 'no_token' && a.cliType === 'claude') {
+                tokenStr = chalk_1.default.dim(' 🔑 no token');
+            }
+            console.log(`  ${chalk_1.default.bold(a.name)}${planStr}${emailStr}${recommendedStr}${tokenStr}`);
             // 5h window
             const cap5hStr = a.minutesUntilFirstCapacity !== undefined
                 ? chalk_1.default.yellow(` · capacity in ${a.minutesUntilFirstCapacity}m`)

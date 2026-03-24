@@ -61,6 +61,13 @@ export interface AccountInfo {
 
   // Live data from API (requires Keychain token)
   live?: LiveRateLimitData
+
+  /** OAuth token status: "valid" | "refreshed" | "expired" | "no_token" */
+  tokenStatus?: string
+  /** When the token was last refreshed (ms epoch), if refreshed during this fetch */
+  tokenRefreshedAt?: number
+  /** Token expiry time (ms epoch), if known */
+  tokenExpiresAt?: number
 }
 
 export interface AccountRef {
@@ -368,6 +375,15 @@ export async function getAccountInfo(
       }
     }
 
+    // Derive tokenStatus from live data or from needsReauth
+    let tokenStatus: string | undefined = live?.tokenStatus
+    if (!tokenStatus) {
+      if (cliType === 'codex') tokenStatus = undefined  // codex doesn't use OAuth tokens this way
+      else if (needsReauth) tokenStatus = 'expired'
+      else if (live) tokenStatus = 'valid'
+      else tokenStatus = 'no_token'
+    }
+
     return {
       name: p.name,
       commandName: p.commandName,
@@ -383,6 +399,9 @@ export async function getAccountInfo(
       ...windows,
       ...(weeklyReset ?? {}),
       live,
+      tokenStatus,
+      tokenRefreshedAt: live?.tokenRefreshedAt,
+      tokenExpiresAt: live?.tokenExpiresAt,
     }
   }))
 }

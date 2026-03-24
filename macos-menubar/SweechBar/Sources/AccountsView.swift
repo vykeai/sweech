@@ -719,6 +719,37 @@ struct AccountCard: View {
                 .help("OAuth token expired. Run: sweech auth \(account.commandName)")
             }
 
+            // Token refresh indicator
+            if account.wasRecentlyRefreshed {
+                HStack(spacing: 6) {
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Sweech.Color.ok)
+                    Text("Token refreshed")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Sweech.Color.ok)
+                    if let expiry = account.tokenExpiryRelative {
+                        Text("· expires in \(expiry)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Sweech.Color.textMuted)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .help("OAuth token was just refreshed successfully")
+            } else if account.tokenStatus == "valid", let expiry = account.tokenExpiryRelative,
+                      let expiresAt = account.tokenExpiresAt,
+                      (expiresAt / 1000 - Date().timeIntervalSince1970) < 86400 {
+                HStack(spacing: 6) {
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
+                    Text("Token expires in \(expiry)")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.7))
+                }
+                .help("OAuth token is valid but expires soon")
+            }
+
             // Usage rows — "All models" first, specific model buckets after
             if account.buckets.count > 1 {
                 let sorted = account.buckets.sorted { a, _ in a.label == "All models" }

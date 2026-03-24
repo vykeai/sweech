@@ -284,6 +284,18 @@ async function getAccountInfo(profiles, options = {}) {
                 needsReauth = true;
             }
         }
+        // Derive tokenStatus from live data or from needsReauth
+        let tokenStatus = live?.tokenStatus;
+        if (!tokenStatus) {
+            if (cliType === 'codex')
+                tokenStatus = undefined; // codex doesn't use OAuth tokens this way
+            else if (needsReauth)
+                tokenStatus = 'expired';
+            else if (live)
+                tokenStatus = 'valid';
+            else
+                tokenStatus = 'no_token';
+        }
         return {
             name: p.name,
             commandName: p.commandName,
@@ -299,6 +311,9 @@ async function getAccountInfo(profiles, options = {}) {
             ...windows,
             ...(weeklyReset ?? {}),
             live,
+            tokenStatus,
+            tokenRefreshedAt: live?.tokenRefreshedAt,
+            tokenExpiresAt: live?.tokenExpiresAt,
         };
     }));
 }
