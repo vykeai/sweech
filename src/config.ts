@@ -238,6 +238,11 @@ export class ConfigManager {
   echo "$UPDATED" > "$USAGE_FILE"
 ) &
 
+# Skip usage tracking for help/version queries
+case "\${1:-}" in
+  --help|-h|--version|-V) exec ${cli.command} "$@" ;;
+esac
+
 # Transform arguments: --yolo -> --dangerously-skip-permissions (Claude Code only)
 ARGS=()
 for arg in "$@"; do

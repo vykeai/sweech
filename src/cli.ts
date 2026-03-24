@@ -308,30 +308,59 @@ program
 program
   .command('stats [command-name]')
   .description('Show usage statistics for providers')
-  .action((commandName?: string) => {
+  .option('--json', 'Output as JSON')
+  .option('--sort <field>', 'Sort by: uses (default), recent, name', 'uses')
+  .action((commandName: string | undefined, opts: { json?: boolean; sort: string }) => {
     const tracker = new UsageTracker();
     const stats = tracker.getStats(commandName);
 
     if (stats.length === 0) {
+      if (opts.json) { process.stdout.write(JSON.stringify({ stats: [] }) + '\n'); return; }
       console.log(chalk.yellow('\n📊 No usage data yet. Start using your providers!\n'));
+      return;
+    }
+
+    // Sort
+    const sorted = [...stats].sort((a, b) => {
+      if (opts.sort === 'recent') return new Date(b.lastUsed).getTime() - new Date(a.lastUsed).getTime();
+      if (opts.sort === 'name') return a.commandName.localeCompare(b.commandName);
+      return b.totalUses - a.totalUses; // default: uses
+    });
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ stats: sorted }, null, 2) + '\n');
       return;
     }
 
     console.log(chalk.bold('\n📊 Usage Statistics:\n'));
 
-    stats.forEach(stat => {
-      const lastUsed = new Date(stat.lastUsed);
+    const timeAgo = (iso: string): string => {
+      const diff = Date.now() - new Date(iso).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `${hours}h ago`;
+      const days = Math.floor(hours / 24);
+      return `${days}d ago`;
+    };
+
+    // Find max for bar rendering
+    const maxUses = Math.max(...sorted.map(s => s.totalUses));
+
+    sorted.forEach(stat => {
       const firstUsed = new Date(stat.firstUsed);
-      const daysSinceFirst = Math.floor(
+      const daysSinceFirst = Math.max(1, Math.floor(
         (Date.now() - firstUsed.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      const avgPerDay = daysSinceFirst > 0 ? (stat.totalUses / daysSinceFirst).toFixed(1) : stat.totalUses;
+      ));
+      const avgPerDay = (stat.totalUses / daysSinceFirst).toFixed(1);
+      const barWidth = 20;
+      const filled = Math.round((stat.totalUses / maxUses) * barWidth);
+      const bar = chalk.cyan('█'.repeat(filled)) + chalk.dim('░'.repeat(barWidth - filled));
 
       console.log(chalk.cyan('▸'), chalk.bold(stat.commandName));
-      console.log(chalk.gray('  Total uses:'), stat.totalUses);
-      console.log(chalk.gray('  Last used:'), lastUsed.toLocaleString());
-      console.log(chalk.gray('  First used:'), firstUsed.toLocaleDateString());
-      console.log(chalk.gray('  Avg per day:'), avgPerDay);
+      console.log(`  ${bar} ${chalk.white(stat.totalUses)} launches`);
+      console.log(chalk.gray(`  Last: ${timeAgo(stat.lastUsed)}  ·  First: ${firstUsed.toLocaleDateString()}  ·  ${avgPerDay}/day`));
       console.log();
     });
   });
