@@ -178,6 +178,53 @@ export function createSweechFedServer(port: number): http.Server {
       return
     }
 
+    if (pathname === '/fed/alerts') {
+      const profiles = getProfiles()
+      const accounts = await getAccountInfo(getKnownAccounts(profiles))
+      const alerts: Array<{ type: string; severity: string; account: string; message: string }> = []
+
+      for (const a of accounts) {
+        if (a.needsReauth) {
+          alerts.push({ type: 'auth', severity: 'error', account: a.name, message: 'Needs re-authentication' })
+        }
+        if (a.live?.status === 'limit_reached') {
+          alerts.push({ type: 'limit', severity: 'warning', account: a.name, message: '5h rate limit reached' })
+        }
+        if (a.live?.utilization7d !== undefined && a.live.utilization7d >= 0.9) {
+          alerts.push({ type: 'usage', severity: 'warning', account: a.name, message: `Weekly usage at ${Math.round(a.live.utilization7d * 100)}%` })
+        }
+        // Expiry alert
+        if (a.live?.reset7dAt) {
+          const hoursLeft = (a.live.reset7dAt - Date.now() / 1000) / 3600
+          const remaining = 1 - (a.live.utilization7d ?? 0)
+          if (hoursLeft > 0 && hoursLeft < 24 && remaining > 0.2) {
+            alerts.push({ type: 'expiry', severity: 'info', account: a.name, message: `${Math.round(remaining * 100)}% expiring in ${Math.round(hoursLeft)}h` })
+          }
+        }
+      }
+
+      sendJson(res, 200, { alerts, timestamp: new Date().toISOString() })
+      return
+    }
+
+    if (pathname === '/fed/status') {
+      const profiles = getProfiles()
+      const accounts = await getAccountInfo(getKnownAccounts(profiles))
+      const total = accounts.length
+      const available = accounts.filter(a => !a.needsReauth && a.live?.status !== 'limit_reached').length
+      const limited = accounts.filter(a => a.live?.status === 'limit_reached').length
+      const needsAuth = accounts.filter(a => a.needsReauth).length
+      sendJson(res, 200, {
+        total,
+        available,
+        limited,
+        needsAuth,
+        uptime: process.uptime(),
+        version: packageJson.version,
+      })
+      return
+    }
+
     sendJson(res, 404, { error: 'Not found' })
   })
 
