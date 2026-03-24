@@ -56,8 +56,9 @@ program
   .action(async () => {
     try {
       await runInit();
-    } catch (error: any) {
-      console.error(chalk.red('Error during initialization:', error.message));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error during initialization:', msg));
       process.exit(1);
     }
   });
@@ -102,8 +103,9 @@ program
       console.log();
       console.log(chalk.gray('💡 Tip: You can add multiple accounts for the same provider!'));
       console.log(chalk.gray('   Example: claude-mini, minimax-work, minimax-personal, etc.'));
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -288,8 +290,9 @@ program
 
       config.removeProfile(commandName);
       console.log(chalk.green(`\n✓ Removed '${commandName}' successfully\n`));
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -366,8 +369,9 @@ program
   .action(async (options) => {
     try {
       await backupSweetch(options.output);
-    } catch (error: any) {
-      console.error(chalk.red('Backup failed:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Backup failed:'), msg);
       process.exit(1);
     }
   });
@@ -380,8 +384,9 @@ program
   .action(async (options) => {
     try {
       await backupClaude(options.output);
-    } catch (error: any) {
-      console.error(chalk.red('Backup failed:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Backup failed:'), msg);
       process.exit(1);
     }
   });
@@ -393,8 +398,9 @@ program
   .action(async (backupFile: string) => {
     try {
       await restoreSweetch(backupFile);
-    } catch (error: any) {
-      console.error(chalk.red('Restore failed:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Restore failed:'), msg);
       process.exit(1);
     }
   });
@@ -585,8 +591,11 @@ program
     try {
       const { execFileSync } = require('child_process');
       execFileSync(cli.command, passthroughArgs, { env, stdio: 'inherit' });
-    } catch (error: any) {
-      process.exit(error.status ?? 1);
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'status' in error) {
+        process.exit((error as { status: number }).status ?? 1);
+      }
+      process.exit(1);
     }
   });
 
@@ -635,8 +644,9 @@ program
       if (token.expiresAt) {
         console.log(chalk.gray(`  Token expires: ${new Date(token.expiresAt).toLocaleString()}\n`));
       }
-    } catch (error: any) {
-      console.error(chalk.red('Authentication failed:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Authentication failed:'), msg);
       process.exit(1);
     }
   });
@@ -679,8 +689,9 @@ program
       try {
         aliasManager.removeAlias(value);
         console.log(chalk.green(`\n✓ Removed alias '${value}'\n`));
-      } catch (error: any) {
-        console.error(chalk.red('Error:'), error.message);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk.red('Error:'), msg);
         process.exit(1);
       }
       return;
@@ -708,8 +719,9 @@ program
         console.log(chalk.green(`\n✓ Added alias: ${alias} → ${command}\n`));
         console.log(chalk.gray('Now you can use:'), chalk.bold(alias));
         console.log();
-      } catch (error: any) {
-        console.error(chalk.red('Error:'), error.message);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk.red('Error:'), msg);
         process.exit(1);
       }
       return;
@@ -807,8 +819,9 @@ program
   .action(async () => {
     try {
       await runDoctor();
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -820,8 +833,9 @@ program
   .action(async () => {
     try {
       await runPath();
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -833,8 +847,9 @@ program
   .action(async (commandName: string) => {
     try {
       await runTest(commandName);
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -846,8 +861,9 @@ program
   .action(async (commandName: string) => {
     try {
       await runEdit(commandName);
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -859,8 +875,9 @@ program
   .action(async (source: string, target: string) => {
     try {
       await runClone(source, target);
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -872,8 +889,9 @@ program
   .action(async (oldName: string, newName: string) => {
     try {
       await runRename(oldName, newName);
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -896,8 +914,9 @@ program
 
       const profileDir = config.getProfileDir(commandName);
       await backupChatHistory(commandName, profileDir, options.output);
-    } catch (error: any) {
-      console.error(chalk.red('Backup failed:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Backup failed:'), msg);
       process.exit(1);
     }
   });
@@ -931,8 +950,9 @@ program
       console.log(chalk.dim(`  SIGTERM/SIGINT for graceful shutdown`));
       // Keep alive
       await new Promise(() => {});
-    } catch (error: any) {
-      console.error(chalk.red('Failed to start server:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Failed to start server:'), msg);
       process.exit(1);
     }
   });
@@ -1161,8 +1181,9 @@ program
   .action(async () => {
     try {
       await runReset();
-    } catch (error: any) {
-      console.error(chalk.red('Error:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
@@ -1177,8 +1198,9 @@ program
       const { execSync: execSyncUpdate } = require('child_process');
       execSyncUpdate('npm install -g github:vykeai/sweech', { stdio: 'inherit' });
       console.log(chalk.green('\n✓ sweech updated successfully\n'));
-    } catch (error: any) {
-      console.error(chalk.red('Update failed:'), error.message);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Update failed:'), msg);
       process.exit(1);
     }
   });

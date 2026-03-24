@@ -257,7 +257,8 @@ async function confirmChatBackupBeforeRemoval(profileName, configDir) {
             console.log(chalk_1.default.green('\n✓ Backup complete. Proceeding with removal...\n'));
         }
         catch (error) {
-            console.error(chalk_1.default.red('\nBackup failed:', error.message));
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(chalk_1.default.red('\nBackup failed:', msg));
             const { proceed } = await inquirer_1.default.prompt([
                 {
                     type: 'confirm',

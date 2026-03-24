@@ -421,8 +421,9 @@ export async function runPath(): Promise<void> {
         console.log(chalk.green(`\n✓ Added to ${rcFile}`));
         console.log(chalk.yellow(`\nRestart your terminal or run: ${chalk.bold(`source ${rcFile}`)}\n`));
       }
-    } catch (error: any) {
-      console.error(chalk.red(`\nFailed to update ${rcFile}:`, error.message));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`\nFailed to update ${rcFile}:`, msg));
       console.log(chalk.gray('Please add manually using the commands above.\n'));
     }
   }

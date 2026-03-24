@@ -110,7 +110,9 @@ async function installPlugin(npmPackage) {
         });
     }
     catch (err) {
-        const msg = err.stderr ? err.stderr.toString().trim() : String(err);
+        const msg = err && typeof err === 'object' && 'stderr' in err && err.stderr
+            ? String(err.stderr).trim()
+            : (err instanceof Error ? err.message : String(err));
         throw new Error(`Failed to install plugin "${npmPackage}": ${msg}`);
     }
     // Resolve the actual package name (handles scoped packages, version

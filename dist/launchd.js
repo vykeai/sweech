@@ -108,7 +108,8 @@ function installLaunchd(port) {
         console.log(chalk_1.default.gray(`Logs: ${LOG_PATH}`));
     }
     catch (err) {
-        console.error(chalk_1.default.red(`Failed to install launchd service: ${err.message}`));
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(chalk_1.default.red(`Failed to install launchd service: ${msg}`));
         throw err;
     }
 }
@@ -129,7 +130,8 @@ function uninstallLaunchd() {
         console.log(chalk_1.default.green(`Removed ${PLIST_PATH}`));
     }
     catch (err) {
-        console.error(chalk_1.default.red(`Failed to uninstall launchd service: ${err.message}`));
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(chalk_1.default.red(`Failed to uninstall launchd service: ${msg}`));
         throw err;
     }
 }

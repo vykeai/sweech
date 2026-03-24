@@ -72,8 +72,9 @@ export function installLaunchd(port: number): void {
     execSync(`launchctl load "${PLIST_PATH}"`);
     console.log(chalk.green(`Loaded ${PLIST_LABEL} via launchctl`));
     console.log(chalk.gray(`Logs: ${LOG_PATH}`));
-  } catch (err: any) {
-    console.error(chalk.red(`Failed to install launchd service: ${err.message}`));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`Failed to install launchd service: ${msg}`));
     throw err;
   }
 }
@@ -94,8 +95,9 @@ export function uninstallLaunchd(): void {
 
     fs.unlinkSync(PLIST_PATH);
     console.log(chalk.green(`Removed ${PLIST_PATH}`));
-  } catch (err: any) {
-    console.error(chalk.red(`Failed to uninstall launchd service: ${err.message}`));
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(chalk.red(`Failed to uninstall launchd service: ${msg}`));
     throw err;
   }
 }

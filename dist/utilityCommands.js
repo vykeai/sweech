@@ -60,6 +60,7 @@ const config_1 = require("./config");
 const clis_1 = require("./clis");
 const providers_1 = require("./providers");
 const cliDetection_1 = require("./cliDetection");
+const subscriptions_1 = require("./subscriptions");
 const execFileAsync = (0, util_1.promisify)(child_process_1.execFile);
 /**
  * Check if sweetch bin directory is in PATH
@@ -169,6 +170,43 @@ async function runDoctor() {
     }
     else {
         console.log(chalk_1.default.gray(`  ✗ No usage cache found — run \`sweech usage\` to populate`));
+    }
+    // Check credential freshness (OAuth tokens in Keychain)
+    console.log(chalk_1.default.bold('\nCredentials:'));
+    let reauthNeeded = [];
+    try {
+        const accountList = (0, subscriptions_1.getKnownAccounts)(profiles);
+        const accounts = await (0, subscriptions_1.getAccountInfo)(accountList);
+        for (const acct of accounts) {
+            if (acct.needsReauth) {
+                reauthNeeded.push(acct.name);
+                console.log(chalk_1.default.red(`  ✗ ${acct.name}: needs re-authentication`));
+                console.log(chalk_1.default.gray(`    Run: sweech auth ${acct.commandName}`));
+            }
+            else if (acct.live?.tokenStatus === 'expired') {
+                reauthNeeded.push(acct.name);
+                console.log(chalk_1.default.yellow(`  ⚠ ${acct.name}: token expired`));
+                console.log(chalk_1.default.gray(`    Run: sweech auth ${acct.commandName}`));
+            }
+            else if (acct.live?.tokenExpiresAt) {
+                const hoursLeft = (acct.live.tokenExpiresAt - Date.now()) / 3600000;
+                if (hoursLeft > 0 && hoursLeft < 24) {
+                    console.log(chalk_1.default.yellow(`  ⚠ ${acct.name}: token expires in ${Math.round(hoursLeft)}h`));
+                }
+                else {
+                    console.log(chalk_1.default.green(`  ✓ ${acct.name}: token valid`));
+                }
+            }
+            else {
+                console.log(chalk_1.default.green(`  ✓ ${acct.name}: ok`));
+            }
+        }
+        if (reauthNeeded.length === 0 && accounts.length > 0) {
+            console.log(chalk_1.default.green(`  All ${accounts.length} account credentials valid`));
+        }
+    }
+    catch {
+        console.log(chalk_1.default.gray('  ✗ Could not check credentials (fetch failed)'));
     }
     // Check profiles
     console.log(chalk_1.default.bold(`\nProfiles (${profiles.length}):`));
@@ -306,6 +344,7 @@ async function runDoctor() {
     const hasIssues = !isInPath(binDir) ||
         symlinkIssues.length > 0 ||
         largeProfiles.length > 0 ||
+        reauthNeeded.length > 0 ||
         cacheStale ||
         profiles.some(p => {
             const wrapperPath = path.join(binDir, p.commandName);
@@ -406,7 +445,8 @@ async function runPath() {
             }
         }
         catch (error) {
-            console.error(chalk_1.default.red(`\nFailed to update ${rcFile}:`, error.message));
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(chalk_1.default.red(`\nFailed to update ${rcFile}:`, msg));
             console.log(chalk_1.default.gray('Please add manually using the commands above.\n'));
         }
     }

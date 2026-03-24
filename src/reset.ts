@@ -118,8 +118,9 @@ export async function runReset(): Promise<void> {
       console.log();
       await backupSweetch();
       console.log();
-    } catch (error: any) {
-      console.error(chalk.red('Backup failed:', error.message));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Backup failed:', msg));
       const { continueAnyway } = await inquirer.prompt([
         {
           type: 'confirm',
@@ -163,8 +164,9 @@ export async function runReset(): Promise<void> {
     try {
       fs.rmSync(sweetchDir, { recursive: true, force: true });
       console.log(chalk.green(`  ✓ Removed ${sweetchDir}`));
-    } catch (error: any) {
-      console.error(chalk.red(`  ✗ Failed to remove ${sweetchDir}:`, error.message));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red(`  ✗ Failed to remove ${sweetchDir}:`, msg));
     }
   }
 

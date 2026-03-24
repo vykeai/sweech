@@ -99,8 +99,10 @@ export async function installPlugin(npmPackage: string): Promise<void> {
     execSync(`npm install --prefix "${PLUGINS_DIR}" ${npmPackage}`, {
       stdio: 'pipe',
     });
-  } catch (err: any) {
-    const msg = err.stderr ? err.stderr.toString().trim() : String(err);
+  } catch (err: unknown) {
+    const msg = err && typeof err === 'object' && 'stderr' in err && err.stderr
+      ? String(err.stderr).trim()
+      : (err instanceof Error ? err.message : String(err));
     throw new Error(`Failed to install plugin "${npmPackage}": ${msg}`);
   }
 

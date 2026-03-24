@@ -128,8 +128,9 @@ export async function runInit(): Promise<void> {
             console.log(chalk.green('\n✓ Already in PATH\n'));
           }
         }
-      } catch (error: any) {
-        console.error(chalk.red(`\n✗ Failed to update ${rcFile}:`, error.message));
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk.red(`\n✗ Failed to update ${rcFile}:`, msg));
         console.log(chalk.yellow('\nPlease add it manually.\n'));
       }
     } else {
@@ -201,8 +202,9 @@ export async function runInit(): Promise<void> {
     await createProfile(answers, provider, cli, config);
     console.log();
 
-  } catch (error: any) {
-    console.error(chalk.red('\n✗ Setup failed:', error.message));
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(chalk.red('\n✗ Setup failed:', msg));
     return;
   }
 

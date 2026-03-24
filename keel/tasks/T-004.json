@@ -3,13 +3,13 @@
   "title": "Replace error: any catches with proper typing",
   "wave": "wave-1",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "26 instances of catch (error: any) across the codebase. Replace with proper error typing.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T22:40:12.593Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-24T22:40:12.593Z",
+      "by": "claude",
+      "text": "33 catch(error:any) replaced with catch(error:unknown) + instanceof guards across 10 files. Zero remaining."
+    }
+  ],
   "acceptanceCriteria": [
     "All catch blocks use unknown or specific error types",
     "instanceof checks for Error vs other",

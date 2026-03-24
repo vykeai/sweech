@@ -156,7 +156,8 @@ async function runInit() {
                 }
             }
             catch (error) {
-                console.error(chalk_1.default.red(`\n✗ Failed to update ${rcFile}:`, error.message));
+                const msg = error instanceof Error ? error.message : String(error);
+                console.error(chalk_1.default.red(`\n✗ Failed to update ${rcFile}:`, msg));
                 console.log(chalk_1.default.yellow('\nPlease add it manually.\n'));
             }
         }
@@ -220,7 +221,8 @@ async function runInit() {
         console.log();
     }
     catch (error) {
-        console.error(chalk_1.default.red('\n✗ Setup failed:', error.message));
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('\n✗ Setup failed:', msg));
         return;
     }
     // Step 4: Verify setup

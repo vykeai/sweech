@@ -201,8 +201,9 @@ async function readOAuthToken(configDir: string): Promise<OAuthReadResult> {
           tokenRefreshedAt: Date.now(),
           tokenExpiresAt: refreshed.expiresAt,
         }
-      } catch (err: any) {
-        console.error(`[sweech] token refresh failed for ${profileName}:`, err?.message ?? err)
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[sweech] token refresh failed for ${profileName}:`, msg)
         return { token: null, tokenStatus: 'expired' }
       }
     }

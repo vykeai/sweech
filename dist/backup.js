@@ -144,7 +144,8 @@ async function backupSweetch(outputFile) {
             console.log(chalk_1.default.yellow('   You\'ll need them to restore on a new machine.\n'));
         }
         catch (error) {
-            console.error(chalk_1.default.red('Encryption failed:'), error.message);
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(chalk_1.default.red('Encryption failed:'), msg);
             if (fs.existsSync(tempZip)) {
                 fs.unlinkSync(tempZip);
             }
@@ -304,7 +305,8 @@ async function restoreSweetch(backupFile) {
         console.log();
     }
     catch (error) {
-        if (error.message.includes('Bad decrypt')) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes('Bad decrypt')) {
             throw new Error('Incorrect password or corrupted backup file');
         }
         throw error;

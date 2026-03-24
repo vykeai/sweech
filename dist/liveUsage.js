@@ -164,7 +164,8 @@ async function readOAuthToken(configDir) {
                 };
             }
             catch (err) {
-                console.error(`[sweech] token refresh failed for ${profileName}:`, err?.message ?? err);
+                const msg = err instanceof Error ? err.message : String(err);
+                console.error(`[sweech] token refresh failed for ${profileName}:`, msg);
                 return { token: null, tokenStatus: 'expired' };
             }
         }

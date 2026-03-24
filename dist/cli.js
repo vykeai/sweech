@@ -89,7 +89,8 @@ program
         await (0, init_1.runInit)();
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error during initialization:', error.message));
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error during initialization:', msg));
         process.exit(1);
     }
 });
@@ -129,7 +130,8 @@ program
         console.log(chalk_1.default.gray('   Example: claude-mini, minimax-work, minimax-personal, etc.'));
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -303,7 +305,8 @@ program
         console.log(chalk_1.default.green(`\n✓ Removed '${commandName}' successfully\n`));
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -375,7 +378,8 @@ program
         await (0, backup_1.backupSweetch)(options.output);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Backup failed:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Backup failed:'), msg);
         process.exit(1);
     }
 });
@@ -389,7 +393,8 @@ program
         await (0, backup_1.backupClaude)(options.output);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Backup failed:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Backup failed:'), msg);
         process.exit(1);
     }
 });
@@ -402,7 +407,8 @@ program
         await (0, backup_1.restoreSweetch)(backupFile);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Restore failed:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Restore failed:'), msg);
         process.exit(1);
     }
 });
@@ -579,7 +585,10 @@ program
         execFileSync(cli.command, passthroughArgs, { env, stdio: 'inherit' });
     }
     catch (error) {
-        process.exit(error.status ?? 1);
+        if (error && typeof error === 'object' && 'status' in error) {
+            process.exit(error.status ?? 1);
+        }
+        process.exit(1);
     }
 });
 // Auth command — re-authenticate a profile
@@ -623,7 +632,8 @@ program
         }
     }
     catch (error) {
-        console.error(chalk_1.default.red('Authentication failed:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Authentication failed:'), msg);
         process.exit(1);
     }
 });
@@ -662,7 +672,8 @@ program
             console.log(chalk_1.default.green(`\n✓ Removed alias '${value}'\n`));
         }
         catch (error) {
-            console.error(chalk_1.default.red('Error:'), error.message);
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(chalk_1.default.red('Error:'), msg);
             process.exit(1);
         }
         return;
@@ -688,7 +699,8 @@ program
             console.log();
         }
         catch (error) {
-            console.error(chalk_1.default.red('Error:'), error.message);
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(chalk_1.default.red('Error:'), msg);
             process.exit(1);
         }
         return;
@@ -773,7 +785,8 @@ program
         await (0, utilityCommands_1.runDoctor)();
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -786,7 +799,8 @@ program
         await (0, utilityCommands_1.runPath)();
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -799,7 +813,8 @@ program
         await (0, utilityCommands_1.runTest)(commandName);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -812,7 +827,8 @@ program
         await (0, utilityCommands_1.runEdit)(commandName);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -825,7 +841,8 @@ program
         await (0, utilityCommands_1.runClone)(source, target);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -838,7 +855,8 @@ program
         await (0, utilityCommands_1.runRename)(oldName, newName);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -860,7 +878,8 @@ program
         await (0, chatBackup_1.backupChatHistory)(commandName, profileDir, options.output);
     }
     catch (error) {
-        console.error(chalk_1.default.red('Backup failed:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Backup failed:'), msg);
         process.exit(1);
     }
 });
@@ -895,7 +914,8 @@ program
         await new Promise(() => { });
     }
     catch (error) {
-        console.error(chalk_1.default.red('Failed to start server:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Failed to start server:'), msg);
         process.exit(1);
     }
 });
@@ -1129,7 +1149,8 @@ program
         await (0, reset_2.runReset)();
     }
     catch (error) {
-        console.error(chalk_1.default.red('Error:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
         process.exit(1);
     }
 });
@@ -1145,7 +1166,8 @@ program
         console.log(chalk_1.default.green('\n✓ sweech updated successfully\n'));
     }
     catch (error) {
-        console.error(chalk_1.default.red('Update failed:'), error.message);
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Update failed:'), msg);
         process.exit(1);
     }
 });

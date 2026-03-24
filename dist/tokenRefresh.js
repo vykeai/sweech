@@ -124,7 +124,8 @@ async function refreshExpiringTokens(profiles) {
             });
         }
         catch (err) {
-            console.error(`[sweech] token refresh failed for ${profile.name}:`, err?.message ?? err);
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[sweech] token refresh failed for ${profile.name}:`, msg);
             events_1.sweechEvents.emit('token_expired', {
                 account: profile.name,
             });

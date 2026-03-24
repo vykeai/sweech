@@ -149,7 +149,8 @@ async function runReset() {
             console.log();
         }
         catch (error) {
-            console.error(chalk_1.default.red('Backup failed:', error.message));
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(chalk_1.default.red('Backup failed:', msg));
             const { continueAnyway } = await inquirer_1.default.prompt([
                 {
                     type: 'confirm',
@@ -190,7 +191,8 @@ async function runReset() {
             console.log(chalk_1.default.green(`  ✓ Removed ${sweetchDir}`));
         }
         catch (error) {
-            console.error(chalk_1.default.red(`  ✗ Failed to remove ${sweetchDir}:`, error.message));
+            const msg = error instanceof Error ? error.message : String(error);
+            console.error(chalk_1.default.red(`  ✗ Failed to remove ${sweetchDir}:`, msg));
         }
     }
     // Note about PATH
