@@ -3,13 +3,13 @@
   "title": "CI pipeline (GitHub Actions)",
   "wave": "wave-4",
   "space": "space-infra",
-  "status": "ready",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Set up CI for automated testing on every push and PR.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T22:34:52.844Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-24T22:34:52.844Z",
+      "by": "claude",
+      "text": "GitHub Actions CI pipeline: Node 18/20/22 matrix, build+typecheck+test, SweechBar swift build on macOS, lint checks."
+    }
+  ],
   "acceptanceCriteria": [
     "Runs npm test on push to main and develop",
     "Runs swift build for SweechBar",

@@ -14,6 +14,7 @@ import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SH
 import { getCLI } from './clis';
 import { getProvider } from './providers';
 import { detectInstalledCLIs } from './cliDetection';
+import { getAccountInfo, getKnownAccounts } from './subscriptions';
 
 const execFileAsync = promisify(execFile);
 
@@ -136,6 +137,39 @@ export async function runDoctor(): Promise<void> {
     }
   } else {
     console.log(chalk.gray(`  ✗ No usage cache found — run \`sweech usage\` to populate`));
+  }
+
+  // Check credential freshness (OAuth tokens in Keychain)
+  console.log(chalk.bold('\nCredentials:'));
+  let reauthNeeded: string[] = [];
+  try {
+    const accountList = getKnownAccounts(profiles);
+    const accounts = await getAccountInfo(accountList);
+    for (const acct of accounts) {
+      if (acct.needsReauth) {
+        reauthNeeded.push(acct.name);
+        console.log(chalk.red(`  ✗ ${acct.name}: needs re-authentication`));
+        console.log(chalk.gray(`    Run: sweech auth ${acct.commandName}`));
+      } else if (acct.live?.tokenStatus === 'expired') {
+        reauthNeeded.push(acct.name);
+        console.log(chalk.yellow(`  ⚠ ${acct.name}: token expired`));
+        console.log(chalk.gray(`    Run: sweech auth ${acct.commandName}`));
+      } else if (acct.live?.tokenExpiresAt) {
+        const hoursLeft = (acct.live.tokenExpiresAt - Date.now()) / 3600000;
+        if (hoursLeft > 0 && hoursLeft < 24) {
+          console.log(chalk.yellow(`  ⚠ ${acct.name}: token expires in ${Math.round(hoursLeft)}h`));
+        } else {
+          console.log(chalk.green(`  ✓ ${acct.name}: token valid`));
+        }
+      } else {
+        console.log(chalk.green(`  ✓ ${acct.name}: ok`));
+      }
+    }
+    if (reauthNeeded.length === 0 && accounts.length > 0) {
+      console.log(chalk.green(`  All ${accounts.length} account credentials valid`));
+    }
+  } catch {
+    console.log(chalk.gray('  ✗ Could not check credentials (fetch failed)'));
   }
 
   // Check profiles
@@ -277,6 +311,7 @@ export async function runDoctor(): Promise<void> {
   const hasIssues = !isInPath(binDir) ||
     symlinkIssues.length > 0 ||
     largeProfiles.length > 0 ||
+    reauthNeeded.length > 0 ||
     cacheStale ||
     profiles.some(p => {
       const wrapperPath = path.join(binDir, p.commandName);

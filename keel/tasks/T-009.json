@@ -3,13 +3,13 @@
   "title": "Doctor command: credential freshness check",
   "wave": "wave-1",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Doctor should verify OAuth tokens are not expired and API keys are valid.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T22:34:52.844Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-24T22:34:52.844Z",
+      "by": "claude",
+      "text": "Doctor now checks OAuth token validity, expiry within 24h, and needsReauth status for all accounts."
+    }
+  ],
   "acceptanceCriteria": [
     "Check OAuth token expiry in Keychain",
     "Warn if token expires within 24h",
