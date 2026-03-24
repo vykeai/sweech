@@ -12,7 +12,7 @@ const aliases_1 = require("./aliases");
 const ALL_COMMANDS = [
     'init', 'add', 'list', 'ls', 'remove', 'rm', 'info',
     'update-wrappers', 'backup', 'backup-claude', 'restore',
-    'stats', 'show', 'alias', 'discover', 'completion',
+    'stats', 'show', 'use', 'auth', 'alias', 'discover', 'completion',
     'doctor', 'path', 'test', 'edit', 'clone', 'rename',
     'backup-chats', 'serve', 'usage', 'reset', 'update',
     'sessions', 'sync', 'audit', 'team', 'plugins',
@@ -20,7 +20,7 @@ const ALL_COMMANDS = [
 ];
 /** Commands that accept a profile name as first argument */
 const PROFILE_COMMANDS = new Set([
-    'remove', 'rm', 'show', 'stats', 'test', 'edit', 'clone', 'rename', 'backup-chats',
+    'remove', 'rm', 'show', 'stats', 'test', 'edit', 'clone', 'rename', 'backup-chats', 'use', 'auth',
 ]);
 /** Sort modes for `usage --sort` */
 const USAGE_SORT_MODES = ['smart', 'status', 'manual'];

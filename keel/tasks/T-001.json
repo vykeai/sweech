@@ -3,13 +3,13 @@
   "title": "Implement sweech use <name> command",
   "wave": "wave-1",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Add a direct profile switch command that sets the active profile without launching the interactive TUI. Referenced in SweechBar guide and docs but not implemented.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-24T22:18:04.935Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-24T22:18:04.935Z",
+      "by": "claude",
+      "text": "Implemented in commit. All 599 tests pass."
+    }
+  ],
   "acceptanceCriteria": [
     "sweech use <name> sets CLAUDE_CONFIG_DIR and launches the CLI",
     "Validates profile exists before switching",

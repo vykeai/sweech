@@ -547,6 +547,85 @@ program
     }
     console.log();
 });
+// Use command — launch a profile's CLI directly
+program
+    .command('use <command-name>')
+    .description('Launch a profile CLI with its config directory')
+    .allowUnknownOption(true)
+    .action((commandName, _opts, cmd) => {
+    const config = new config_1.ConfigManager();
+    const profiles = config.getProfiles();
+    const aliasManager = new aliases_1.AliasManager();
+    const resolvedName = aliasManager.resolveAlias(commandName);
+    const profile = profiles.find(p => p.commandName === resolvedName);
+    const cli = profile ? (0, clis_1.getCLI)(profile.cliType) : (0, clis_1.getCLI)(resolvedName);
+    if (!profile && !cli) {
+        console.error(chalk_1.default.red(`Profile '${commandName}' not found`));
+        process.exit(1);
+    }
+    const cliConfig = profile ? (0, clis_1.getCLI)(profile.cliType) : cli;
+    const profileDir = profile
+        ? config.getProfileDir(profile.commandName)
+        : path.join(require('os').homedir(), `.${cliConfig.name}`);
+    // Passthrough args (everything after the profile name)
+    const passthroughArgs = cmd.args.slice(1);
+    // Set config dir env var and exec the CLI
+    const env = { ...process.env, [cliConfig.configDirEnvVar]: profileDir };
+    // Strip nesting vars per AGENTS.md
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    try {
+        const { execFileSync } = require('child_process');
+        execFileSync(cliConfig.command, passthroughArgs, { env, stdio: 'inherit' });
+    }
+    catch (error) {
+        process.exit(error.status ?? 1);
+    }
+});
+// Auth command — re-authenticate a profile
+program
+    .command('auth <command-name>')
+    .description('Re-authenticate a profile (trigger OAuth flow)')
+    .action(async (commandName) => {
+    const config = new config_1.ConfigManager();
+    const profiles = config.getProfiles();
+    const aliasManager = new aliases_1.AliasManager();
+    const resolvedName = aliasManager.resolveAlias(commandName);
+    const profile = profiles.find(p => p.commandName === resolvedName);
+    if (!profile) {
+        console.error(chalk_1.default.red(`Profile '${commandName}' not found`));
+        process.exit(1);
+    }
+    const cli = (0, clis_1.getCLI)(profile.cliType);
+    if (!cli) {
+        console.error(chalk_1.default.red(`CLI type '${profile.cliType}' not supported`));
+        process.exit(1);
+    }
+    console.log(chalk_1.default.bold(`\nRe-authenticating ${resolvedName}...\n`));
+    try {
+        const { getOAuthToken, oauthTokenToEnv } = require('./oauth');
+        const token = await getOAuthToken(profile.cliType, profile.provider);
+        const envVars = oauthTokenToEnv(token, profile.cliType);
+        // Update profile settings.json with new auth token
+        const profileDir = config.getProfileDir(resolvedName);
+        const settingsPath = path.join(profileDir, 'settings.json');
+        if (fs.existsSync(settingsPath)) {
+            const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+            if (!settings.env)
+                settings.env = {};
+            Object.assign(settings.env, envVars);
+            fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+        }
+        console.log(chalk_1.default.green(`\n  ✓ Successfully re-authenticated ${resolvedName}\n`));
+        if (token.expiresAt) {
+            console.log(chalk_1.default.gray(`  Token expires: ${new Date(token.expiresAt).toLocaleString()}\n`));
+        }
+    }
+    catch (error) {
+        console.error(chalk_1.default.red('Authentication failed:'), error.message);
+        process.exit(1);
+    }
+});
 // Alias command
 program
     .command('alias [action] [value]')

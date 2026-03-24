@@ -659,9 +659,9 @@ async function runLauncher() {
             (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })), { refresh: true }).then(fresh => {
                 patchEntries(fresh);
                 draw();
-            }).catch(() => { });
+            }).catch(err => console.error('[sweech] usage refresh:', err.message || err));
         }
-    }).catch(() => { });
+    }).catch(err => console.error('[sweech] initial fetch:', err.message || err));
     // Enter alternate screen + hide cursor.
     // Enable SGR mouse reporting so scroll wheel arrives as \x1b[<64/65;...M sequences
     // (which our PassThrough filter drops) rather than being converted to arrow keys
@@ -712,7 +712,7 @@ async function runLauncher() {
                 state.extraBuckets = !state.extraBuckets;
                 // Re-patch bars with new filter
                 if (usageLoad === 'loaded') {
-                    (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName }))).then(accounts => { patchEntries(accounts); draw(); }).catch(() => { });
+                    (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName }))).then(accounts => { patchEntries(accounts); draw(); }).catch(err => console.error('[sweech] bucket refresh:', err.message || err));
                 }
                 draw();
             }

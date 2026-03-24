@@ -137,9 +137,9 @@ async function refreshExpiringTokens(profiles) {
  */
 function startTokenRefreshLoop(profiles, intervalMs = DEFAULT_INTERVAL_MS) {
     // Run immediately on start, then on the interval
-    refreshExpiringTokens(profiles).catch(() => { });
+    refreshExpiringTokens(profiles).catch(err => console.error('[sweech] token refresh:', err.message || err));
     const timer = setInterval(() => {
-        refreshExpiringTokens(profiles).catch(() => { });
+        refreshExpiringTokens(profiles).catch(err => console.error('[sweech] token refresh:', err.message || err));
     }, intervalMs);
     // Allow the Node process to exit even if the timer is still active
     timer.unref();
