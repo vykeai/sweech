@@ -3,13 +3,13 @@
   "title": "SweechBar notarization and DMG distribution",
   "wave": "wave-4",
   "space": "space-menubar",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Notarize SweechBar.app for macOS Gatekeeper and create DMG installer.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T16:50:39.594Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T16:50:39.594Z",
+      "by": "claude",
+      "text": "Build script scripts/build-dmg.sh: release build, code signing, DMG creation, notarization. Entitlements file added. Requires DEVELOPER_ID and APPLE_ID env vars for signing/notarization."
+    }
+  ],
   "acceptanceCriteria": [
     "App is signed with developer certificate",
     "Notarized with Apple",
