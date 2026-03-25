@@ -636,6 +636,13 @@ add       backup    clone     doctor    edit      list      update    ...
 curl -fsSL https://raw.githubusercontent.com/vykeai/sweech/main/install-from-github.sh | bash
 ```
 
+### Homebrew (macOS)
+
+```bash
+brew install vykeai/tap/sweech
+brew install --cask vykeai/tap/sweech-bar
+```
+
 ### Manual Install
 
 **Option 1:** Install from GitHub

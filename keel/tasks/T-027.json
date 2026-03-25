@@ -3,13 +3,13 @@
   "title": "Homebrew formula",
   "wave": "wave-4",
   "space": "space-infra",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Create Homebrew formula for easy macOS installation.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T14:21:29.698Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T14:21:29.698Z",
+      "by": "claude",
+      "text": "Formula/sweech.rb + Casks/sweech-bar.rb created. README updated with brew install instructions."
+    }
+  ],
   "acceptanceCriteria": [
     "Formula installs sweech and SweechBar.app",
     "brew install sweech works",
