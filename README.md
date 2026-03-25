@@ -10,10 +10,10 @@ Sweech is also the account control plane for the broader routing stack:
 - it tracks account health, rate-limit windows, and refresh state
 - it can recommend which account should be used first when a router such as `omnai` or `cloudy` asks
 
-[![Tests](https://img.shields.io/badge/tests-380%20passing-brightgreen.svg)](https://github.com/vykeai/sweech)
+[![Tests](https://img.shields.io/badge/tests-733%20passing-brightgreen.svg)](https://github.com/vykeai/sweech)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue.svg)](https://www.typescriptlang.org/)
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-yellow.svg?logo=buy-me-a-coffee&logoColor=white)](https://buymeacoffee.com/czaku)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://www.typescriptlang.org/)
+[![npm](https://img.shields.io/npm/v/sweech.svg)](https://www.npmjs.com/package/sweech)
 
 ```bash
 # Use them all at once! 🎉
@@ -22,35 +22,29 @@ claude-qwen         # Qwen (Alibaba) - $0.14/M tokens
 claude-deep         # DeepSeek via Claude Code - $0.28/M tokens (cheapest!)
 ```
 
-## ✨ What's New
+## Features
 
-### v0.2.1
+| Feature | CLI | Launcher TUI | SweechBar (macOS) |
+|---------|-----|-------------|-------------------|
+| Smart sort (expiry-first) | `sweech usage` | `s` key | Settings |
+| Live usage bars (5h + 7d) | `sweech usage` | auto | auto |
+| Per-model buckets | `sweech usage -m` | `m` key | Settings toggle |
+| Sparkline history (24h) | `sweech usage --history` | `h` key | — |
+| Profile launch | `sweech use <name>` | Enter | Launch menu |
+| Re-authentication | `sweech auth <name>` | — | — |
+| Global hotkey | — | — | Cmd+Shift+S |
+| Threshold notifications | — | — | 70% / 90% alerts |
+| Token refresh visibility | JSON output | key icon | Token badge |
+| Webhook events | Config-driven | — | — |
+| Dynamic shell completion | Tab | — | — |
 
-- 🔗 **Shared Data Mode** — When adding a profile, choose **Fresh** (fully isolated) or **Shared** (symlink memory & data to a master profile). Auth stays separate.
-- 📋 **List improvements** — Profiles with `sharedWith` show `[shared ↔ claude]` tag; master profiles show `(← shared by: ...)` reverse dependency.
-- ⚠️ **Remove warnings** — Warns when other profiles share data with the profile being removed ("Their symlinks will break"). Safely unlinks symlinks instead of deleting shared dirs.
-- 🏥 **Doctor symlink check** — Now verifies symlink validity for shared profiles, reporting ✓/✗ for each of the 5 shared dirs.
-- 📋 **Clone sharing** — If the source profile has `sharedWith` set, clone asks whether to inherit that sharing relationship.
-- 🔄 **`sweech update`** — New command. Self-updates sweech from `github:vykeai/sweech` via `npm install -g`.
-- 🎮 **Launcher improvements** — Shared profiles show `[shared]` indicator; model name shown in label when set.
+### Highlights
 
-### v0.2.0
-
-- 🎮 **Interactive Launcher** - Just type `sweech` — select profile, toggle yolo & resume with keyboard
-- 📁 **Sibling Directories** - Profiles live at `~/.claude-<name>/` alongside `~/.claude/`
-- 🔒 **Enforced Naming** - All commands must start with `claude-` for consistency
-- 💾 **Remembers Last Choice** - Launcher restores your previous selection, yolo, and resume state
-- 🧠 **Updated Models** - Default Anthropic models updated to claude-sonnet-4-6 / claude-haiku-4-5
-
-### v0.1.0
-
-- 🔐 **Multiple Claude Accounts** - OAuth support for adding multiple subscription accounts without logging out
-- 🚀 **Dual CLI Support** - Claude Code + Codex (OpenAI)
-- 🏠 **Custom Providers** - Localhost, LAN, remote hosts
-- 🌐 **10+ Providers** - DeepSeek, Qwen, OpenRouter, MiniMax, Kimi, GLM + more
-- 💾 **Profile Backup** - Export complete profile data (settings, chat history, credentials)
-- 🔧 **Advanced Tools** - Doctor, test, clone, rename commands
-- 🛡️ **Smart Reset** - Safe cleanup without touching default directories
+- **Smart Sort** — Profiles with expiring weekly quota automatically rank first. Never waste what resets soonest.
+- **SweechBar** — macOS menu bar app with live usage, smart sort, launch buttons, and Cmd+Shift+S global hotkey.
+- **Federation API** — `sweech serve` exposes `/fed/widget`, `/fed/alerts`, `/fed/status` for integration with routing tools.
+- **733 tests** — Comprehensive coverage including integration tests, edge cases, and OAuth flows.
+- **AES-256 backups** — Encrypted backup/restore of all profile configurations and chat history.
 
 ---
 
@@ -343,22 +337,35 @@ $ fast      # Runs: codex-deepseek
 
 ## 📦 All Commands
 
-### Core Commands
+### Core
 
 ```bash
-sweech add                     # Add provider (interactive, with data mode choice)
-sweech list                    # List all providers (shows shared tags)
-sweech remove <name>           # Remove provider (warns if others share data with it)
-sweech info                    # Show configuration
-sweech update                  # Self-update sweech from GitHub
+sweech                         # Interactive launcher TUI
+sweech use <name>              # Launch a profile directly
+sweech auth <name>             # Re-authenticate expired token
+sweech add                     # Add provider (interactive)
+sweech list                    # List all providers with live status
+sweech remove <name>           # Remove provider
+sweech info [--json]           # Show configuration
+```
+
+### Usage & Monitoring
+
+```bash
+sweech usage                   # Live usage bars (5h + 7d windows)
+sweech usage -m                # Per-model bucket breakdown
+sweech usage --history         # 24h sparkline trends
+sweech usage --json            # Machine-readable output
+sweech stats [name] [--json]   # Launch statistics with visual bars
+sweech serve [--port]          # Start federation HTTP server
 ```
 
 ### Provider Management
 
 ```bash
-sweech show <name>             # Show provider details
+sweech show <name>             # Detailed info with live rate limits
 sweech edit <name>             # Edit provider config
-sweech clone <src> <dest>      # Clone provider config (inherits shared data if applicable)
+sweech clone <src> <dest>      # Clone provider config
 sweech rename <old> <new>      # Rename provider
 sweech test <name>             # Test provider connection
 ```
@@ -366,27 +373,22 @@ sweech test <name>             # Test provider connection
 ### Backup & Migration
 
 ```bash
-sweech backup                  # Create encrypted backup
+sweech backup                  # Create AES-256 encrypted backup
 sweech restore <file>          # Restore from backup
-sweech backup-chats <name>     # Export complete profile data
+sweech backup-chats <name>     # Export chat history
+sweech backup-claude           # Backup ~/.claude/ directory
 ```
 
 ### Utilities
 
 ```bash
-sweech stats [name]            # Usage statistics
-sweech alias [action]          # Manage aliases
+sweech doctor                  # Health check (PATH, CLIs, credentials, symlinks)
+sweech alias [action]          # Manage command aliases
 sweech discover                # Browse available providers
-sweech doctor                  # Check installation health (includes symlink check for shared profiles)
-sweech path                    # Show bin directory path
-sweech completion <shell>      # Generate shell completion
-```
-
-### Maintenance
-
-```bash
-sweech reset                   # Remove all sweech providers
-sweech update-wrappers         # Regenerate wrapper scripts
+sweech completion <shell>      # Shell completion (bash/zsh) with dynamic profiles
+sweech webhooks                # Show configured webhooks
+sweech path                    # Show bin directory
+sweech update                  # Self-update from GitHub
 ```
 
 ---
@@ -756,26 +758,23 @@ Your default `~/.claude/` stays **completely untouched** (unless a profile choos
 
 ## 🧪 Testing
 
-Comprehensive test suite with 380 tests:
+Comprehensive test suite with 733 tests across 30 suites:
 
 ```bash
-# Run all tests
-npm test
-
-# Run with coverage
-npm run test:coverage
-
-# Watch mode
-npm run test:watch
+npm test            # Run all tests
+npm run build       # TypeScript build
 ```
 
 **Test Coverage:**
-- ✅ 380 tests passing
-- ✅ 17 test suites
-- ✅ Provider filtering by CLI
-- ✅ Custom provider creation
-- ✅ Backup/restore encryption
-- ✅ Chat history export
+- 733 tests across 30 suites
+- Launcher integration tests (entry building, render, keyboard, launch command)
+- Federation server edge cases (rate limiting, CORS, alerts, status)
+- OAuth flow tests
+- Charts and sparkline tests
+- Account selector scoring tests
+- Live usage cache TTL and staleness
+- Webhook delivery and retry logic
+- Usage history recording and pruning
 - ✅ Reset protection
 - ✅ All commands tested
 - ✅ Shared data mode (setupSharedDirs, symlink removal, list tags, doctor checks, clone inheritance)

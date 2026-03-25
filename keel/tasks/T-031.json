@@ -3,13 +3,13 @@
   "title": "README overhaul",
   "wave": "wave-4",
   "space": "space-infra",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Update README with current features, screenshots, installation options.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T13:14:13.110Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T13:14:13.110Z",
+      "by": "claude",
+      "text": "README updated: feature parity table, 733 test badge, updated command reference with new commands (use/auth/usage -m/--history/webhooks), updated test section."
+    }
+  ],
   "acceptanceCriteria": [
     "GIF/screenshot of launcher TUI",
     "Screenshot of SweechBar",
