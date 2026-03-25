@@ -19,6 +19,14 @@ export interface UsageStats {
   recentUses: string[]; // Last 10 timestamps
 }
 
+export interface UsageSummary {
+  totalAccounts: number;
+  availableAccounts: number;
+  limitedAccounts: number;
+  accountsNeedingReauth: number;
+  recommendedAccount?: string;
+}
+
 export class UsageTracker {
   private usageFile: string;
 
@@ -94,4 +102,21 @@ export class UsageTracker {
       return [];
     }
   }
+}
+
+export function summarizeAccountsForTelemetry(
+  accounts: Array<{
+    commandName: string;
+    needsReauth?: boolean;
+    live?: { status?: string };
+  }>,
+): UsageSummary {
+  const available = accounts.filter((account) => !account.needsReauth && account.live?.status !== 'limit_reached');
+  return {
+    totalAccounts: accounts.length,
+    availableAccounts: available.length,
+    limitedAccounts: accounts.filter((account) => account.live?.status === 'limit_reached').length,
+    accountsNeedingReauth: accounts.filter((account) => account.needsReauth).length,
+    recommendedAccount: available[0]?.commandName,
+  };
 }

@@ -58,6 +58,7 @@ const path = __importStar(require("path"));
 const config_1 = require("./config");
 const subscriptions_1 = require("./subscriptions");
 const accountSelector_1 = require("./accountSelector");
+const usage_1 = require("./usage");
 const packageJsonPath = path.join(__dirname, '../package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 function sendJson(res, status, body) {
@@ -144,7 +145,7 @@ function createSweechFedServer(port) {
                 uptime: process.uptime(),
                 hostname: node_os_1.default.hostname(),
                 accountCount: allAccounts.length,
-                capabilities: ['account-usage', 'claude-usage'],
+                capabilities: ['account-usage', 'account-recommendation', 'account-alerts'],
             });
             return;
         }
@@ -166,11 +167,13 @@ function createSweechFedServer(port) {
         if (pathname === '/fed/widget') {
             const profiles = getProfiles();
             const accounts = await (0, subscriptions_1.getAccountInfo)((0, subscriptions_1.getKnownAccounts)(profiles));
+            const summary = (0, usage_1.summarizeAccountsForTelemetry)(accounts);
             sendJson(res, 200, {
                 type: 'account-usage',
                 title: 'sweech',
                 emoji: '🍭',
                 data: {
+                    summary,
                     accounts: accounts.map(a => ({
                         name: a.name,
                         cliType: a.cliType,

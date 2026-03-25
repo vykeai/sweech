@@ -37,6 +37,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.UsageTracker = void 0;
+exports.summarizeAccountsForTelemetry = summarizeAccountsForTelemetry;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
@@ -103,3 +104,13 @@ class UsageTracker {
     }
 }
 exports.UsageTracker = UsageTracker;
+function summarizeAccountsForTelemetry(accounts) {
+    const available = accounts.filter((account) => !account.needsReauth && account.live?.status !== 'limit_reached');
+    return {
+        totalAccounts: accounts.length,
+        availableAccounts: available.length,
+        limitedAccounts: accounts.filter((account) => account.live?.status === 'limit_reached').length,
+        accountsNeedingReauth: accounts.filter((account) => account.needsReauth).length,
+        recommendedAccount: available[0]?.commandName,
+    };
+}

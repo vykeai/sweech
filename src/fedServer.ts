@@ -18,6 +18,7 @@ import * as path from 'path'
 import { ConfigManager } from './config'
 import { getAccountInfo, getKnownAccounts } from './subscriptions'
 import { suggestBestAccount } from './accountSelector'
+import { summarizeAccountsForTelemetry } from './usage'
 
 const packageJsonPath = path.join(__dirname, '../package.json')
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { version: string }
@@ -124,7 +125,7 @@ export function createSweechFedServer(port: number): http.Server {
         uptime: process.uptime(),
         hostname: os.hostname(),
         accountCount: allAccounts.length,
-        capabilities: ['account-usage', 'claude-usage'],
+        capabilities: ['account-usage', 'account-recommendation', 'account-alerts'],
       })
       return
     }
@@ -148,11 +149,13 @@ export function createSweechFedServer(port: number): http.Server {
     if (pathname === '/fed/widget') {
       const profiles = getProfiles()
       const accounts = await getAccountInfo(getKnownAccounts(profiles))
+      const summary = summarizeAccountsForTelemetry(accounts)
       sendJson(res, 200, {
         type: 'account-usage',
         title: 'sweech',
         emoji: '🍭',
         data: {
+          summary,
           accounts: accounts.map(a => ({
             name: a.name,
             cliType: a.cliType,

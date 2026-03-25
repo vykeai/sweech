@@ -103,6 +103,8 @@ describe('Fed Server', () => {
       expect(body).toHaveProperty('machine');
       expect(body).toHaveProperty('accountCount');
       expect(body.capabilities).toContain('account-usage');
+      expect(body.capabilities).toContain('account-recommendation');
+      expect(body.capabilities).not.toContain('claude-usage');
     });
   });
 
@@ -125,6 +127,14 @@ describe('Fed Server', () => {
       expect(body.type).toBe('account-usage');
       expect(body.title).toBe('sweech');
       expect(body.data).toHaveProperty('accounts');
+      expect(body.data).toHaveProperty('summary');
+      expect(body.data.summary).toMatchObject({
+        totalAccounts: 1,
+        availableAccounts: 1,
+        limitedAccounts: 0,
+        accountsNeedingReauth: 0,
+        recommendedAccount: 'claude',
+      });
       expect(Array.isArray(body.data.accounts)).toBe(true);
     });
   });

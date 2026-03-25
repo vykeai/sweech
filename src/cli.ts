@@ -12,6 +12,7 @@ import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
 import { backupSweetch, restoreSweetch, backupClaude } from './backup';
 import { UsageTracker } from './usage';
+import { summarizeAccountsForTelemetry } from './usage';
 import { AliasManager } from './aliases';
 import { generateBashCompletion, generateZshCompletion, handleComplete } from './completion';
 import { confirmChatBackupBeforeRemoval, backupChatHistory } from './chatBackup';
@@ -1127,7 +1128,12 @@ const usageCmd = program
     try { appendSnapshot(accounts); } catch {}
 
     if (opts.json) {
-      process.stdout.write(JSON.stringify({ accounts }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        summary: summarizeAccountsForTelemetry(accounts),
+        accounts,
+      }, null, 2) + '\n');
       return;
     }
 

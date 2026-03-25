@@ -5,7 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { UsageTracker, UsageRecord, UsageStats } from '../src/usage';
+import { UsageTracker, UsageRecord, UsageStats, summarizeAccountsForTelemetry } from '../src/usage';
 
 jest.mock('fs');
 const mockFs = fs as jest.Mocked<typeof fs>;
@@ -220,6 +220,24 @@ describe('UsageTracker', () => {
 
       expect(writtenData).toHaveLength(1);
       expect(writtenData[0].commandName).toBe('claude-qwen');
+    });
+  });
+
+  describe('summarizeAccountsForTelemetry', () => {
+    test('summarizes multi-account availability for machine-readable consumers', () => {
+      const summary = summarizeAccountsForTelemetry([
+        { commandName: 'claude', live: { status: 'allowed' } },
+        { commandName: 'codex', live: { status: 'limit_reached' } },
+        { commandName: 'claude-pole', needsReauth: true, live: { status: 'allowed' } },
+      ]);
+
+      expect(summary).toEqual({
+        totalAccounts: 3,
+        availableAccounts: 1,
+        limitedAccounts: 1,
+        accountsNeedingReauth: 1,
+        recommendedAccount: 'claude',
+      });
     });
   });
 });

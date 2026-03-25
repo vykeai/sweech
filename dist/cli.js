@@ -48,6 +48,7 @@ const interactive_1 = require("./interactive");
 const clis_1 = require("./clis");
 const backup_1 = require("./backup");
 const usage_1 = require("./usage");
+const usage_2 = require("./usage");
 const aliases_1 = require("./aliases");
 const completion_1 = require("./completion");
 const chatBackup_1 = require("./chatBackup");
@@ -1081,7 +1082,12 @@ const usageCmd = program
     }
     catch { }
     if (opts.json) {
-        process.stdout.write(JSON.stringify({ accounts }, null, 2) + '\n');
+        process.stdout.write(JSON.stringify({
+            schemaVersion: 1,
+            generatedAt: new Date().toISOString(),
+            summary: (0, usage_2.summarizeAccountsForTelemetry)(accounts),
+            accounts,
+        }, null, 2) + '\n');
         return;
     }
     // --history: show 24h sparkline per account and exit
