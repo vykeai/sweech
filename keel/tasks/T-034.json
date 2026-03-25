@@ -3,13 +3,13 @@
   "title": "Usage analytics dashboard (local)",
   "wave": "wave-4",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "low",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "sweech dashboard opens a local web page with charts showing usage over time.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T19:25:53.986Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T19:25:53.986Z",
+      "by": "claude",
+      "text": "sweech dashboard serves self-contained HTML on localhost with usage charts, profile stats, account status. 463-line dashboard.ts."
+    }
+  ],
   "acceptanceCriteria": [
     "Serves static HTML on localhost",
     "Charts: usage over 7d, top profiles, peak hours",

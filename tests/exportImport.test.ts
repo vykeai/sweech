@@ -110,6 +110,7 @@ describe('Export/Import Settings', () => {
           accessToken: 'at',
           refreshToken: 'rt',
           expiresAt: Date.now(),
+          tokenType: 'bearer',
           provider: 'anthropic',
         },
       });
@@ -247,6 +248,7 @@ describe('Export/Import Settings', () => {
           accessToken: 'bearer-access-token-unique',
           refreshToken: 'refresh-token-unique',
           expiresAt: Date.now(),
+          tokenType: 'bearer',
           provider: 'anthropic',
         },
       });

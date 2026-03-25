@@ -3,13 +3,13 @@
   "title": "Federation peer discovery and sync",
   "wave": "wave-2",
   "space": "space-api",
-  "status": "ready",
+  "status": "done",
   "priority": "low",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Federation peers declared but peering not functional. Implement peer add/remove/sync.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T19:25:53.986Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T19:25:53.986Z",
+      "by": "claude",
+      "text": "Federation peer CRUD: addPeer, removePeer, listPeers with healthz ping. Config in ~/.sweech/peers.json. 289-line test suite."
+    }
+  ],
   "acceptanceCriteria": [
     "sweech peers add connects to remote sweech serve",
     "Peer status shown in sweech serve dashboard",

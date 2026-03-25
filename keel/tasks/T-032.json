@@ -3,13 +3,13 @@
   "title": "Windows/Linux compatibility",
   "wave": "wave-4",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "low",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "CLI uses macOS Keychain and path separators. Add cross-platform support.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T19:25:53.986Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T19:25:53.986Z",
+      "by": "claude",
+      "text": "Platform abstraction: isMacOS/isLinux/isWindows helpers, credential store abstraction with Keychain/libsecret/file fallback. 89-line platform.ts."
+    }
+  ],
   "acceptanceCriteria": [
     "Credential store abstraction (Keychain on macOS, keytar on Linux/Windows)",
     "Path separator handling",

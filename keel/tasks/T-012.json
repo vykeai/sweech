@@ -3,13 +3,13 @@
   "title": "Implement plugin lifecycle hooks",
   "wave": "wave-2",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Plugin system declared in plugins.ts but dormant. Wire up onProfileCreate, onLaunch, onLimitReached hooks.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T19:25:53.986Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T19:25:53.986Z",
+      "by": "claude",
+      "text": "Plugin lifecycle hooks wired up: onLaunch, onProfileCreate, onLimitReached. Error isolation with try/catch. 564-line test suite."
+    }
+  ],
   "acceptanceCriteria": [
     "Plugins loaded from ~/.sweech/plugins/",
     "Hooks called at correct lifecycle points",

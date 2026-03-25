@@ -3,13 +3,13 @@
   "title": "sweech export/import settings",
   "wave": "wave-4",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "low",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Export/import individual profile settings as templates for sharing.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T19:25:53.986Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T19:25:53.986Z",
+      "by": "claude",
+      "text": "sweech export <name> strips sensitive fields, sweech import <file> creates profile. 52-test export/import suite."
+    }
+  ],
   "acceptanceCriteria": [
     "sweech export <name> produces JSON template",
     "sweech import <file> creates profile from template",
