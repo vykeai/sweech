@@ -3,13 +3,13 @@
   "title": "SweechBar accessibility audit and fixes",
   "wave": "wave-3",
   "space": "space-menubar",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Missing accessibility labels, keyboard navigation, and VoiceOver support.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T14:13:05.593Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T14:13:05.593Z",
+      "by": "claude",
+      "text": "Accessibility labels on AccountCard (combined element with status/usage description), connection indicator, refresh button, StatusPill. VoiceOver announces card state changes."
+    }
+  ],
   "acceptanceCriteria": [
     "All interactive elements have accessibilityLabel",
     "Full keyboard navigation (Tab/Shift-Tab)",

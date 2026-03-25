@@ -24,6 +24,7 @@ import { runLauncher } from './launcher';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { startSweechFedServerWithShutdown } from './fedServer';
+import { checkForUpdate, fetchChangelog } from './updateChecker';
 import * as path from 'path';
 import * as fs from 'fs';
 

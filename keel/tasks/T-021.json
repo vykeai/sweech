@@ -3,13 +3,13 @@
   "title": "SweechBar dark/light mode support",
   "wave": "wave-3",
   "space": "space-menubar",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Currently only dark theme. Add automatic light mode that respects system appearance.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T14:13:05.593Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T14:13:05.593Z",
+      "by": "claude",
+      "text": "Adaptive colors using NSColor(name:) appearance callback. Dark/light values for background, surface, surfaceHigh, textPrimary, textMuted. Status colors unchanged (good contrast in both)."
+    }
+  ],
   "acceptanceCriteria": [
     "Design tokens for light mode",
     "Automatic switching with system appearance",

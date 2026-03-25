@@ -323,6 +323,7 @@ struct AccountsView: View {
                 .help(service.isConnected
                     ? "Connected to sweech daemon — data is live"
                     : "Cannot reach sweech daemon — check that it's running with `sweech serve`")
+                .accessibilityLabel(service.isConnected ? "Connected" : "Disconnected")
 
             Button(action: { service.fetch() }) {
                 Group {
@@ -342,6 +343,7 @@ struct AccountsView: View {
             .buttonStyle(.plain)
             .disabled(service.isFetching)
             .help("Reload usage data from all accounts (auto-refreshes every 30s)")
+            .accessibilityLabel(service.isFetching ? "Refreshing data" : "Refresh data")
 
             Button {
                 showSettings.toggle()
@@ -902,6 +904,18 @@ struct AccountCard: View {
         .scaleEffect(isHovered ? 1.01 : 1.0)
         .animation(.easeInOut(duration: 0.15), value: isHovered)
         .onHover { isHovered = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var accessibilityDescription: String {
+        let status = account.liveStatus == "limit_reached" ? "rate limited"
+            : account.needsReauth == true ? "needs re-authentication"
+            : "available"
+        let weekly = "\(Int(account.utilization7d * 100))% weekly used"
+        let session = "\(Int(account.utilization5h * 100))% session used"
+        let tierLabel = tier.badgeLabel.map { ", \($0)" } ?? ""
+        return "\(account.name), \(status)\(tierLabel), \(weekly), \(session)"
     }
 }
 
