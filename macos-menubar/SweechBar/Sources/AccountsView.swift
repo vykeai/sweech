@@ -842,14 +842,39 @@ struct AccountCard: View {
 
                 Spacer()
 
-                Button {
-                    SweechService.launchInTerminal(commandName: account.commandName)
+                Menu {
+                    Button {
+                        SweechService.launchInTerminal(commandName: account.commandName)
+                    } label: {
+                        Label("Fresh session", systemImage: "plus.circle")
+                    }
+                    Button {
+                        SweechService.launchInTerminal(commandName: "\(account.commandName) --continue")
+                    } label: {
+                        Label("Continue last", systemImage: "arrow.uturn.forward")
+                    }
+                    Button {
+                        let yoloFlag = (account.cliType ?? "claude") == "claude"
+                            ? "--dangerously-skip-permissions" : "--yolo"
+                        SweechService.launchInTerminal(commandName: "\(account.commandName) \(yoloFlag)")
+                    } label: {
+                        Label("Yolo mode", systemImage: "bolt.fill")
+                    }
+                    Divider()
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(account.commandName, forType: .string)
+                    } label: {
+                        Label("Copy command", systemImage: "doc.on.doc")
+                    }
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "terminal")
                             .font(.system(size: 9))
                         Text("launch")
                             .font(.system(size: 9, weight: .semibold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 7))
                     }
                     .foregroundStyle(Sweech.Color.accent)
                     .padding(.horizontal, 8)
@@ -857,8 +882,9 @@ struct AccountCard: View {
                     .background(Sweech.Color.accent.opacity(0.1))
                     .clipShape(Capsule())
                 }
-                .buttonStyle(.plain)
-                .help("Open \(account.commandName) in Terminal.app")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Launch \(account.commandName) — click for options")
             }
             .foregroundStyle(Sweech.Color.textMuted.opacity(0.65))
         }

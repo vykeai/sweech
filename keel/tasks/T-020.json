@@ -3,13 +3,13 @@
   "title": "SweechBar click card to launch with profile selection",
   "wave": "wave-3",
   "space": "space-menubar",
-  "status": "ready",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Clicking the launch button should offer options: launch fresh, continue last, launch with yolo mode.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T08:18:12.611Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T08:18:12.611Z",
+      "by": "claude",
+      "text": "Launch button now has context menu: Fresh session, Continue last, Yolo mode, Copy command. Uses Menu+Label pattern with chevron indicator."
+    }
+  ],
   "acceptanceCriteria": [
     "Context menu on launch button: Fresh / Continue / Yolo",
     "Each option opens Terminal with correct flags",
