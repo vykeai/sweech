@@ -18,7 +18,7 @@ import { confirmChatBackupBeforeRemoval, backupChatHistory } from './chatBackup'
 import { isDefaultCLIDirectory } from './reset';
 import { runDoctor, runPath, runTest, runEdit, runClone, runRename } from './utilityCommands';
 import { runReset } from './reset';
-import { runInit } from './init';
+import { runInit, isFirstRun } from './init';
 import { createProfile } from './profileCreation';
 import { runLauncher } from './launcher';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
@@ -1559,10 +1559,18 @@ program
 
 // Default action: interactive launcher when no command given
 if (process.argv.length <= 2) {
-  runLauncher().catch(err => {
-    console.error(chalk.red('Error:'), err.message);
-    process.exit(1);
-  });
+  // First run: no profiles configured → run onboarding instead of empty launcher
+  if (isFirstRun()) {
+    runInit().catch(err => {
+      console.error(chalk.red('Error:'), err.message);
+      process.exit(1);
+    });
+  } else {
+    runLauncher().catch(err => {
+      console.error(chalk.red('Error:'), err.message);
+      process.exit(1);
+    });
+  }
 } else {
   program.parse();
 }

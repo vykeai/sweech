@@ -15,6 +15,15 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 /**
+ * Check if this is a first run (no profiles configured).
+ * Exported for use in the no-args CLI handler.
+ */
+export function isFirstRun(config?: ConfigManager): boolean {
+  const mgr = config || new ConfigManager();
+  return mgr.getProfiles().length === 0;
+}
+
+/**
  * Check if sweech bin directory is in PATH
  */
 function isInPath(): boolean {
@@ -225,6 +234,19 @@ export async function runInit(): Promise<void> {
     await runDoctor();
   }
 
+  // Step 5: Suggest SweechBar
+  console.log(chalk.bold('Step 5: SweechBar (optional)\n'));
+  console.log(chalk.gray('SweechBar is a macOS menu bar companion that shows live usage'));
+  console.log(chalk.gray('and rate-limit status for all your profiles at a glance.\n'));
+
+  if (process.platform === 'darwin') {
+    console.log(chalk.cyan('  Install: brew install --cask sweechbar'));
+    console.log(chalk.gray('  Or download from: https://github.com/vykeai/sweechbar/releases\n'));
+  } else {
+    console.log(chalk.gray('  SweechBar is currently macOS-only.'));
+    console.log(chalk.gray('  Visit: https://github.com/vykeai/sweechbar for updates.\n'));
+  }
+
   // Final summary
   console.log(chalk.bold.green('\n🎉 Setup complete!\n'));
   console.log(chalk.bold('Next steps:\n'));
@@ -239,15 +261,13 @@ export async function runInit(): Promise<void> {
   const profiles = config.getProfiles();
   if (profiles.length > 0) {
     const firstProfile = profiles[0];
-    console.log(chalk.cyan(`2. Try your new command:`));
-    console.log(chalk.bold.cyan(`   ${firstProfile.commandName}\n`));
+    console.log(chalk.cyan('  Run `sweech` to launch the interactive switcher'));
+    console.log(chalk.bold.cyan(`  Try your new command: ${firstProfile.commandName}\n`));
   }
 
-  console.log(chalk.gray('3. Add more providers:'));
-  console.log(chalk.gray('   sweech add\n'));
-
-  console.log(chalk.gray('4. View all providers:'));
-  console.log(chalk.gray('   sweech list\n'));
+  console.log(chalk.gray('  Run `sweech add` to add more profiles'));
+  console.log(chalk.gray('  Install SweechBar for menu bar monitoring'));
+  console.log(chalk.gray('  Run `sweech doctor` to check your setup\n'));
 
   console.log(chalk.gray('Happy sweeching! 🍭\n'));
 }

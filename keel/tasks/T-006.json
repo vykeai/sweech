@@ -3,13 +3,13 @@
   "title": "Add tests for oauthServer.ts",
   "wave": "wave-1",
   "space": "space-infra",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "OAuth callback handler has no test coverage. Critical security surface.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T13:19:03.366Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T13:19:03.366Z",
+      "by": "claude",
+      "text": "49 OAuth tests: isTokenExpired, oauthTokenToEnv, getOAuthToken routing, refreshOAuthToken, PKCE, callback server CSRF/timeout. 793 total tests."
+    }
+  ],
   "acceptanceCriteria": [
     "Test PKCE validation",
     "Test state parameter verification",

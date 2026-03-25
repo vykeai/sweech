@@ -39,6 +39,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isFirstRun = isFirstRun;
 exports.runInit = runInit;
 const chalk_1 = __importDefault(require("chalk"));
 const inquirer_1 = __importDefault(require("inquirer"));
@@ -51,6 +52,14 @@ const cliDetection_1 = require("./cliDetection");
 const os = __importStar(require("os"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+/**
+ * Check if this is a first run (no profiles configured).
+ * Exported for use in the no-args CLI handler.
+ */
+function isFirstRun(config) {
+    const mgr = config || new config_1.ConfigManager();
+    return mgr.getProfiles().length === 0;
+}
 /**
  * Check if sweech bin directory is in PATH
  */
@@ -239,6 +248,18 @@ async function runInit() {
         console.log();
         await (0, utilityCommands_1.runDoctor)();
     }
+    // Step 5: Suggest SweechBar
+    console.log(chalk_1.default.bold('Step 5: SweechBar (optional)\n'));
+    console.log(chalk_1.default.gray('SweechBar is a macOS menu bar companion that shows live usage'));
+    console.log(chalk_1.default.gray('and rate-limit status for all your profiles at a glance.\n'));
+    if (process.platform === 'darwin') {
+        console.log(chalk_1.default.cyan('  Install: brew install --cask sweechbar'));
+        console.log(chalk_1.default.gray('  Or download from: https://github.com/vykeai/sweechbar/releases\n'));
+    }
+    else {
+        console.log(chalk_1.default.gray('  SweechBar is currently macOS-only.'));
+        console.log(chalk_1.default.gray('  Visit: https://github.com/vykeai/sweechbar for updates.\n'));
+    }
     // Final summary
     console.log(chalk_1.default.bold.green('\n🎉 Setup complete!\n'));
     console.log(chalk_1.default.bold('Next steps:\n'));
@@ -251,12 +272,11 @@ async function runInit() {
     const profiles = config.getProfiles();
     if (profiles.length > 0) {
         const firstProfile = profiles[0];
-        console.log(chalk_1.default.cyan(`2. Try your new command:`));
-        console.log(chalk_1.default.bold.cyan(`   ${firstProfile.commandName}\n`));
+        console.log(chalk_1.default.cyan('  Run `sweech` to launch the interactive switcher'));
+        console.log(chalk_1.default.bold.cyan(`  Try your new command: ${firstProfile.commandName}\n`));
     }
-    console.log(chalk_1.default.gray('3. Add more providers:'));
-    console.log(chalk_1.default.gray('   sweech add\n'));
-    console.log(chalk_1.default.gray('4. View all providers:'));
-    console.log(chalk_1.default.gray('   sweech list\n'));
+    console.log(chalk_1.default.gray('  Run `sweech add` to add more profiles'));
+    console.log(chalk_1.default.gray('  Install SweechBar for menu bar monitoring'));
+    console.log(chalk_1.default.gray('  Run `sweech doctor` to check your setup\n'));
     console.log(chalk_1.default.gray('Happy sweeching! 🍭\n'));
 }

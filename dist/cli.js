@@ -1498,10 +1498,19 @@ program
 });
 // Default action: interactive launcher when no command given
 if (process.argv.length <= 2) {
-    (0, launcher_1.runLauncher)().catch(err => {
-        console.error(chalk_1.default.red('Error:'), err.message);
-        process.exit(1);
-    });
+    // First run: no profiles configured → run onboarding instead of empty launcher
+    if ((0, init_1.isFirstRun)()) {
+        (0, init_1.runInit)().catch(err => {
+            console.error(chalk_1.default.red('Error:'), err.message);
+            process.exit(1);
+        });
+    }
+    else {
+        (0, launcher_1.runLauncher)().catch(err => {
+            console.error(chalk_1.default.red('Error:'), err.message);
+            process.exit(1);
+        });
+    }
 }
 else {
     program.parse();
