@@ -1329,22 +1329,74 @@ teamCmd
     console.log();
 });
 // ── sweech webhooks ─────────────────────────────────────────────────────────────
-program
+const webhooksCmd = program
     .command('webhooks')
-    .description('Show configured webhooks')
+    .description('Manage webhook notifications');
+webhooksCmd
+    .command('list')
+    .description('Show configured webhooks and recent deliveries')
     .action(async () => {
-    const { loadWebhookConfig } = await Promise.resolve().then(() => __importStar(require('./webhooks')));
+    const { loadWebhookConfig, getDeliveryLog } = await Promise.resolve().then(() => __importStar(require('./webhooks')));
     const hooks = loadWebhookConfig();
     if (hooks.length === 0) {
         console.log(chalk_1.default.dim('\n  No webhooks configured. Add them to ~/.sweech/webhooks.json\n'));
+        console.log(chalk_1.default.dim('  Example config:'));
+        console.log(chalk_1.default.dim('  ['));
+        console.log(chalk_1.default.dim('    {'));
+        console.log(chalk_1.default.dim('      "url": "https://example.com/webhook",'));
+        console.log(chalk_1.default.dim('      "events": ["*"],'));
+        console.log(chalk_1.default.dim('      "name": "my-hook"'));
+        console.log(chalk_1.default.dim('    }'));
+        console.log(chalk_1.default.dim('  ]\n'));
         return;
     }
     console.log(chalk_1.default.bold(`\n  ${hooks.length} webhook(s)\n`));
     for (const h of hooks) {
         const name = h.name ? chalk_1.default.white(h.name) : chalk_1.default.dim('unnamed');
-        console.log(`  ${name} → ${chalk_1.default.cyan(h.url)} ${chalk_1.default.dim(`[${h.events.join(', ')}]`)}`);
+        const evts = h.events.includes('*') ? chalk_1.default.yellow('*') : chalk_1.default.dim(h.events.join(', '));
+        const secret = h.secret ? chalk_1.default.green(' [signed]') : '';
+        console.log(`  ${name} → ${chalk_1.default.cyan(h.url)} [${evts}]${secret}`);
+    }
+    const log = getDeliveryLog();
+    if (log.length > 0) {
+        console.log(chalk_1.default.bold(`\n  recent deliveries (${log.length})\n`));
+        for (const d of log.slice(0, 10)) {
+            const status = d.status === 'success' ? chalk_1.default.green('ok') : chalk_1.default.red('fail');
+            const attempts = d.attempts > 1 ? chalk_1.default.dim(` (${d.attempts} attempts)`) : '';
+            console.log(`  ${status} ${chalk_1.default.dim(d.event)} → ${chalk_1.default.dim(d.url)}${attempts} ${chalk_1.default.dim(d.timestamp)}`);
+        }
     }
     console.log();
+});
+webhooksCmd
+    .command('test [url]')
+    .description('Send a test webhook to verify delivery')
+    .action(async (url) => {
+    const { loadWebhookConfig, deliverWebhook } = await Promise.resolve().then(() => __importStar(require('./webhooks')));
+    const hooks = loadWebhookConfig();
+    const targets = url
+        ? [{ url, events: ['*'], name: 'test' }]
+        : hooks;
+    if (targets.length === 0) {
+        console.log(chalk_1.default.dim('\n  No webhooks to test. Configure ~/.sweech/webhooks.json or pass a URL.\n'));
+        return;
+    }
+    console.log(chalk_1.default.bold(`\n  Testing ${targets.length} webhook(s)...\n`));
+    for (const hook of targets) {
+        const name = hook.name || hook.url;
+        const result = await deliverWebhook(hook, 'test', { message: 'sweech webhook test' }, 1);
+        if (result.success) {
+            console.log(`  ${chalk_1.default.green('ok')} ${name} (HTTP ${result.statusCode})`);
+        }
+        else {
+            console.log(`  ${chalk_1.default.red('fail')} ${name}: ${result.error}`);
+        }
+    }
+    console.log();
+});
+// Backwards compat: `sweech webhooks` with no subcommand shows the list
+webhooksCmd.action(async () => {
+    await webhooksCmd.commands.find(c => c.name() === 'list')?.parseAsync([], { from: 'user' });
 });
 // ── sweech peers ────────────────────────────────────────────────────────────────
 const peersCmd = program

@@ -51,6 +51,7 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const liveUsage_1 = require("./liveUsage");
 const clis_1 = require("./clis");
+const usageMonitor_1 = require("./usageMonitor");
 // ── Storage ───────────────────────────────────────────────────────────────────
 const SUBSCRIPTIONS_FILE = path.join(os.homedir(), '.sweech', 'subscriptions.json');
 function readMeta() {
@@ -256,6 +257,10 @@ async function getAccountInfo(profiles, options = {}) {
             : undefined;
         const usageFn = options.refresh ? liveUsage_1.refreshLiveUsage : liveUsage_1.getLiveUsage;
         const live = await usageFn(configDir, cliType).catch(() => undefined) ?? undefined;
+        // Check for usage threshold crossings and emit events
+        if (live) {
+            (0, usageMonitor_1.checkUsageThresholds)(p.name, live);
+        }
         // Only flag reauth if the Keychain token is actually expired (not just a transient fetch failure)
         let needsReauth = false;
         if (process.platform === 'darwin' && cliType === 'claude' && !live) {

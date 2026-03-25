@@ -340,6 +340,7 @@ function render(entries, state, usageLoad = 'idle') {
         body.push(`  ${k('s')}${d('Cycle sort mode (smart → status → manual)')}`);
         body.push(`  ${k('g')}${d('Toggle grouping (by provider / flat)')}`);
         body.push(`  ${k('m')}${d('Toggle model bucket display')}`);
+        body.push(`  ${k('h')}${d('Toggle 24h sparkline history')}`);
         body.push(`  ${k('a')}${d('Add new profile')}`);
         body.push(`  ${k('e')}${d('Edit selected profile')}`);
         body.push(`  ${k('?')}${d('Toggle this help')}`);
@@ -498,7 +499,7 @@ function render(entries, state, usageLoad = 'idle') {
     const key = (k) => chalk_1.default.bold.white(k);
     const desc = (d) => chalk_1.default.dim(d);
     footer.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
-    footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}`);
+    footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}   ${key('h')} ${desc('history')}`);
     return { header, body, footer, entryStartLines };
 }
 /** Build a placeholder entry from static data only — no I/O, instant. */
@@ -739,6 +740,10 @@ async function runLauncher() {
                 if (usageLoad === 'loaded') {
                     (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName }))).then(accounts => { patchEntries(accounts); draw(); }).catch(err => console.error('[sweech] bucket refresh:', err.message || err));
                 }
+                draw();
+            }
+            else if (str === 'h' || str === 'H') {
+                state.showHistory = !state.showHistory;
                 draw();
             }
             else if (str === '?') {

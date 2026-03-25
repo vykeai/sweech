@@ -3,13 +3,13 @@
   "title": "sweech usage sparkline history",
   "wave": "wave-2",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "charts.ts has sparkline() but no historical data. Collect hourly usage snapshots for trend display.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T13:06:22.330Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T13:06:22.330Z",
+      "by": "claude",
+      "text": "Hourly snapshots in ~/.sweech/history.json, sweech usage --history shows 24h sparklines, launcher h key toggles trend display, auto-prune >7d. 29 new tests."
+    }
+  ],
   "acceptanceCriteria": [
     "Store hourly utilization snapshots in ~/.sweech/history.json",
     "sweech usage --history shows 24h sparkline per profile",
