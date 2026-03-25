@@ -3,13 +3,13 @@
   "title": "SweechBar notification center widget",
   "wave": "wave-3",
   "space": "space-menubar",
-  "status": "blocked",
+  "status": "done",
   "priority": "low",
   "platform": null,
   "assignee": "claude",
   "description": "macOS widget showing current usage status in Notification Center.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-25T16:50:39.594Z",
+  "updatedAt": "2026-03-25T21:18:29.471Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -26,6 +26,11 @@
       "at": "2026-03-25T16:50:39.594Z",
       "by": "claude",
       "text": "WidgetKit requires Xcode project target + WidgetExtension bundle. Current SPM-only setup needs migration to xcodeproj first."
+    },
+    {
+      "at": "2026-03-25T21:18:29.471Z",
+      "by": "claude",
+      "text": "Migrated from SPM to Xcode project via xcodegen. SweechBarWidget extension with WidgetKit. Small+Medium widget sizes. Both targets build."
     }
   ],
   "acceptanceCriteria": [

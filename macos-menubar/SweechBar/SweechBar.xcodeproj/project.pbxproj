@@ -1,0 +1,394 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4F137B8B1968FE5FCE76C661 /* SweechWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FE5B11EBC32F55F8D884FBF /* SweechWidget.swift */; };
+		6379A7AB40CA3325378C6866 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39736BD0892FB20FCF4B24B7 /* Design.swift */; };
+		69743C301028D763E39ACAC4 /* HotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 313054338C3638CC92835E5B /* HotkeyManager.swift */; };
+		89D0DA43357E57CA072F17E7 /* SweechAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9D2CA882BDF033A3823214 /* SweechAPI.swift */; };
+		AFF2A34BA5F330AF2601F732 /* SweechBarApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33A6F3E7186EF762C9A2241 /* SweechBarApp.swift */; };
+		F87BE459FDE31A21B67E1A2C /* AccountsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AEE1B9B334A64B2343D46DB /* AccountsView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		313054338C3638CC92835E5B /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
+		39736BD0892FB20FCF4B24B7 /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design.swift; sourceTree = "<group>"; };
+		42D4E6374693B914ACFEE9FF /* SweechBarWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SweechBarWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		6AEE1B9B334A64B2343D46DB /* AccountsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsView.swift; sourceTree = "<group>"; };
+		6E9D2CA882BDF033A3823214 /* SweechAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SweechAPI.swift; sourceTree = "<group>"; };
+		870E05D6C8C1CDC5C8AAAE87 /* SweechBar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SweechBar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9FE5B11EBC32F55F8D884FBF /* SweechWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SweechWidget.swift; sourceTree = "<group>"; };
+		C33A6F3E7186EF762C9A2241 /* SweechBarApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SweechBarApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		3ED04A16A89B511694D7237D /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				6AEE1B9B334A64B2343D46DB /* AccountsView.swift */,
+				39736BD0892FB20FCF4B24B7 /* Design.swift */,
+				313054338C3638CC92835E5B /* HotkeyManager.swift */,
+				6E9D2CA882BDF033A3823214 /* SweechAPI.swift */,
+				C33A6F3E7186EF762C9A2241 /* SweechBarApp.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A7109EA07C0059EE9A7DC5DB /* WidgetSources */ = {
+			isa = PBXGroup;
+			children = (
+				9FE5B11EBC32F55F8D884FBF /* SweechWidget.swift */,
+			);
+			path = WidgetSources;
+			sourceTree = "<group>";
+		};
+		B404B61A0083B59634A357CF = {
+			isa = PBXGroup;
+			children = (
+				3ED04A16A89B511694D7237D /* Sources */,
+				A7109EA07C0059EE9A7DC5DB /* WidgetSources */,
+				E419693263979A8345B548F3 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E419693263979A8345B548F3 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				870E05D6C8C1CDC5C8AAAE87 /* SweechBar.app */,
+				42D4E6374693B914ACFEE9FF /* SweechBarWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9CC4B22C9FC2E887F37555CA /* SweechBar */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2DDB14E8CE9531694D54BF40 /* Build configuration list for PBXNativeTarget "SweechBar" */;
+			buildPhases = (
+				469867D968717E7E028C2293 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SweechBar;
+			packageProductDependencies = (
+			);
+			productName = SweechBar;
+			productReference = 870E05D6C8C1CDC5C8AAAE87 /* SweechBar.app */;
+			productType = "com.apple.product-type.application";
+		};
+		BC2EFFF08B202E09CED091EC /* SweechBarWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BEC5A3AB17EC9E66D74CC116 /* Build configuration list for PBXNativeTarget "SweechBarWidget" */;
+			buildPhases = (
+				F144801CADFD3B545192506B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SweechBarWidget;
+			packageProductDependencies = (
+			);
+			productName = SweechBarWidget;
+			productReference = 42D4E6374693B914ACFEE9FF /* SweechBarWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A5EF5E5E8BAD94A5EA3D0D66 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					9CC4B22C9FC2E887F37555CA = {
+						ProvisioningStyle = Manual;
+					};
+					BC2EFFF08B202E09CED091EC = {
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = BC74B2581A2B4B6AB4911AB7 /* Build configuration list for PBXProject "SweechBar" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = B404B61A0083B59634A357CF;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9CC4B22C9FC2E887F37555CA /* SweechBar */,
+				BC2EFFF08B202E09CED091EC /* SweechBarWidget */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		469867D968717E7E028C2293 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F87BE459FDE31A21B67E1A2C /* AccountsView.swift in Sources */,
+				6379A7AB40CA3325378C6866 /* Design.swift in Sources */,
+				69743C301028D763E39ACAC4 /* HotkeyManager.swift in Sources */,
+				89D0DA43357E57CA072F17E7 /* SweechAPI.swift in Sources */,
+				AFF2A34BA5F330AF2601F732 /* SweechBarApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F144801CADFD3B545192506B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4F137B8B1968FE5FCE76C661 /* SweechWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0CCE633DAF07447B4689F0D6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar;
+				PRODUCT_NAME = SweechBar;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		34B67ACD02C7DAD6C34828FE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar.widget;
+				PRODUCT_NAME = SweechBarWidget;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		699DE96038393643FAB27CCC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar.widget;
+				PRODUCT_NAME = SweechBarWidget;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		6F342EE823A0D550D443943B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		AB4CD261E253D18FA70B7A64 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		B95A9B850684656E19DAA780 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar;
+				PRODUCT_NAME = SweechBar;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2DDB14E8CE9531694D54BF40 /* Build configuration list for PBXNativeTarget "SweechBar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B95A9B850684656E19DAA780 /* Debug */,
+				0CCE633DAF07447B4689F0D6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BC74B2581A2B4B6AB4911AB7 /* Build configuration list for PBXProject "SweechBar" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6F342EE823A0D550D443943B /* Debug */,
+				AB4CD261E253D18FA70B7A64 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BEC5A3AB17EC9E66D74CC116 /* Build configuration list for PBXNativeTarget "SweechBarWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				699DE96038393643FAB27CCC /* Debug */,
+				34B67ACD02C7DAD6C34828FE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A5EF5E5E8BAD94A5EA3D0D66 /* Project object */;
+}
