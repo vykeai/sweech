@@ -21,6 +21,7 @@ import {
   ProfileTemplate,
   loadCustomTemplates,
   saveCustomTemplate,
+  deleteCustomTemplate,
   getAllTemplates,
   findTemplate,
 } from '../src/templates';
@@ -430,5 +431,121 @@ describe('edge cases', () => {
     const parsed = JSON.parse(content as string);
     expect(parsed[0].model).toBe('claude-3');
     expect(parsed[0].baseUrl).toBe('https://api.example.com');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New built-in templates (claude-max, multi-account)
+// ---------------------------------------------------------------------------
+
+describe('new built-in templates', () => {
+  test('claude-max template exists with model override', () => {
+    const cm = BUILT_IN_TEMPLATES.find(t => t.name === 'claude-max');
+    expect(cm).toBeDefined();
+    expect(cm!.cliType).toBe('claude');
+    expect(cm!.provider).toBe('anthropic');
+    expect(cm!.model).toBeDefined();
+    expect(cm!.tags).toContain('max');
+  });
+
+  test('multi-account template exists', () => {
+    const ma = BUILT_IN_TEMPLATES.find(t => t.name === 'multi-account');
+    expect(ma).toBeDefined();
+    expect(ma!.cliType).toBe('claude');
+    expect(ma!.provider).toBe('anthropic');
+    expect(ma!.tags).toContain('multi');
+    expect(ma!.tags).toContain('shared');
+  });
+
+  test('claude-max is findable by tag "max"', () => {
+    mockFs.existsSync.mockReturnValue(false);
+    const result = findTemplate('max');
+    expect(result).toBeDefined();
+    expect(result!.name).toBe('claude-max');
+  });
+
+  test('multi-account is findable by tag "shared"', () => {
+    mockFs.existsSync.mockReturnValue(false);
+    const result = findTemplate('shared');
+    expect(result).toBeDefined();
+    expect(result!.name).toBe('multi-account');
+  });
+
+  test('multi-account is findable by name', () => {
+    mockFs.existsSync.mockReturnValue(false);
+    const result = findTemplate('multi-account');
+    expect(result).toBeDefined();
+    expect(result!.name).toBe('multi-account');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deleteCustomTemplate
+// ---------------------------------------------------------------------------
+
+describe('deleteCustomTemplate', () => {
+  test('removes an existing custom template', () => {
+    const existing = [
+      customTemplate({ name: 'keep-me' }),
+      customTemplate({ name: 'delete-me' }),
+    ];
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(existing));
+    mockFs.writeFileSync.mockImplementation(() => {});
+
+    const result = deleteCustomTemplate('delete-me');
+    expect(result).toBe(true);
+
+    const [, content] = (mockFs.writeFileSync as jest.Mock).mock.calls[0];
+    const parsed = JSON.parse(content as string);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].name).toBe('keep-me');
+  });
+
+  test('returns false when template name not found', () => {
+    const existing = [customTemplate({ name: 'only-one' })];
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(existing));
+    mockFs.writeFileSync.mockImplementation(() => {});
+
+    const result = deleteCustomTemplate('nonexistent');
+    expect(result).toBe(false);
+  });
+
+  test('returns false when no custom templates exist', () => {
+    mockFs.existsSync.mockReturnValue(false);
+    mockFs.writeFileSync.mockImplementation(() => {});
+
+    const result = deleteCustomTemplate('anything');
+    expect(result).toBe(false);
+  });
+
+  test('creates .sweech dir if needed during delete', () => {
+    const existing = [customTemplate({ name: 'to-delete' })];
+    mockFs.existsSync.mockImplementation((p: any) => {
+      // templates.json exists but .sweech dir check returns false
+      if (String(p).endsWith('.sweech')) return false;
+      return true;
+    });
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(existing));
+    mockFs.mkdirSync.mockImplementation(() => undefined as any);
+    mockFs.writeFileSync.mockImplementation(() => {});
+
+    const result = deleteCustomTemplate('to-delete');
+    expect(result).toBe(true);
+    expect(mockFs.mkdirSync).toHaveBeenCalled();
+  });
+
+  test('deleting last custom template results in empty array', () => {
+    const existing = [customTemplate({ name: 'last-one' })];
+    mockFs.existsSync.mockReturnValue(true);
+    mockFs.readFileSync.mockReturnValue(JSON.stringify(existing));
+    mockFs.writeFileSync.mockImplementation(() => {});
+
+    deleteCustomTemplate('last-one');
+
+    const [, content] = (mockFs.writeFileSync as jest.Mock).mock.calls[0];
+    const parsed = JSON.parse(content as string);
+    expect(parsed).toEqual([]);
   });
 });

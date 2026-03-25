@@ -1,6 +1,13 @@
 "use strict";
 /**
- * Configuration manager for sweetch profiles
+ * Configuration manager for sweetch profiles.
+ *
+ * All paths use path.join() for cross-platform separators.
+ *
+ * Platform-specific base directories:
+ *   - macOS:   /Users/<user>/.sweech/   (config), /Users/<user>/.<name>/   (profiles)
+ *   - Linux:   /home/<user>/.sweech/    (config), /home/<user>/.<name>/    (profiles)
+ *   - Windows: C:\Users\<user>\.sweech\ (config), C:\Users\<user>\.<name>\ (profiles)
  */
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;

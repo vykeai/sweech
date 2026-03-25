@@ -3,13 +3,13 @@
   "title": "Implement team sync basics",
   "wave": "wave-2",
   "space": "space-api",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "team.ts has stubs. Implement basic team join/leave/members/invite via a hub server.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T16:56:49.972Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T16:56:49.972Z",
+      "by": "claude",
+      "text": "Team sync: joinTeamLocal, leaveTeamLocal, getLocalMembers, addLocalInvite. 19 tests."
+    }
+  ],
   "acceptanceCriteria": [
     "sweech team join <code> connects to hub",
     "sweech team members lists team",

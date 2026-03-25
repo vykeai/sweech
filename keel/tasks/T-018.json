@@ -3,13 +3,13 @@
   "title": "Add audit log API endpoint and alerting",
   "wave": "wave-2",
   "space": "space-api",
-  "status": "ready",
+  "status": "done",
   "priority": "low",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Audit log exists as jsonl file but not exposed via API or alerts.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T16:56:49.972Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T16:56:49.972Z",
+      "by": "claude",
+      "text": "GET /fed/audit endpoint with limit+action filtering. 13 tests."
+    }
+  ],
   "acceptanceCriteria": [
     "GET /fed/audit returns recent audit entries",
     "Filter by action type and date range",

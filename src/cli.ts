@@ -2084,6 +2084,28 @@ program
     }
   });
 
+// ── sweech dashboard ────────────────────────────────────────────────────────────
+program
+  .command('dashboard')
+  .description('Open a local usage analytics dashboard in the browser')
+  .option('--port <number>', 'Port to listen on (default: random available)')
+  .option('--no-open', 'Do not auto-open the browser')
+  .action(async (opts: { port?: string; open?: boolean }) => {
+    try {
+      const { startDashboard } = await import('./dashboard');
+      const portNum = opts.port ? parseInt(opts.port, 10) : undefined;
+      const { port } = await startDashboard({ port: portNum, open: opts.open });
+      console.log(chalk.green(`\n  sweech dashboard running at http://127.0.0.1:${port}\n`));
+      console.log(chalk.dim('  Press Ctrl+C to stop\n'));
+      // Keep alive
+      await new Promise(() => {});
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Dashboard failed:'), msg);
+      process.exit(1);
+    }
+  });
+
 // ── Startup update check (non-blocking) ────────────────────────────────────────
 // Fire-and-forget: if the check completes before parse finishes, print a notice.
 // Skip for --help, --version, --complete, and the update command itself.

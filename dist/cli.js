@@ -1840,6 +1840,155 @@ peersCmd
     removePeer(name);
     console.log(chalk_1.default.green(`✓ Peer '${name}' removed`));
 });
+// ── sweech export / import ───────────────────────────────────────────────────
+program
+    .command('export <name>')
+    .description('Export a profile as a shareable JSON template (sensitive fields stripped)')
+    .option('-o, --output <file>', 'Write to file instead of stdout')
+    .action(async (name, opts) => {
+    try {
+        const config = new config_1.ConfigManager();
+        const profiles = config.getProfiles();
+        const aliasManager = new aliases_1.AliasManager();
+        const resolvedName = aliasManager.resolveAlias(name);
+        const profile = profiles.find(p => p.commandName === resolvedName);
+        if (!profile) {
+            console.error(chalk_1.default.red(`Profile '${name}' not found`));
+            process.exit(1);
+        }
+        // Build template — strip sensitive fields (apiKey, oauth, accessToken, refreshToken)
+        const template = {
+            commandName: profile.commandName,
+            cliType: profile.cliType,
+            provider: profile.provider,
+        };
+        if (profile.model)
+            template.model = profile.model;
+        if (profile.smallFastModel)
+            template.smallFastModel = profile.smallFastModel;
+        if (profile.baseUrl)
+            template.baseUrl = profile.baseUrl;
+        if (profile.sharedWith)
+            template.sharedWith = profile.sharedWith;
+        const json = JSON.stringify(template, null, 2) + '\n';
+        if (opts.output) {
+            fs.writeFileSync(opts.output, json);
+            console.error(chalk_1.default.green(`✓ Exported '${resolvedName}' to ${opts.output}`));
+        }
+        else {
+            process.stdout.write(json);
+        }
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Export failed:'), msg);
+        process.exit(1);
+    }
+});
+program
+    .command('import <file>')
+    .description('Import a profile from a JSON template')
+    .action(async (file) => {
+    try {
+        if (!fs.existsSync(file)) {
+            console.error(chalk_1.default.red(`File not found: ${file}`));
+            process.exit(1);
+        }
+        const raw = fs.readFileSync(file, 'utf-8');
+        let template;
+        try {
+            template = JSON.parse(raw);
+        }
+        catch {
+            console.error(chalk_1.default.red('Invalid JSON in template file'));
+            process.exit(1);
+        }
+        // Validate required fields
+        const required = ['commandName', 'cliType', 'provider'];
+        const missing = required.filter(f => !template[f]);
+        if (missing.length > 0) {
+            console.error(chalk_1.default.red(`Missing required fields: ${missing.join(', ')}`));
+            process.exit(1);
+        }
+        const commandName = template.commandName;
+        const cliType = template.cliType;
+        const providerName = template.provider;
+        // Validate command name format
+        if (!/^[a-z0-9-]+$/.test(commandName)) {
+            console.error(chalk_1.default.red(`Invalid command name: '${commandName}' (must be lowercase alphanumeric with dashes)`));
+            process.exit(1);
+        }
+        // Check CLI type
+        const cli = (0, clis_1.getCLI)(cliType);
+        if (!cli) {
+            console.error(chalk_1.default.red(`Unknown CLI type: '${cliType}' (expected 'claude' or 'codex')`));
+            process.exit(1);
+        }
+        // Check provider
+        const provider = (0, providers_1.getProvider)(providerName);
+        if (!provider) {
+            console.error(chalk_1.default.red(`Unknown provider: '${providerName}'`));
+            console.log(chalk_1.default.dim('Available: ' + (0, providers_1.getProviderList)().map(p => p.name).join(', ')));
+            process.exit(1);
+        }
+        const config = new config_1.ConfigManager();
+        const profiles = config.getProfiles();
+        if (profiles.some(p => p.commandName === commandName)) {
+            console.error(chalk_1.default.red(`Profile '${commandName}' already exists`));
+            process.exit(1);
+        }
+        // Prompt for API key if TTY
+        console.log(chalk_1.default.bold(`\nImporting profile: ${commandName}`));
+        console.log(chalk_1.default.dim(`  Provider: ${provider.displayName}`));
+        console.log(chalk_1.default.dim(`  CLI: ${cli.displayName}`));
+        if (template.model)
+            console.log(chalk_1.default.dim(`  Model: ${template.model}`));
+        console.log();
+        let apiKey;
+        if (process.stdout.isTTY) {
+            const inquirer = await Promise.resolve().then(() => __importStar(require('inquirer')));
+            const { key } = await inquirer.default.prompt([{
+                    type: 'password',
+                    name: 'key',
+                    message: `API key for ${provider.displayName} (leave blank to skip):`,
+                    mask: '*',
+                }]);
+            apiKey = key || undefined;
+        }
+        else {
+            console.error(chalk_1.default.yellow('Non-interactive mode: skipping API key prompt. Run sweech auth to configure later.'));
+        }
+        // Create profile
+        const profile = {
+            name: commandName,
+            commandName,
+            cliType,
+            provider: providerName,
+            apiKey,
+            baseUrl: template.baseUrl || provider.baseUrl,
+            model: template.model || provider.defaultModel,
+            smallFastModel: template.smallFastModel || provider.smallFastModel,
+            sharedWith: template.sharedWith,
+            createdAt: new Date().toISOString(),
+        };
+        config.addProfile(profile);
+        config.createProfileConfig(commandName, provider, apiKey, cliType);
+        config.createWrapperScript(commandName, cli);
+        if (profile.sharedWith) {
+            config.setupSharedDirs(commandName, profile.sharedWith, cliType);
+        }
+        console.log(chalk_1.default.green(`\n✓ Imported profile '${commandName}'`));
+        if (!apiKey) {
+            console.log(chalk_1.default.yellow('  No API key set — run:'), chalk_1.default.bold(`sweech auth ${commandName}`));
+        }
+        console.log(chalk_1.default.dim(`  Run: ${commandName}\n`));
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Import failed:'), msg);
+        process.exit(1);
+    }
+});
 // ── Startup update check (non-blocking) ────────────────────────────────────────
 // Fire-and-forget: if the check completes before parse finishes, print a notice.
 // Skip for --help, --version, --complete, and the update command itself.
