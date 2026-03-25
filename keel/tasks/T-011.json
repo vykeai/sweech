@@ -3,13 +3,13 @@
   "title": "Implement webhook event system",
   "wave": "wave-2",
   "space": "space-api",
-  "status": "ready",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "webhooks.ts loads config but no events are fired. Wire up events for profile switches, limit hits, and usage thresholds.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T13:06:49.400Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T13:06:49.400Z",
+      "by": "claude",
+      "text": "Webhook event system with delivery+retry, event bus integration, usage monitoring. Tests in webhooks.test.ts."
+    }
+  ],
   "acceptanceCriteria": [
     "Events fire on: profile_switch, limit_reached, limit_recovered, usage_threshold (70/90)",
     "Webhook delivery with retry (3 attempts, exponential backoff)",
