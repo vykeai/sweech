@@ -61,6 +61,7 @@ const subscriptions_1 = require("./subscriptions");
 const usageHistory_1 = require("./usageHistory");
 const fedServer_1 = require("./fedServer");
 const updateChecker_1 = require("./updateChecker");
+const charts_1 = require("./charts");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 // Read version from package.json
@@ -481,6 +482,125 @@ program
         console.log(chalk_1.default.gray(`  Last: ${timeAgo(stat.lastUsed)}  ·  First: ${firstUsed.toLocaleDateString()}  ·  ${avgPerDay}/day`));
         console.log();
     });
+});
+// Compare command — side-by-side profile comparison
+program
+    .command('compare <a> <b>')
+    .description('Compare two profiles side-by-side (usage, plan, score)')
+    .action(async (a, b) => {
+    try {
+        const config = new config_1.ConfigManager();
+        const profiles = config.getProfiles();
+        const aliasManager = new aliases_1.AliasManager();
+        // Resolve aliases
+        const nameA = aliasManager.resolveAlias(a);
+        const nameB = aliasManager.resolveAlias(b);
+        // Build account refs for the two profiles
+        const accountList = (0, subscriptions_1.getKnownAccounts)(profiles);
+        const refA = accountList.find(p => p.commandName === nameA || p.name === nameA);
+        const refB = accountList.find(p => p.commandName === nameB || p.name === nameB);
+        if (!refA) {
+            console.error(chalk_1.default.red(`Profile '${a}' not found`));
+            console.log(chalk_1.default.dim('Available: ' + accountList.map(p => p.name).join(', ')));
+            process.exit(1);
+        }
+        if (!refB) {
+            console.error(chalk_1.default.red(`Profile '${b}' not found`));
+            console.log(chalk_1.default.dim('Available: ' + accountList.map(p => p.name).join(', ')));
+            process.exit(1);
+        }
+        // Fetch live usage for both
+        const [infoA, infoB] = await Promise.all([
+            (0, subscriptions_1.getAccountInfo)([refA]).then(r => r[0]),
+            (0, subscriptions_1.getAccountInfo)([refB]).then(r => r[0]),
+        ]);
+        // Smart score helper (same as usage command)
+        const smartScore = (acct) => {
+            if (acct.needsReauth)
+                return -2;
+            if (acct.live?.status === 'limit_reached')
+                return -1;
+            const remaining7d = 1 - (acct.live?.utilization7d ?? 0);
+            const reset7dAt = acct.live?.reset7dAt;
+            if (!reset7dAt)
+                return remaining7d / 7;
+            const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
+            const daysLeft = hoursLeft / 24;
+            const baseScore = remaining7d / daysLeft;
+            if (hoursLeft < 72 && remaining7d > 0)
+                return 100 + baseScore;
+            return baseScore;
+        };
+        // Time-ago helper
+        const timeAgo = (iso) => {
+            if (!iso)
+                return 'n/a';
+            const diff = Date.now() - new Date(iso).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1)
+                return 'just now';
+            if (mins < 60)
+                return `${mins}m ago`;
+            const hours = Math.floor(mins / 60);
+            if (hours < 24)
+                return `${hours}h ago`;
+            const days = Math.floor(hours / 24);
+            return `${days}d ago`;
+        };
+        // Status string
+        const statusStr = (acct) => {
+            if (acct.needsReauth)
+                return chalk_1.default.red('reauth needed');
+            if (acct.live?.status === 'limit_reached')
+                return chalk_1.default.red('limit reached');
+            if (acct.live?.status === 'warning')
+                return chalk_1.default.yellow('warning');
+            return chalk_1.default.green('ok');
+        };
+        // Column widths
+        const colW = 24;
+        const padVal = (s) => s.padEnd(colW);
+        console.log(chalk_1.default.bold(`\n  sweech compare · ${nameA} vs ${nameB}\n`));
+        // Header
+        console.log(`${''.padEnd(18)}${chalk_1.default.bold(padVal(nameA))}${chalk_1.default.bold(nameB)}`);
+        // Plan
+        const planA = infoA.meta.plan || 'unknown';
+        const planB = infoB.meta.plan || 'unknown';
+        console.log(`  ${'Plan:'.padEnd(16)}${padVal(planA)}${planB}`);
+        // Status
+        console.log(`  ${'Status:'.padEnd(16)}${padVal(statusStr(infoA))}${statusStr(infoB)}`);
+        // 5h usage bars
+        const barW = 14;
+        const u5hA = infoA.live?.utilization5h ?? 0;
+        const u5hB = infoB.live?.utilization5h ?? 0;
+        const bar5hA = (0, charts_1.asciiBar)({ label: '', value: u5hA, max: 1, width: barW, color: (0, charts_1.barColor)(u5hA) });
+        const bar5hB = (0, charts_1.asciiBar)({ label: '', value: u5hB, max: 1, width: barW, color: (0, charts_1.barColor)(u5hB) });
+        console.log(`  ${'5h:'.padEnd(7)}${bar5hA.padEnd(colW)}${bar5hB}`);
+        // 7d usage bars
+        const u7dA = infoA.live?.utilization7d ?? 0;
+        const u7dB = infoB.live?.utilization7d ?? 0;
+        const bar7dA = (0, charts_1.asciiBar)({ label: '', value: u7dA, max: 1, width: barW, color: (0, charts_1.barColor)(u7dA) });
+        const bar7dB = (0, charts_1.asciiBar)({ label: '', value: u7dB, max: 1, width: barW, color: (0, charts_1.barColor)(u7dB) });
+        console.log(`  ${'Week:'.padEnd(7)}${bar7dA.padEnd(colW)}${bar7dB}`);
+        // Score
+        const scoreA = smartScore(infoA).toFixed(2);
+        const scoreB = smartScore(infoB).toFixed(2);
+        console.log(`  ${'Score:'.padEnd(16)}${padVal(scoreA)}${scoreB}`);
+        // Last active
+        const lastA = timeAgo(infoA.lastActive);
+        const lastB = timeAgo(infoB.lastActive);
+        console.log(`  ${'Last:'.padEnd(16)}${padVal(lastA)}${lastB}`);
+        // Total messages
+        const msgsA = String(infoA.totalMessages);
+        const msgsB = String(infoB.totalMessages);
+        console.log(`  ${'Messages:'.padEnd(16)}${padVal(msgsA)}${msgsB}`);
+        console.log();
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
 });
 // Show command
 program

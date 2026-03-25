@@ -101,7 +101,7 @@ export function usageChart(accounts: UsageAccount[]): string {
 /**
  * Pick a chalk colour function based on utilisation level.
  */
-function barColor(ratio: number): (s: string) => string {
+export function barColor(ratio: number): (s: string) => string {
   if (ratio <= 0.5) return chalk.green;
   if (ratio <= 0.8) return chalk.yellow;
   return chalk.red;

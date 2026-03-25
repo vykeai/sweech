@@ -222,6 +222,36 @@ export async function runDoctor(): Promise<void> {
         // du not available or dir doesn't exist — skip size check
       }
 
+      // Check SQLite database integrity
+      try {
+        const dbFiles: string[] = [];
+        if (fs.existsSync(profileDir)) {
+          const entries = fs.readdirSync(profileDir);
+          for (const entry of entries) {
+            if (entry.endsWith('.sqlite') || entry.endsWith('.db')) {
+              dbFiles.push(path.join(profileDir, entry));
+            }
+          }
+        }
+        for (const dbFile of dbFiles) {
+          try {
+            const { stdout } = await execFileAsync('sqlite3', [dbFile, 'PRAGMA integrity_check'], { timeout: 5000 });
+            if (stdout.trim() === 'ok') {
+              console.log(chalk.green(`    ✓ ${path.basename(dbFile)}: integrity ok`));
+            } else {
+              console.log(chalk.yellow(`    ⚠ ${path.basename(dbFile)}: integrity issue — ${stdout.trim()}`));
+              console.log(chalk.gray(`      Run: sqlite3 "${dbFile}" "PRAGMA integrity_check" for details`));
+            }
+          } catch (dbErr: unknown) {
+            const dbMsg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+            console.log(chalk.yellow(`    ⚠ ${path.basename(dbFile)}: check failed — ${dbMsg}`));
+            console.log(chalk.gray(`      Run: sqlite3 "${dbFile}" ".recover" to attempt recovery`));
+          }
+        }
+      } catch {
+        // readdirSync failed — skip DB check
+      }
+
       // Check symlinks for profiles that share data with a master profile
       if (profile.sharedWith) {
         const isCodex = profile.cliType === 'codex'

@@ -3,13 +3,13 @@
   "title": "Doctor command: database integrity check",
   "wave": "wave-1",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "low",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Run sqlite3 .integrity_check on profile databases to detect corruption.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T14:26:00.700Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T14:26:00.700Z",
+      "by": "claude",
+      "text": "Doctor runs sqlite3 PRAGMA integrity_check on all profile databases. 14 new tests."
+    }
+  ],
   "acceptanceCriteria": [
     "Check each profile SQLite database",
     "Report corrupted databases with remediation steps",

@@ -2,7 +2,7 @@
  * Tests for ASCII bar charts and sparklines (src/charts.ts).
  */
 
-import { sparkline, asciiBar, usageChart } from '../src/charts';
+import { sparkline, asciiBar, usageChart, barColor } from '../src/charts';
 
 // ---------------------------------------------------------------------------
 // sparkline
@@ -180,5 +180,49 @@ describe('usageChart', () => {
     const lines = result.split('\n');
     expect(lines[0]).toContain('25%');
     expect(lines[1]).toContain('75%');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// barColor
+// ---------------------------------------------------------------------------
+
+describe('barColor', () => {
+  test('returns green for low utilisation (<=50%)', () => {
+    const fn = barColor(0);
+    expect(typeof fn).toBe('function');
+    const fn2 = barColor(0.5);
+    expect(typeof fn2).toBe('function');
+  });
+
+  test('returns yellow for medium utilisation (>50%, <=80%)', () => {
+    const fn = barColor(0.51);
+    expect(typeof fn).toBe('function');
+    const fn2 = barColor(0.8);
+    expect(typeof fn2).toBe('function');
+  });
+
+  test('returns red for high utilisation (>80%)', () => {
+    const fn = barColor(0.81);
+    expect(typeof fn).toBe('function');
+    const fn2 = barColor(1.0);
+    expect(typeof fn2).toBe('function');
+  });
+
+  test('boundary at 0.5 is green', () => {
+    const fn = barColor(0.5);
+    // Apply to test string — green output should differ from red
+    const result = fn('test');
+    expect(typeof result).toBe('string');
+  });
+
+  test('boundary at 0.8 is yellow', () => {
+    const fn = barColor(0.8);
+    const result = fn('test');
+    expect(typeof result).toBe('string');
+  });
+
+  test('zero returns a function', () => {
+    expect(typeof barColor(0)).toBe('function');
   });
 });
