@@ -58,6 +58,7 @@ const init_1 = require("./init");
 const profileCreation_1 = require("./profileCreation");
 const launcher_1 = require("./launcher");
 const subscriptions_1 = require("./subscriptions");
+const usageHistory_1 = require("./usageHistory");
 const fedServer_1 = require("./fedServer");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
@@ -928,6 +929,7 @@ const usageCmd = program
     .option('--sort <mode>', 'Sort order: smart (default), status, manual', 'smart')
     .option('--no-group', 'Show all accounts in one list instead of grouped by provider')
     .option('-m, --models', 'Show per-model bucket breakdowns (e.g. Sonnet only, Codex Spark)')
+    .option('--history', 'Show 24h sparkline history per account')
     .action(async (opts) => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
@@ -942,8 +944,28 @@ const usageCmd = program
         return;
     }
     const accounts = await (0, subscriptions_1.getAccountInfo)(accountList, { refresh: opts.refresh });
+    // Record history snapshot (non-blocking, max once per hour)
+    try {
+        (0, usageHistory_1.appendSnapshot)(accounts);
+    }
+    catch { }
     if (opts.json) {
         process.stdout.write(JSON.stringify({ accounts }, null, 2) + '\n');
+        return;
+    }
+    // --history: show 24h sparkline per account and exit
+    if (opts.history) {
+        console.log(chalk_1.default.bold('\n  sweech · usage history (24h)\n'));
+        const sparklines = (0, usageHistory_1.allAccountSparklines)(24, 'u7d');
+        if (sparklines.size === 0) {
+            console.log(chalk_1.default.dim('  No history data yet. Usage snapshots are recorded hourly.\n'));
+            return;
+        }
+        const maxNameLen = Math.max(...Array.from(sparklines.keys()).map(n => n.length));
+        for (const [name, spark] of sparklines) {
+            console.log(`  ${chalk_1.default.bold(name.padEnd(maxNameLen))}  ${spark}  ${chalk_1.default.dim('(24h trend)')}`);
+        }
+        console.log();
         return;
     }
     console.log(chalk_1.default.bold('\n  sweech · usage\n'));

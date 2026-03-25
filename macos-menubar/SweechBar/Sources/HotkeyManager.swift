@@ -15,6 +15,7 @@ class HotkeyManager {
     private init() {}
 
     func register() {
+        unregister() // prevent double-registration
         let enabled = UserDefaults.standard.object(forKey: "sweechHotkeyEnabled") as? Bool ?? true
         guard enabled else { return }
 

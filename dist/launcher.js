@@ -57,6 +57,8 @@ const config_1 = require("./config");
 const providers_1 = require("./providers");
 const clis_1 = require("./clis");
 const subscriptions_1 = require("./subscriptions");
+const usageHistory_1 = require("./usageHistory");
+const events_1 = require("./events");
 const STATE_FILE = path.join(os.homedir(), '.sweech', 'last-launch.json');
 function loadLastState() {
     try {
@@ -454,6 +456,13 @@ function render(entries, state, usageLoad = 'idle') {
                     body.push(prefix + chalk_1.default.gray(`${label} `) + barStr + reset);
                 }
             }
+            // Sparkline history (h key toggle)
+            if (state.showHistory) {
+                const spark = (0, usageHistory_1.allAccountSparklines)(24, 'u7d').get(entry.name);
+                if (spark) {
+                    body.push(prefix + chalk_1.default.dim('24h trend   ') + chalk_1.default.cyan(spark));
+                }
+            }
         };
         if (selected) {
             body.push(chalk_1.default.yellowBright(`  ┏${'━'.repeat(W)}┓`));
@@ -643,6 +652,10 @@ async function runLauncher() {
         (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })), { refresh })
             .then(accounts => {
             patchEntries(accounts);
+            try {
+                (0, usageHistory_1.appendSnapshot)(accounts);
+            }
+            catch { }
             usageLoad = 'loaded';
             draw();
         })
@@ -656,12 +669,20 @@ async function runLauncher() {
     (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName }))).then(accounts => {
         if (usageLoad !== 'loading') {
             patchEntries(accounts);
+            try {
+                (0, usageHistory_1.appendSnapshot)(accounts);
+            }
+            catch { }
             state.usage = true;
             usageLoad = 'loaded';
             draw();
             // Auto-refresh: silently fetch fresh data in background
             (0, subscriptions_1.getAccountInfo)(accountList.map(a => ({ name: a.name, commandName: a.commandName })), { refresh: true }).then(fresh => {
                 patchEntries(fresh);
+                try {
+                    (0, usageHistory_1.appendSnapshot)(fresh);
+                }
+                catch { }
                 draw();
             }).catch(err => console.error('[sweech] usage refresh:', err.message || err));
         }
@@ -773,6 +794,11 @@ async function runLauncher() {
             const entry = getSorted(entries, state.sortMode, state.grouped)[state.selectedIndex];
             const preview = buildCommandPreview(entry, state);
             console.log(chalk_1.default.gray(`→ ${preview}\n`));
+            // Emit profile_switch event
+            events_1.sweechEvents.emit('profile_switch', {
+                account: entry.name,
+                timestamp: new Date().toISOString(),
+            });
             const env = { ...process.env };
             const launchArgs = [];
             if (entry.configDir) {

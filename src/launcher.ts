@@ -340,6 +340,7 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
     body.push(`  ${k('s')}${d('Cycle sort mode (smart → status → manual)')}`);
     body.push(`  ${k('g')}${d('Toggle grouping (by provider / flat)')}`);
     body.push(`  ${k('m')}${d('Toggle model bucket display')}`);
+    body.push(`  ${k('h')}${d('Toggle 24h sparkline history')}`);
     body.push(`  ${k('a')}${d('Add new profile')}`);
     body.push(`  ${k('e')}${d('Edit selected profile')}`);
     body.push(`  ${k('?')}${d('Toggle this help')}`);
@@ -453,6 +454,13 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
           body.push(prefix + chalk.gray(`${label} `) + barStr + reset);
         }
       }
+      // Sparkline history (h key toggle)
+      if (state.showHistory) {
+        const spark = allAccountSparklines(24, 'u7d').get(entry.name);
+        if (spark) {
+          body.push(prefix + chalk.dim('24h trend   ') + chalk.cyan(spark));
+        }
+      }
     };
 
     if (selected) {
@@ -495,7 +503,7 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
   const key = (k: string) => chalk.bold.white(k);
   const desc = (d: string) => chalk.dim(d);
   footer.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
-  footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}`);
+  footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}   ${key('h')} ${desc('history')}`);
 
   return { header, body, footer, entryStartLines };
 }
@@ -760,6 +768,9 @@ export async function runLauncher(): Promise<void> {
             accountList.map(a => ({ name: a.name, commandName: a.commandName })),
           ).then(accounts => { patchEntries(accounts); draw(); }).catch(err => console.error('[sweech] bucket refresh:', err.message || err));
         }
+        draw();
+      } else if (str === 'h' || str === 'H') {
+        state.showHistory = !state.showHistory;
         draw();
       } else if (str === '?') {
         state.helpVisible = !state.helpVisible;

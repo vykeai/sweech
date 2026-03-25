@@ -1374,23 +1374,81 @@ teamCmd
   });
 
 // ── sweech webhooks ─────────────────────────────────────────────────────────────
-program
+const webhooksCmd = program
   .command('webhooks')
-  .description('Show configured webhooks')
+  .description('Manage webhook notifications');
+
+webhooksCmd
+  .command('list')
+  .description('Show configured webhooks and recent deliveries')
   .action(async () => {
-    const { loadWebhookConfig } = await import('./webhooks');
+    const { loadWebhookConfig, getDeliveryLog } = await import('./webhooks');
     const hooks = loadWebhookConfig();
     if (hooks.length === 0) {
       console.log(chalk.dim('\n  No webhooks configured. Add them to ~/.sweech/webhooks.json\n'));
+      console.log(chalk.dim('  Example config:'));
+      console.log(chalk.dim('  ['));
+      console.log(chalk.dim('    {'));
+      console.log(chalk.dim('      "url": "https://example.com/webhook",'));
+      console.log(chalk.dim('      "events": ["*"],'));
+      console.log(chalk.dim('      "name": "my-hook"'));
+      console.log(chalk.dim('    }'));
+      console.log(chalk.dim('  ]\n'));
       return;
     }
     console.log(chalk.bold(`\n  ${hooks.length} webhook(s)\n`));
     for (const h of hooks) {
       const name = h.name ? chalk.white(h.name) : chalk.dim('unnamed');
-      console.log(`  ${name} → ${chalk.cyan(h.url)} ${chalk.dim(`[${h.events.join(', ')}]`)}`);
+      const evts = h.events.includes('*') ? chalk.yellow('*') : chalk.dim(h.events.join(', '));
+      const secret = h.secret ? chalk.green(' [signed]') : '';
+      console.log(`  ${name} → ${chalk.cyan(h.url)} [${evts}]${secret}`);
+    }
+
+    const log = getDeliveryLog();
+    if (log.length > 0) {
+      console.log(chalk.bold(`\n  recent deliveries (${log.length})\n`));
+      for (const d of log.slice(0, 10)) {
+        const status = d.status === 'success' ? chalk.green('ok') : chalk.red('fail');
+        const attempts = d.attempts > 1 ? chalk.dim(` (${d.attempts} attempts)`) : '';
+        console.log(`  ${status} ${chalk.dim(d.event)} → ${chalk.dim(d.url)}${attempts} ${chalk.dim(d.timestamp)}`);
+      }
     }
     console.log();
   });
+
+webhooksCmd
+  .command('test [url]')
+  .description('Send a test webhook to verify delivery')
+  .action(async (url?: string) => {
+    const { loadWebhookConfig, deliverWebhook } = await import('./webhooks');
+    const hooks = loadWebhookConfig();
+
+    const targets = url
+      ? [{ url, events: ['*'], name: 'test' } as import('./webhooks').WebhookConfig]
+      : hooks;
+
+    if (targets.length === 0) {
+      console.log(chalk.dim('\n  No webhooks to test. Configure ~/.sweech/webhooks.json or pass a URL.\n'));
+      return;
+    }
+
+    console.log(chalk.bold(`\n  Testing ${targets.length} webhook(s)...\n`));
+    for (const hook of targets) {
+      const name = hook.name || hook.url;
+      const result = await deliverWebhook(hook, 'test', { message: 'sweech webhook test' }, 1);
+      if (result.success) {
+        console.log(`  ${chalk.green('ok')} ${name} (HTTP ${result.statusCode})`);
+      } else {
+        console.log(`  ${chalk.red('fail')} ${name}: ${result.error}`);
+      }
+    }
+    console.log();
+  });
+
+// Backwards compat: `sweech webhooks` with no subcommand shows the list
+webhooksCmd.action(async () => {
+  await webhooksCmd.commands.find(c => c.name() === 'list')?.parseAsync([], { from: 'user' });
+});
 
 // ── sweech peers ────────────────────────────────────────────────────────────────
 const peersCmd = program

@@ -13,6 +13,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { getLiveUsage, refreshLiveUsage, type LiveRateLimitData } from './liveUsage'
 import { SUPPORTED_CLIS } from './clis'
+import { checkUsageThresholds } from './usageMonitor'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -344,6 +345,11 @@ export async function getAccountInfo(
 
     const usageFn = options.refresh ? refreshLiveUsage : getLiveUsage
     const live = await usageFn(configDir, cliType).catch(() => undefined) ?? undefined
+
+    // Check for usage threshold crossings and emit events
+    if (live) {
+      checkUsageThresholds(p.name, live)
+    }
 
     // Only flag reauth if the Keychain token is actually expired (not just a transient fetch failure)
     let needsReauth = false
