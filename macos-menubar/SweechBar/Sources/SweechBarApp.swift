@@ -15,6 +15,18 @@ struct SweechBarApp: App {
         DispatchQueue.main.async {
             NSApp.setActivationPolicy(.accessory)
         }
+
+        // Register global hotkey (Cmd+Shift+S) to toggle popover
+        HotkeyManager.shared.onToggle = {
+            // Find the SweechBar status item button and click it
+            DispatchQueue.main.async {
+                guard let button = NSApp.windows
+                    .compactMap({ $0.value(forKey: "statusItem") as? NSStatusItem })
+                    .first?.button else { return }
+                button.performClick(nil)
+            }
+        }
+        HotkeyManager.shared.register()
     }
 
     private var menuBarLabel: String {

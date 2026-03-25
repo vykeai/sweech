@@ -22,6 +22,7 @@ import { runInit } from './init';
 import { createProfile } from './profileCreation';
 import { runLauncher } from './launcher';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
+import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { startSweechFedServerWithShutdown } from './fedServer';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -966,7 +967,8 @@ const usageCmd = program
   .option('--sort <mode>', 'Sort order: smart (default), status, manual', 'smart')
   .option('--no-group', 'Show all accounts in one list instead of grouped by provider')
   .option('-m, --models', 'Show per-model bucket breakdowns (e.g. Sonnet only, Codex Spark)')
-  .action(async (opts: { json?: boolean; refresh?: boolean; sort: string; group: boolean; models?: boolean }) => {
+  .option('--history', 'Show 24h sparkline history per account')
+  .action(async (opts: { json?: boolean; refresh?: boolean; sort: string; group: boolean; models?: boolean; history?: boolean }) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     const accountList = getKnownAccounts(profiles);
@@ -981,8 +983,28 @@ const usageCmd = program
     }
 
     const accounts = await getAccountInfo(accountList, { refresh: opts.refresh });
+
+    // Record history snapshot (non-blocking, max once per hour)
+    try { appendSnapshot(accounts); } catch {}
+
     if (opts.json) {
       process.stdout.write(JSON.stringify({ accounts }, null, 2) + '\n');
+      return;
+    }
+
+    // --history: show 24h sparkline per account and exit
+    if (opts.history) {
+      console.log(chalk.bold('\n  sweech · usage history (24h)\n'));
+      const sparklines = allAccountSparklines(24, 'u7d');
+      if (sparklines.size === 0) {
+        console.log(chalk.dim('  No history data yet. Usage snapshots are recorded hourly.\n'));
+        return;
+      }
+      const maxNameLen = Math.max(...Array.from(sparklines.keys()).map(n => n.length));
+      for (const [name, spark] of sparklines) {
+        console.log(`  ${chalk.bold(name.padEnd(maxNameLen))}  ${spark}  ${chalk.dim('(24h trend)')}`);
+      }
+      console.log();
       return;
     }
 

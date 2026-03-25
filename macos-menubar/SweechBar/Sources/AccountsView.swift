@@ -1154,6 +1154,7 @@ struct SettingsView: View {
     @AppStorage("sweechNotifications")   private var notificationsEnabled: Bool = true
     @AppStorage("sweechCompact")         private var compact: Bool     = false
     @AppStorage("sweechShowExtraBuckets") private var showExtraBuckets: Bool = false
+    @AppStorage("sweechHotkeyEnabled")   private var hotkeyEnabled: Bool = true
 
     var body: some View {
         ScrollView {
@@ -1292,6 +1293,29 @@ struct SettingsView: View {
                     }
                     .toggleStyle(.switch)
                     .tint(Sweech.Color.core)
+                }
+
+                // Global hotkey
+                settingsSection(title: "GLOBAL HOTKEY") {
+                    Toggle(isOn: $hotkeyEnabled) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("⌘⇧S to toggle SweechBar")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                            Text("Press Cmd+Shift+S from any app to open or close the popover.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Sweech.Color.textMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(Sweech.Color.core)
+                    .onChange(of: hotkeyEnabled) { enabled in
+                        if enabled {
+                            HotkeyManager.shared.register()
+                        } else {
+                            HotkeyManager.shared.unregister()
+                        }
+                    }
                 }
             }
             .padding(16)

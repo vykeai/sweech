@@ -6,7 +6,10 @@ import { EventEmitter } from 'node:events';
 
 export interface SweechEvents {
   limit_reached: { account: string; window: '5h' | '7d'; timestamp: string };
+  limit_recovered: { account: string; window: '5h' | '7d'; timestamp: string };
   capacity_available: { account: string; window: '5h' | '7d'; timestamp: string };
+  usage_threshold: { account: string; threshold: number; utilization: number; window: '5h' | '7d'; timestamp: string };
+  profile_switch: { account: string; previous?: string; timestamp: string };
   session_start: { account: string; pid: number; timestamp: string };
   session_end: { account: string; pid: number; timestamp: string };
   token_refreshed: { account: string; expiresAt: string };

@@ -11,6 +11,8 @@ import { ConfigManager } from './config';
 import { getProvider } from './providers';
 import { getCLI, SUPPORTED_CLIS } from './clis';
 import { getAccountInfo, type AccountInfo } from './subscriptions';
+import { appendSnapshot, allAccountSparklines } from './usageHistory';
+import { sweechEvents } from './events';
 
 interface UsageBar {
   label: string;
@@ -52,6 +54,7 @@ export interface LaunchState {
   sortMode: 'smart' | 'status' | 'manual';
   grouped: boolean;
   extraBuckets?: boolean;
+  showHistory?: boolean;
   helpVisible?: boolean;
 }
 
@@ -679,6 +682,7 @@ export async function runLauncher(): Promise<void> {
     )
       .then(accounts => {
         patchEntries(accounts);
+        try { appendSnapshot(accounts); } catch {}
         usageLoad = 'loaded';
         draw();
       })
@@ -695,6 +699,7 @@ export async function runLauncher(): Promise<void> {
   ).then(accounts => {
     if (usageLoad !== 'loading') {
       patchEntries(accounts);
+      try { appendSnapshot(accounts); } catch {}
       state.usage = true;
       usageLoad = 'loaded';
       draw();
@@ -704,6 +709,7 @@ export async function runLauncher(): Promise<void> {
         { refresh: true },
       ).then(fresh => {
         patchEntries(fresh);
+        try { appendSnapshot(fresh); } catch {}
         draw();
       }).catch(err => console.error('[sweech] usage refresh:', err.message || err));
     }
@@ -797,6 +803,12 @@ export async function runLauncher(): Promise<void> {
       const entry = getSorted(entries, state.sortMode, state.grouped)[state.selectedIndex];
       const preview = buildCommandPreview(entry, state);
       console.log(chalk.gray(`→ ${preview}\n`));
+
+      // Emit profile_switch event
+      sweechEvents.emit('profile_switch', {
+        account: entry.name,
+        timestamp: new Date().toISOString(),
+      });
 
       const env = { ...process.env };
       const launchArgs: string[] = [];

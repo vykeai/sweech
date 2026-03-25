@@ -3,13 +3,13 @@
   "title": "SweechBar global hotkey to toggle popover",
   "wave": "wave-3",
   "space": "space-menubar",
-  "status": "ready",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Register a global keyboard shortcut (e.g. Cmd+Shift+S) to toggle the menu bar popover from anywhere.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T13:01:56.349Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T13:01:56.349Z",
+      "by": "claude",
+      "text": "Global hotkey Cmd+Shift+S registered via Carbon EventHotKey API. Configurable toggle in Settings. Simulates status item click to toggle popover."
+    }
+  ],
   "acceptanceCriteria": [
     "Configurable hotkey in settings",
     "Toggle opens/closes popover",
