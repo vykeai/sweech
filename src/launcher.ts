@@ -44,7 +44,7 @@ export interface LaunchEntry {
   tokenExpiresAt?: number;
 }
 
-interface LaunchState {
+export interface LaunchState {
   selectedIndex: number;
   yolo: boolean;
   resume: boolean;
@@ -55,7 +55,7 @@ interface LaunchState {
   helpVisible?: boolean;
 }
 
-type UsageLoadState = 'idle' | 'loading' | 'loaded' | 'error';
+export type UsageLoadState = 'idle' | 'loading' | 'loaded' | 'error';
 
 const STATE_FILE = path.join(os.homedir(), '.sweech', 'last-launch.json');
 
@@ -76,7 +76,7 @@ function saveState(state: LaunchState): void {
   } catch {}
 }
 
-function buildCommandPreview(entry: LaunchEntry, state: LaunchState): string {
+export function buildCommandPreview(entry: LaunchEntry, state: LaunchState): string {
   const args: string[] = [];
   if (state.yolo) args.push(entry.yoloFlag);
   if (state.resume) args.push(entry.resumeFlag);
@@ -173,7 +173,7 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-function resolveAuthType(account: AccountInfo, command: string): string {
+export function resolveAuthType(account: AccountInfo, command: string): string {
   // Claude accounts — check rateLimitTier (from Keychain or .credentials.json)
   if (command !== 'codex') {
     if (account.rateLimitTier) {
@@ -203,7 +203,7 @@ function resolveAuthType(account: AccountInfo, command: string): string {
   return 'Subscription';
 }
 
-function buildEntry(
+export function buildEntry(
   name: string, command: string, configDir: string | null, label: string,
   yoloFlag: string, resumeFlag: string, isDefault: boolean, account: AccountInfo,
   opts?: { sharedWith?: string; model?: string }
@@ -307,7 +307,7 @@ export function expiryAlert(e: LaunchEntry): string {
   return chalk.cyan(` ⚡ ${pct}% expiring in ${label}`);
 }
 
-interface RenderResult {
+export interface RenderResult {
   header: string[];
   body: string[];
   footer: string[];
@@ -315,7 +315,7 @@ interface RenderResult {
   entryStartLines: number[];
 }
 
-function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoadState = 'idle'): RenderResult {
+export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: UsageLoadState = 'idle'): RenderResult {
   const header: string[] = [];
   const body: string[] = [];
   const footer: string[] = [];

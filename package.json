@@ -1,7 +1,7 @@
 {
   "name": "sweech",
   "version": "0.2.0",
-  "description": "🍭 Switch between Claude Code, Codex, and 10+ AI providers seamlessly. Install from GitHub: github.com/czaku/sweech",
+  "description": "AI CLI switcher — isolated profile dirs per provider. Switch between Claude Code, Codex, and 10+ AI providers seamlessly.",
   "main": "dist/index.js",
   "bin": {
     "sweech": "./dist/cli.js"
@@ -12,16 +12,19 @@
     "start": "node dist/cli.js",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
+    "cli",
+    "ai",
     "claude",
     "claude-code",
     "codex",
-    "ai",
-    "cli",
-    "anthropic",
     "openai",
+    "anthropic",
+    "profile-switcher",
+    "rate-limit",
     "provider",
     "account-manager",
     "multi-account",
@@ -42,29 +45,26 @@
     "code-assistant"
   ],
   "files": [
-    "dist/**/*",
+    "dist/",
     "README.md",
-    "LICENSE",
-    "CHANGELOG.md",
-    "PROVIDERS.md",
-    "CUSTOM-PROVIDERS.md",
-    "BACKUP.md",
-    "ARCHITECTURE.md",
-    "TESTING.md"
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
   },
-  "author": "czaku",
+  "author": "vykeai",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/czaku/sweech.git"
+    "url": "https://github.com/vykeai/sweech.git"
   },
   "bugs": {
-    "url": "https://github.com/czaku/sweech/issues"
+    "url": "https://github.com/vykeai/sweech/issues"
   },
-  "homepage": "https://github.com/czaku/sweech#readme",
+  "homepage": "https://github.com/vykeai/sweech#readme",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.73.0",
     "archiver": "^6.0.1",

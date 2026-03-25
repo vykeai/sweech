@@ -3,13 +3,13 @@
   "title": "npm publish setup",
   "wave": "wave-4",
   "space": "space-infra",
-  "status": "ready",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Prepare package for npm registry publication. Currently install-only from GitHub.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T08:19:46.978Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T08:19:46.978Z",
+      "by": "claude",
+      "text": "npm publish ready: 40 files in tarball (dist/ only), prepublishOnly runs build+test, engines >=18, LICENSE updated."
+    }
+  ],
   "acceptanceCriteria": [
     "package.json has correct fields for npm publish",
     "npm pack produces clean tarball",

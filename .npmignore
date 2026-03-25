@@ -1,8 +1,30 @@
+# Source
 src/
+
+# Tests
+tests/
+*.test.ts
+*.test.js
+jest.config.*
 tsconfig.json
-.git/
+
+# macOS menu bar app
+macos-menubar/
+
+# Project management
+keel/
+views/
+AGENTS.md
+CLAUDE.md
+
+# CI/CD
 .github/
+
+# Dev/build artifacts
 *.log
-node_modules/
 .DS_Store
+node_modules/
+.git/
+
+# Install script (GitHub-only)
 install.sh
