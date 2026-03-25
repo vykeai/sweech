@@ -26,6 +26,8 @@ export interface FedPeer {
   host: string
   port: number
   secret?: string
+  addedAt?: string
+  lastSeen?: string
 }
 
 export interface MergedAccount {
@@ -53,16 +55,30 @@ export interface AggregatedView {
 
 // ── Config paths ──────────────────────────────────────────────────────────────
 
-const FED_PEERS_FILE = path.join(os.homedir(), '.sweech', 'fed-peers.json')
+const FED_PEERS_FILE = path.join(os.homedir(), '.sweech', 'peers.json')
+// Legacy path for backwards compatibility
+const LEGACY_PEERS_FILE = path.join(os.homedir(), '.sweech', 'fed-peers.json')
 
 // ── Peer config management ────────────────────────────────────────────────────
 
 export function loadFedPeers(): FedPeer[] {
   try {
     const raw = fs.readFileSync(FED_PEERS_FILE, 'utf-8')
-    return JSON.parse(raw) as FedPeer[]
+    const peers = JSON.parse(raw) as FedPeer[]
+    // Backfill addedAt for legacy entries
+    return peers.map(p => ({ ...p, addedAt: p.addedAt || new Date().toISOString() }))
   } catch {
-    return []
+    // Migrate from legacy fed-peers.json if it exists
+    try {
+      const legacyRaw = fs.readFileSync(LEGACY_PEERS_FILE, 'utf-8')
+      const legacyPeers = JSON.parse(legacyRaw) as FedPeer[]
+      const migrated = legacyPeers.map(p => ({ ...p, addedAt: p.addedAt || new Date().toISOString() }))
+      // Save to new location
+      saveFedPeers(migrated)
+      return migrated
+    } catch {
+      return []
+    }
   }
 }
 
@@ -75,11 +91,23 @@ export function addPeer(peer: FedPeer): void {
   const peers = loadFedPeers()
   const existing = peers.findIndex(p => p.name === peer.name)
   if (existing !== -1) {
-    peers[existing] = peer
+    peers[existing] = { ...peer, addedAt: peers[existing].addedAt || peer.addedAt || new Date().toISOString() }
   } else {
-    peers.push(peer)
+    peers.push({ ...peer, addedAt: peer.addedAt || new Date().toISOString() })
   }
   saveFedPeers(peers)
+}
+
+/**
+ * Update the lastSeen timestamp for a peer after a successful health check.
+ */
+export function updatePeerLastSeen(name: string): void {
+  const peers = loadFedPeers()
+  const peer = peers.find(p => p.name === name)
+  if (peer) {
+    peer.lastSeen = new Date().toISOString()
+    saveFedPeers(peers)
+  }
 }
 
 export function removePeer(name: string): void {

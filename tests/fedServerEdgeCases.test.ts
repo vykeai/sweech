@@ -28,6 +28,10 @@ jest.mock('../src/accountSelector', () => ({
   suggestBestAccount: jest.fn().mockResolvedValue(null),
 }));
 
+jest.mock('../src/auditLog', () => ({
+  readAuditLog: jest.fn().mockReturnValue([]),
+}));
+
 jest.mock('fs', () => {
   const actual = jest.requireActual('fs');
   return {

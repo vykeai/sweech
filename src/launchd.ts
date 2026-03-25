@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execSync } from 'child_process';
 import chalk from 'chalk';
+import { isMacOS } from './platform';
 
 const PLIST_LABEL = 'ai.sweech.serve';
 const PLIST_FILENAME = `${PLIST_LABEL}.plist`;
@@ -56,6 +57,10 @@ function generatePlist(port: number): string {
 }
 
 export function installLaunchd(port: number): void {
+  if (!isMacOS()) {
+    console.error(chalk.red('launchd is only available on macOS'));
+    throw new Error('launchd is only available on macOS');
+  }
   try {
     const plistContent = generatePlist(port);
 
@@ -80,6 +85,10 @@ export function installLaunchd(port: number): void {
 }
 
 export function uninstallLaunchd(): void {
+  if (!isMacOS()) {
+    console.error(chalk.red('launchd is only available on macOS'));
+    throw new Error('launchd is only available on macOS');
+  }
   try {
     if (!fs.existsSync(PLIST_PATH)) {
       console.error(chalk.yellow(`Plist not found at ${PLIST_PATH} — nothing to uninstall`));

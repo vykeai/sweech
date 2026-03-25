@@ -90,8 +90,10 @@ struct AccountsView: View {
     @AppStorage("sweechSortMode") private var sortMode: String = "smart"
     @AppStorage("sweechGrouped")  private var grouped: Bool = true
     @AppStorage("sweechCompact")  private var compact: Bool = false
+    @AppStorage("sweechMiniMode") private var miniMode: Bool = false
     @State private var showGuide    = false
     @State private var showSettings = false
+    @State private var miniExpanded = false
 
     // Raw account groups
     private var rawClaude: [SweechAccount] {
@@ -122,6 +124,9 @@ struct AccountsView: View {
     private var sortedClaude: [SweechAccount] { apply(sort: sortMode, to: rawClaude) }
     private var sortedCodex:  [SweechAccount] { apply(sort: sortMode, to: rawCodex) }
     private var sortedAll:    [SweechAccount] { apply(sort: sortMode, to: service.sortedAccounts) }
+
+    /// Mini mode is active when the toggle is on and the user hasn't tapped "Show all"
+    private var activeMiniMode: Bool { miniMode && !miniExpanded }
 
     // Tier
     private func hasExpiryUrgency(_ a: SweechAccount) -> Bool {
@@ -154,6 +159,8 @@ struct AccountsView: View {
 
                 if service.accounts.isEmpty && !service.isConnected {
                     disconnectedView
+                } else if activeMiniMode {
+                    miniLayout
                 } else if hasBothTypes && grouped {
                     groupedLayout
                 } else {
@@ -163,10 +170,13 @@ struct AccountsView: View {
                 Divider().overlay(Sweech.Color.core.opacity(0.1))
                 footer
             }
-            .onAppear { service.fetch() }
+            .onAppear {
+                service.fetch()
+                miniExpanded = false  // Reset mini expansion on each popover open
+            }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(width: hasBothTypes && grouped ? 680 : 360)
+        .frame(width: activeMiniMode ? 360 : (hasBothTypes && grouped ? 680 : 360))
         .background(KeyboardShortcuts(
             onRefresh: { service.fetch() },
             onCycleSort: {
@@ -182,6 +192,13 @@ struct AccountsView: View {
 
     // MARK: Layouts
 
+    private var cardTransition: AnyTransition {
+        .asymmetric(
+            insertion: .opacity.combined(with: .move(edge: .top)),
+            removal: .opacity
+        )
+    }
+
     private var groupedLayout: some View {
         VStack(spacing: 10) {
             summaryHeader
@@ -191,18 +208,22 @@ struct AccountsView: View {
                         .help("\(sortedClaude.count) Claude Code account(s) — sorted by \(sortMode) mode")
                     ForEach(Array(sortedClaude.enumerated()), id: \.element.id) { i, account in
                         AccountCard(account: account, tier: tier(for: account, rank: i))
+                            .transition(cardTransition)
                     }
                 }
                 .frame(minWidth: 290, maxWidth: .infinity)
+                .animation(Sweech.Animation.medium, value: sortMode)
 
                 VStack(spacing: 8) {
                     columnHeader(title: "codex", count: sortedCodex.count)
                         .help("\(sortedCodex.count) Codex CLI account(s) — sorted by \(sortMode) mode")
                     ForEach(Array(sortedCodex.enumerated()), id: \.element.id) { i, account in
                         AccountCard(account: account, tier: tier(for: account, rank: i))
+                            .transition(cardTransition)
                     }
                 }
                 .frame(minWidth: 290, maxWidth: .infinity)
+                .animation(Sweech.Animation.medium, value: sortMode)
             }
             .padding(.horizontal, 4)
         }
@@ -222,10 +243,48 @@ struct AccountsView: View {
                         onMoveDown: sortMode == "manual" && i < sortedAll.count - 1
                             ? { service.moveAccount(from: IndexSet(integer: i), to: i + 2) } : nil
                     )
+                    .transition(cardTransition)
                 }
             }
             .padding(12)
+            .animation(Sweech.Animation.medium, value: sortMode)
         }
+    }
+
+    // MARK: Mini Layout (T-024)
+
+    private var miniLayout: some View {
+        VStack(spacing: 8) {
+            // Show only the top 2 recommended accounts
+            let topAccounts = Array(sortedAll.prefix(2))
+            ForEach(Array(topAccounts.enumerated()), id: \.element.id) { i, account in
+                MiniAccountCard(account: account, tier: tier(for: account, rank: i))
+                    .transition(cardTransition)
+            }
+            .animation(Sweech.Animation.medium, value: sortMode)
+
+            // "Show all" button
+            Button {
+                withAnimation(Sweech.Animation.medium) {
+                    miniExpanded = true
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                    Text("Show all \(service.accounts.count) accounts")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(Sweech.Color.accent)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(Sweech.Color.accent.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .help("Expand to show all accounts")
+        }
+        .padding(12)
     }
 
     // MARK: Sub-views
@@ -930,6 +989,83 @@ struct AccountCard: View {
     }
 }
 
+// MARK: - Mini Account Card (T-024)
+
+/// Compact card for mini mode — shows name, status pill, and week bar only.
+/// Approximately 40% the height of a full AccountCard.
+struct MiniAccountCard: View {
+    let account: SweechAccount
+    var tier: CardTier = .normal
+
+    @State private var isHovered = false
+
+    private var weekBarColor: Color {
+        let u = account.utilization7d
+        if u >= 0.9 { return Sweech.Color.danger }
+        if u >= 0.7 { return Sweech.Color.warning }
+        if u >= 0.4 { return Sweech.Color.warm }
+        return Sweech.Color.ok
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Name
+            Text(account.name)
+                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Sweech.Color.textPrimary)
+                .lineLimit(1)
+
+            // Tier badge (if any)
+            if let label = tier.badgeLabel {
+                HStack(spacing: 2) {
+                    Image(systemName: tier.badgeIcon).font(.system(size: 7))
+                    Text(label).font(.system(size: 8, weight: .bold))
+                }
+                .foregroundStyle(tier.badgeColor)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(tier.badgeColor.opacity(0.12))
+                .clipShape(Capsule())
+            }
+
+            Spacer()
+
+            // Week usage bar (inline mini bar)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Sweech.Color.surfaceHigh)
+                        .frame(height: 4)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(weekBarColor)
+                        .frame(width: max(0, geo.size.width * min(account.utilization7d, 1.0)), height: 4)
+                }
+            }
+            .frame(width: 60, height: 4)
+            .help("\(Int(account.utilization7d * 100))% weekly used")
+
+            // Status pill
+            StatusPill(account: account)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Sweech.Color.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(
+                    tier.borderColor.opacity(isHovered ? 1.0 : 0.85),
+                    lineWidth: tier.borderWidth
+                )
+        )
+        .shadow(color: tier.glowColor, radius: isHovered ? tier.glowRadius + 2 : tier.glowRadius, x: 0, y: 0)
+        .scaleEffect(isHovered ? 1.01 : 1.0)
+        .animation(Sweech.Animation.fast, value: isHovered)
+        .onHover { isHovered = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(account.name), \(account.liveStatus), \(Int(account.utilization7d * 100))% weekly used")
+    }
+}
+
 // MARK: - Status Pill
 
 struct StatusPill: View {
@@ -1175,6 +1311,7 @@ struct SettingsView: View {
     @AppStorage("sweechBarLabelMode")    private var labelMode: String = "capacity"
     @AppStorage("sweechSortMode")        private var sortMode: String  = "smart"
     @AppStorage("sweechGrouped")         private var grouped: Bool     = true
+    @AppStorage("sweechMiniMode")        private var miniMode: Bool    = false
     @AppStorage("sweechRefreshInterval") private var refreshInterval: Int  = 30
     @AppStorage("sweechNotifications")   private var notificationsEnabled: Bool = true
     @AppStorage("sweechCompact")         private var compact: Bool     = false
@@ -1241,6 +1378,19 @@ struct SettingsView: View {
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Sweech.Color.textPrimary)
                             Text("Show Claude and Codex accounts in separate columns.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Sweech.Color.textMuted)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .tint(Sweech.Color.core)
+
+                    Toggle(isOn: $miniMode) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Mini mode")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                            Text("Show only the top 2 recommended accounts with minimal detail. Tap \"Show all\" to expand.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Sweech.Color.textMuted)
                         }

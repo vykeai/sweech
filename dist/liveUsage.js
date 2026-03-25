@@ -50,6 +50,8 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
+const platform_1 = require("./platform");
+const credentialStore_1 = require("./credentialStore");
 // ── Cache ─────────────────────────────────────────────────────────────────────
 const CACHE_FILE = path.join(os.homedir(), '.sweech', 'rate-limit-cache.json');
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -106,13 +108,25 @@ function keychainServiceName(configDir) {
     return `Claude Code-credentials-${hash}`;
 }
 async function readOAuthToken(configDir) {
-    if (process.platform !== 'darwin')
-        return { token: null, tokenStatus: 'no_token' };
     const service = keychainServiceName(configDir);
     const profileName = path.basename(configDir);
     try {
+        // Use cross-platform credential store for reading
         const username = process.env.USER || os.userInfo().username;
-        const raw = (0, child_process_1.execSync)(`security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        let raw = null;
+        if ((0, platform_1.isMacOS)()) {
+            // macOS: use Keychain directly (existing path — preserves refresh flow)
+            try {
+                raw = (0, child_process_1.execSync)(`security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null;
+            }
+            catch {
+                raw = null;
+            }
+        }
+        else {
+            // Linux/Windows: use cross-platform credential store
+            raw = await (0, credentialStore_1.readCredential)(service, username);
+        }
         if (!raw)
             return { token: null, tokenStatus: 'no_token' };
         const payload = JSON.parse(raw);
@@ -149,12 +163,20 @@ async function readOAuthToken(configDir) {
                         expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
                     },
                 };
-                (0, child_process_1.execFileSync)('security', [
-                    'add-generic-password', '-U',
-                    '-a', username,
-                    '-s', service,
-                    '-w', JSON.stringify(updatedPayload),
-                ], { stdio: 'ignore' });
+                // Write updated token back using platform-appropriate method
+                if ((0, platform_1.isMacOS)()) {
+                    (0, child_process_1.execFileSync)('security', [
+                        'add-generic-password', '-U',
+                        '-a', username,
+                        '-s', service,
+                        '-w', JSON.stringify(updatedPayload),
+                    ], { stdio: 'ignore' });
+                }
+                else {
+                    const { getCredentialStore } = require('./credentialStore');
+                    const store = getCredentialStore();
+                    await store.set(service, username, JSON.stringify(updatedPayload));
+                }
                 const refreshed = updatedPayload.claudeAiOauth;
                 return {
                     token: refreshed,

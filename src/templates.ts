@@ -39,10 +39,18 @@ const CUSTOM_TEMPLATES_PATH = path.join(SWEECH_DIR, 'templates.json');
 export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
   {
     name: 'claude-pro',
-    description: 'Anthropic Claude Pro',
+    description: 'Claude with Pro subscription defaults',
     cliType: 'claude',
     provider: 'anthropic',
     tags: ['claude', 'anthropic', 'pro'],
+  },
+  {
+    name: 'claude-max',
+    description: 'Claude with Max subscription, model overrides',
+    cliType: 'claude',
+    provider: 'anthropic',
+    model: 'claude-sonnet-4-6',
+    tags: ['claude', 'anthropic', 'max'],
   },
   {
     name: 'claude-team',
@@ -53,10 +61,17 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
   },
   {
     name: 'codex-pro',
-    description: 'OpenAI Codex Pro',
+    description: 'Codex with ChatGPT Pro subscription',
     cliType: 'codex',
     provider: 'openai',
     tags: ['codex', 'openai', 'pro'],
+  },
+  {
+    name: 'multi-account',
+    description: 'Second account with shared data (projects, plans, MCP)',
+    cliType: 'claude',
+    provider: 'anthropic',
+    tags: ['claude', 'anthropic', 'multi', 'shared'],
   },
   {
     name: 'deepseek-coder',
@@ -144,6 +159,28 @@ export function saveCustomTemplate(template: ProfileTemplate): void {
   }
 
   fs.writeFileSync(CUSTOM_TEMPLATES_PATH, JSON.stringify(templates, null, 2));
+}
+
+/**
+ * Delete a custom template by name from ~/.sweech/templates.json.
+ *
+ * Returns true when the template was found and removed, false otherwise.
+ * Built-in templates cannot be deleted through this function.
+ */
+export function deleteCustomTemplate(name: string): boolean {
+  const templates = loadCustomTemplates();
+  const filtered = templates.filter((t) => t.name !== name);
+
+  if (filtered.length === templates.length) {
+    return false; // nothing removed
+  }
+
+  if (!fs.existsSync(SWEECH_DIR)) {
+    fs.mkdirSync(SWEECH_DIR, { recursive: true });
+  }
+
+  fs.writeFileSync(CUSTOM_TEMPLATES_PATH, JSON.stringify(filtered, null, 2));
+  return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@
 
 import { sweechEvents } from './events';
 import type { LiveRateLimitData } from './liveUsage';
+import { runHook } from './plugins';
 
 // ---------------------------------------------------------------------------
 // State tracking
@@ -114,6 +115,8 @@ function checkWindow(
       window,
       timestamp: now,
     });
+    // Run plugin onLimitReached hooks (errors are caught inside runHook)
+    try { runHook('onLimitReached', account, window); } catch { /* plugin errors must not crash CLI */ }
   }
 
   // Limit recovered (<100% after being at limit)

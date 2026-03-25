@@ -3,13 +3,13 @@
   "title": "Add tests for templates.ts",
   "wave": "wave-1",
   "space": "space-infra",
-  "status": "ready",
+  "status": "done",
   "priority": "low",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Template rendering untested. 189 lines.",
   "createdAt": "2026-03-24T17:30:00Z",
-  "updatedAt": "2026-03-24T17:30:00Z",
+  "updatedAt": "2026-03-25T16:54:17.268Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -21,7 +21,13 @@
   "statusHistory": [],
   "dependsOn": [],
   "runStatus": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-03-25T16:54:17.268Z",
+      "by": "claude",
+      "text": "36 tests for templates: built-in, custom, save, find, special chars, overrides."
+    }
+  ],
   "acceptanceCriteria": [
     "Test template listing",
     "Test special character handling",

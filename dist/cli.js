@@ -63,6 +63,8 @@ const usageHistory_1 = require("./usageHistory");
 const fedServer_1 = require("./fedServer");
 const updateChecker_1 = require("./updateChecker");
 const charts_1 = require("./charts");
+const plugins_1 = require("./plugins");
+const templates_1 = require("./templates");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 // Read version from package.json
@@ -102,10 +104,55 @@ program
 program
     .command('add')
     .description('Add a new provider with interactive setup')
-    .action(async () => {
+    .option('-t, --template <name>', 'Use a profile template for quick setup')
+    .action(async (opts) => {
     try {
         const config = new config_1.ConfigManager();
         const existingProfiles = config.getProfiles();
+        // If --template is provided, use template to pre-fill answers
+        if (opts.template) {
+            const tpl = (0, templates_1.findTemplate)(opts.template);
+            if (!tpl) {
+                console.error(chalk_1.default.red(`Template '${opts.template}' not found`));
+                console.log(chalk_1.default.dim('Available templates: ' + (0, templates_1.getAllTemplates)().map(t => t.name).join(', ')));
+                process.exit(1);
+            }
+            console.log(chalk_1.default.cyan('Using template:'), chalk_1.default.bold(tpl.name), chalk_1.default.dim(`— ${tpl.description}`));
+            // Pre-fill answers from template
+            const commandName = tpl.name;
+            const provider = (0, providers_1.getProvider)(tpl.provider);
+            if (!provider) {
+                console.error(chalk_1.default.red(`Template provider '${tpl.provider}' not found`));
+                process.exit(1);
+            }
+            const cli = (0, clis_1.getCLI)(tpl.cliType);
+            if (!cli) {
+                console.error(chalk_1.default.red(`Template CLI type '${tpl.cliType}' not found`));
+                process.exit(1);
+            }
+            // Apply template overrides to provider
+            const templateProvider = { ...provider };
+            if (tpl.model)
+                templateProvider.defaultModel = tpl.model;
+            if (tpl.baseUrl)
+                templateProvider.baseUrl = tpl.baseUrl;
+            const answers = {
+                cliType: tpl.cliType,
+                provider: tpl.provider,
+                commandName,
+                authMethod: 'oauth',
+            };
+            await (0, profileCreation_1.createProfile)(answers, templateProvider, cli, config);
+            const binDir = config.getBinDir();
+            const pathIncludesBin = (process.env.PATH || '').split(':').includes(binDir);
+            if (!pathIncludesBin) {
+                console.log(chalk_1.default.blue('\nℹ'), chalk_1.default.gray(`Add to your PATH:`));
+                console.log(chalk_1.default.gray(`  export PATH="${binDir}:$PATH"`));
+                console.log(chalk_1.default.gray(`  Add this to your ~/.zshrc or ~/.bashrc`));
+            }
+            console.log(chalk_1.default.green('\nNow run:'), chalk_1.default.bold(commandName));
+            return;
+        }
         const answers = await (0, interactive_1.interactiveAddProvider)(existingProfiles);
         // Use custom provider config if provided, otherwise get from registry
         const provider = answers.customProviderConfig || (0, providers_1.getProvider)(answers.provider);
@@ -130,7 +177,7 @@ program
         }
         console.log(chalk_1.default.green('\nNow run:'), chalk_1.default.bold(answers.commandName));
         console.log();
-        console.log(chalk_1.default.gray('💡 Tip: You can add multiple accounts for the same provider!'));
+        console.log(chalk_1.default.gray('Tip: You can add multiple accounts for the same provider!'));
         console.log(chalk_1.default.gray('   Example: claude-mini, minimax-work, minimax-personal, etc.'));
     }
     catch (error) {
@@ -1299,6 +1346,122 @@ usageCmd
     (0, subscriptions_1.setMeta)(profile.commandName, { limits: { window5h: parseInt(limit5h), window7d: parseInt(limit7d) } });
     console.log(chalk_1.default.green(`✓ Limits set for ${profile.name}: 5h=${limit5h} 7d=${limit7d}`));
 });
+// ── sweech plugins ────────────────────────────────────────────────────────────
+const pluginsCmd = program
+    .command('plugins')
+    .description('Manage sweech plugins');
+pluginsCmd
+    .command('list')
+    .alias('ls')
+    .description('List installed plugins')
+    .action(() => {
+    const plugins = (0, plugins_1.listPlugins)();
+    if (plugins.length === 0) {
+        console.log(chalk_1.default.dim('\nNo plugins installed. Use `sweech plugins install <package>` to add one.\n'));
+        return;
+    }
+    console.log(chalk_1.default.bold('\n  sweech · plugins\n'));
+    for (const p of plugins) {
+        const status = p.enabled ? chalk_1.default.green('enabled') : chalk_1.default.red('disabled');
+        console.log(`  ${chalk_1.default.bold(p.name)} ${chalk_1.default.dim(`v${p.version}`)} [${status}]`);
+    }
+    console.log();
+});
+pluginsCmd
+    .command('install <package>')
+    .description('Install an npm package as a sweech plugin')
+    .action(async (npmPackage) => {
+    try {
+        console.log(chalk_1.default.dim(`Installing plugin "${npmPackage}"...`));
+        await (0, plugins_1.installPlugin)(npmPackage);
+        console.log(chalk_1.default.green(`\n✓ Plugin "${npmPackage}" installed and enabled.\n`));
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
+});
+pluginsCmd
+    .command('uninstall <name>')
+    .description('Uninstall a sweech plugin')
+    .action(async (name) => {
+    try {
+        await (0, plugins_1.uninstallPlugin)(name);
+        console.log(chalk_1.default.green(`\n✓ Plugin "${name}" uninstalled.\n`));
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
+});
+// ── sweech templates ──────────────────────────────────────────────────────────
+const templatesCmd = program
+    .command('templates')
+    .description('Manage profile templates');
+templatesCmd
+    .command('list')
+    .alias('ls')
+    .description('List available profile templates')
+    .action(() => {
+    const all = (0, templates_1.getAllTemplates)();
+    const custom = (0, templates_1.loadCustomTemplates)();
+    const customNames = new Set(custom.map(t => t.name));
+    console.log(chalk_1.default.bold('\n  sweech · templates\n'));
+    console.log(chalk_1.default.cyan('  Built-in:\n'));
+    for (const t of templates_1.BUILT_IN_TEMPLATES) {
+        const overridden = customNames.has(t.name) ? chalk_1.default.yellow(' [overridden]') : '';
+        const modelStr = t.model ? chalk_1.default.dim(` model=${t.model}`) : '';
+        console.log(`    ${chalk_1.default.bold(t.name)}  ${chalk_1.default.dim(t.description)}${modelStr}${overridden}`);
+    }
+    if (custom.length > 0) {
+        console.log(chalk_1.default.cyan('\n  Custom:\n'));
+        for (const t of custom) {
+            const modelStr = t.model ? chalk_1.default.dim(` model=${t.model}`) : '';
+            console.log(`    ${chalk_1.default.bold(t.name)}  ${chalk_1.default.dim(t.description)}${modelStr}`);
+        }
+    }
+    console.log(chalk_1.default.dim(`\n  Use: sweech add --template <name>\n`));
+});
+templatesCmd
+    .command('save <name>')
+    .description('Save a custom template')
+    .requiredOption('--cli <type>', 'CLI type (claude or codex)')
+    .requiredOption('--provider <name>', 'Provider name')
+    .option('--description <text>', 'Template description', '')
+    .option('--model <model>', 'Default model')
+    .option('--base-url <url>', 'Base URL for API')
+    .option('--tags <tags>', 'Comma-separated tags')
+    .action((name, opts) => {
+    const tpl = {
+        name,
+        description: opts.description || `Custom template: ${name}`,
+        cliType: opts.cli,
+        provider: opts.provider,
+        model: opts.model,
+        baseUrl: opts.baseUrl,
+        tags: opts.tags ? opts.tags.split(',').map(t => t.trim()) : [name],
+    };
+    (0, templates_1.saveCustomTemplate)(tpl);
+    console.log(chalk_1.default.green(`\n✓ Template "${name}" saved.\n`));
+});
+templatesCmd
+    .command('remove <name>')
+    .description('Remove a custom template')
+    .action((name) => {
+    const custom = (0, templates_1.loadCustomTemplates)();
+    if (!custom.find(t => t.name === name)) {
+        console.error(chalk_1.default.red(`Custom template '${name}' not found.`));
+        const builtIn = templates_1.BUILT_IN_TEMPLATES.find(t => t.name === name);
+        if (builtIn) {
+            console.log(chalk_1.default.dim('Note: Built-in templates cannot be removed.'));
+        }
+        process.exit(1);
+    }
+    (0, templates_1.deleteCustomTemplate)(name);
+    console.log(chalk_1.default.green(`\n✓ Template "${name}" removed.\n`));
+});
 // Reset command - Uninstall sweetch
 program
     .command('reset')
@@ -1458,37 +1621,75 @@ const teamCmd = program
 teamCmd
     .command('join <invite-code>')
     .description('Join a team using an invite code')
-    .option('--hub <url>', 'Team hub URL')
+    .option('--hub <url>', 'Team hub URL (omit for local-only mode)')
     .action(async (inviteCode, opts) => {
-    const { joinTeam } = await Promise.resolve().then(() => __importStar(require('./team')));
-    await joinTeam(inviteCode, opts.hub || '');
+    if (opts.hub) {
+        const { joinTeam } = await Promise.resolve().then(() => __importStar(require('./team')));
+        await joinTeam(inviteCode, opts.hub);
+    }
+    else {
+        const { joinTeamLocal } = await Promise.resolve().then(() => __importStar(require('./team')));
+        joinTeamLocal(inviteCode);
+    }
     console.log(chalk_1.default.green('✓ Joined team'));
 });
 teamCmd
     .command('leave')
     .description('Leave the current team')
-    .action(async () => {
-    const { leaveTeam } = await Promise.resolve().then(() => __importStar(require('./team')));
-    await leaveTeam();
+    .option('--hub', 'Notify hub before leaving')
+    .action(async (opts) => {
+    if (opts.hub) {
+        const { leaveTeam } = await Promise.resolve().then(() => __importStar(require('./team')));
+        await leaveTeam();
+    }
+    else {
+        const { leaveTeamLocal } = await Promise.resolve().then(() => __importStar(require('./team')));
+        leaveTeamLocal();
+    }
     console.log(chalk_1.default.green('✓ Left team'));
 });
 teamCmd
     .command('invite <email>')
     .description('Invite a member to the team')
-    .action(async (email) => {
-    const { inviteMember } = await Promise.resolve().then(() => __importStar(require('./team')));
-    await inviteMember(email);
+    .option('--hub', 'Send invite via hub (requires admin)')
+    .action(async (email, opts) => {
+    if (opts.hub) {
+        const { inviteMember } = await Promise.resolve().then(() => __importStar(require('./team')));
+        await inviteMember(email);
+    }
+    else {
+        const { addLocalInvite } = await Promise.resolve().then(() => __importStar(require('./team')));
+        addLocalInvite(email);
+    }
     console.log(chalk_1.default.green(`✓ Invite sent to ${email}`));
 });
 teamCmd
     .command('members')
     .description('List team members')
-    .action(async () => {
-    const { listMembers } = await Promise.resolve().then(() => __importStar(require('./team')));
-    const members = await listMembers();
-    console.log(chalk_1.default.bold(`\n  team members (${members.length})\n`));
-    for (const m of members) {
-        console.log(`  ${chalk_1.default.white(m.name)} ${chalk_1.default.dim(`[${m.role}]`)} ${chalk_1.default.dim(`${m.accounts} accounts`)} ${chalk_1.default.dim(`last seen: ${m.lastSeen}`)}`);
+    .option('--hub', 'Fetch members from hub')
+    .action(async (opts) => {
+    if (opts.hub) {
+        const { listMembers } = await Promise.resolve().then(() => __importStar(require('./team')));
+        const members = await listMembers();
+        console.log(chalk_1.default.bold(`\n  team members (${members.length})\n`));
+        for (const m of members) {
+            console.log(`  ${chalk_1.default.white(m.name)} ${chalk_1.default.dim(`[${m.role}]`)} ${chalk_1.default.dim(`${m.accounts} accounts`)} ${chalk_1.default.dim(`last seen: ${m.lastSeen}`)}`);
+        }
+    }
+    else {
+        const { getLocalMembers, loadTeamConfig } = await Promise.resolve().then(() => __importStar(require('./team')));
+        const members = getLocalMembers();
+        const config = loadTeamConfig();
+        console.log(chalk_1.default.bold(`\n  team members (${members.length})\n`));
+        for (const m of members) {
+            console.log(`  ${chalk_1.default.white(m.name)} ${chalk_1.default.dim(`[${m.role}]`)} ${chalk_1.default.dim(m.email)} ${chalk_1.default.dim(`joined: ${m.joinedAt}`)}`);
+        }
+        if (config && config.pendingInvites.length > 0) {
+            console.log(chalk_1.default.bold(`\n  pending invites (${config.pendingInvites.length})\n`));
+            for (const email of config.pendingInvites) {
+                console.log(`  ${chalk_1.default.yellow('○')} ${email}`);
+            }
+        }
     }
     console.log();
 });
@@ -1568,20 +1769,47 @@ const peersCmd = program
     .description('Manage federation peers');
 peersCmd
     .command('list')
-    .description('List configured federation peers')
-    .action(async () => {
-    const { loadFedPeers, fetchPeerHealth } = await Promise.resolve().then(() => __importStar(require('./fedClient')));
+    .description('List configured federation peers with connectivity status')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (opts) => {
+    const { loadFedPeers, fetchPeerHealth, updatePeerLastSeen } = await Promise.resolve().then(() => __importStar(require('./fedClient')));
     const peers = loadFedPeers();
     if (peers.length === 0) {
-        console.log(chalk_1.default.dim('\n  No peers configured. Add them to ~/.sweech/fed-peers.json\n'));
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ peers: [] }, null, 2) + '\n');
+        }
+        else {
+            console.log(chalk_1.default.dim('\n  No peers configured. Run: sweech peers add <name> <host> <port>\n'));
+        }
+        return;
+    }
+    const results = await Promise.all(peers.map(async (p) => {
+        const health = await fetchPeerHealth(p);
+        if (health?.ok)
+            updatePeerLastSeen(p.name);
+        return { peer: p, health };
+    }));
+    if (opts.json) {
+        process.stdout.write(JSON.stringify({
+            peers: results.map(r => ({
+                name: r.peer.name,
+                host: r.peer.host,
+                port: r.peer.port,
+                addedAt: r.peer.addedAt,
+                lastSeen: r.peer.lastSeen,
+                status: r.health?.ok ? 'ok' : 'down',
+                latencyMs: r.health?.latencyMs ?? null,
+            })),
+        }, null, 2) + '\n');
         return;
     }
     console.log(chalk_1.default.bold(`\n  ${peers.length} peer(s)\n`));
-    for (const p of peers) {
-        const health = await fetchPeerHealth(p);
+    for (const { peer: p, health } of results) {
         const status = health?.ok ? chalk_1.default.green('ok') : chalk_1.default.red('down');
         const latency = health?.latencyMs ? chalk_1.default.dim(`${health.latencyMs}ms`) : '';
-        console.log(`  ${chalk_1.default.white(p.name)} ${chalk_1.default.dim(`${p.host}:${p.port}`)} ${status} ${latency}`);
+        const addedStr = p.addedAt ? chalk_1.default.dim(` added ${new Date(p.addedAt).toLocaleDateString()}`) : '';
+        const lastStr = p.lastSeen ? chalk_1.default.dim(` last seen ${new Date(p.lastSeen).toLocaleString()}`) : '';
+        console.log(`  ${chalk_1.default.white(p.name)} ${chalk_1.default.dim(`${p.host}:${p.port}`)} ${status} ${latency}${addedStr}${lastStr}`);
     }
     console.log();
 });
@@ -1590,75 +1818,27 @@ peersCmd
     .description('Add a federation peer')
     .option('--secret <secret>', 'Shared secret for auth')
     .action(async (name, host, port, opts) => {
-    const { loadFedPeers, saveFedPeers } = await Promise.resolve().then(() => __importStar(require('./fedClient')));
-    const peers = loadFedPeers();
-    peers.push({ name, host, port: parseInt(port), secret: opts.secret });
-    saveFedPeers(peers);
-    console.log(chalk_1.default.green(`✓ Peer '${name}' added`));
+    const { addPeer } = await Promise.resolve().then(() => __importStar(require('./fedClient')));
+    const portNum = parseInt(port, 10);
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+        console.error(chalk_1.default.red('Error: Port must be a number between 1 and 65535'));
+        process.exit(1);
+    }
+    addPeer({ name, host, port: portNum, secret: opts.secret, addedAt: new Date().toISOString() });
+    console.log(chalk_1.default.green(`✓ Peer '${name}' added (${host}:${portNum})`));
 });
 peersCmd
     .command('remove <name>')
     .description('Remove a federation peer')
     .action(async (name) => {
-    const { loadFedPeers, saveFedPeers } = await Promise.resolve().then(() => __importStar(require('./fedClient')));
-    const peers = loadFedPeers().filter(p => p.name !== name);
-    saveFedPeers(peers);
+    const { loadFedPeers, removePeer } = await Promise.resolve().then(() => __importStar(require('./fedClient')));
+    const peers = loadFedPeers();
+    if (!peers.find(p => p.name === name)) {
+        console.error(chalk_1.default.red(`Peer '${name}' not found`));
+        process.exit(1);
+    }
+    removePeer(name);
     console.log(chalk_1.default.green(`✓ Peer '${name}' removed`));
-});
-// ── sweech plugins ──────────────────────────────────────────────────────────────
-const pluginsCmd = program
-    .command('plugins')
-    .description('Manage sweech plugins');
-pluginsCmd
-    .command('list')
-    .description('List installed plugins')
-    .action(async () => {
-    const { listPlugins } = await Promise.resolve().then(() => __importStar(require('./plugins')));
-    const plugins = listPlugins();
-    if (plugins.length === 0) {
-        console.log(chalk_1.default.dim('\n  No plugins installed.\n'));
-        return;
-    }
-    console.log(chalk_1.default.bold(`\n  ${plugins.length} plugin(s)\n`));
-    for (const p of plugins) {
-        const status = p.enabled ? chalk_1.default.green('enabled') : chalk_1.default.red('disabled');
-        console.log(`  ${chalk_1.default.white(p.name)} ${chalk_1.default.dim(`v${p.version}`)} ${status}`);
-    }
-    console.log();
-});
-pluginsCmd
-    .command('install <package>')
-    .description('Install a plugin from npm')
-    .action(async (pkg) => {
-    const { installPlugin } = await Promise.resolve().then(() => __importStar(require('./plugins')));
-    await installPlugin(pkg);
-    console.log(chalk_1.default.green(`✓ Plugin '${pkg}' installed`));
-});
-pluginsCmd
-    .command('uninstall <name>')
-    .description('Uninstall a plugin')
-    .action(async (name) => {
-    const { uninstallPlugin } = await Promise.resolve().then(() => __importStar(require('./plugins')));
-    await uninstallPlugin(name);
-    console.log(chalk_1.default.green(`✓ Plugin '${name}' uninstalled`));
-});
-// ── sweech templates ────────────────────────────────────────────────────────────
-program
-    .command('templates')
-    .description('List available profile templates')
-    .option('--json', 'Output as JSON')
-    .action(async (opts) => {
-    const { getAllTemplates } = await Promise.resolve().then(() => __importStar(require('./templates')));
-    const templates = getAllTemplates();
-    if (opts.json) {
-        process.stdout.write(JSON.stringify({ templates }, null, 2) + '\n');
-        return;
-    }
-    console.log(chalk_1.default.bold(`\n  ${templates.length} template(s)\n`));
-    for (const t of templates) {
-        console.log(`  ${chalk_1.default.white(t.name)} ${chalk_1.default.dim(`[${t.cliType}/${t.provider}]`)} ${chalk_1.default.dim(t.description)}`);
-    }
-    console.log();
 });
 // ── Startup update check (non-blocking) ────────────────────────────────────────
 // Fire-and-forget: if the check completes before parse finishes, print a notice.

@@ -27,6 +27,8 @@ import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { startSweechFedServerWithShutdown } from './fedServer';
 import { checkForUpdate, fetchChangelog } from './updateChecker';
 import { asciiBar, barColor } from './charts';
+import { installPlugin, uninstallPlugin, listPlugins } from './plugins';
+import { getAllTemplates, findTemplate, saveCustomTemplate, loadCustomTemplates, deleteCustomTemplate, BUILT_IN_TEMPLATES, ProfileTemplate } from './templates';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -71,10 +73,63 @@ program
 program
   .command('add')
   .description('Add a new provider with interactive setup')
-  .action(async () => {
+  .option('-t, --template <name>', 'Use a profile template for quick setup')
+  .action(async (opts: { template?: string }) => {
     try {
       const config = new ConfigManager();
       const existingProfiles = config.getProfiles();
+
+      // If --template is provided, use template to pre-fill answers
+      if (opts.template) {
+        const tpl = findTemplate(opts.template);
+        if (!tpl) {
+          console.error(chalk.red(`Template '${opts.template}' not found`));
+          console.log(chalk.dim('Available templates: ' + getAllTemplates().map(t => t.name).join(', ')));
+          process.exit(1);
+        }
+
+        console.log(chalk.cyan('Using template:'), chalk.bold(tpl.name), chalk.dim(`— ${tpl.description}`));
+
+        // Pre-fill answers from template
+        const commandName = tpl.name;
+        const provider = getProvider(tpl.provider);
+        if (!provider) {
+          console.error(chalk.red(`Template provider '${tpl.provider}' not found`));
+          process.exit(1);
+        }
+
+        const cli = getCLI(tpl.cliType);
+        if (!cli) {
+          console.error(chalk.red(`Template CLI type '${tpl.cliType}' not found`));
+          process.exit(1);
+        }
+
+        // Apply template overrides to provider
+        const templateProvider = { ...provider };
+        if (tpl.model) templateProvider.defaultModel = tpl.model;
+        if (tpl.baseUrl) templateProvider.baseUrl = tpl.baseUrl;
+
+        const answers = {
+          cliType: tpl.cliType,
+          provider: tpl.provider,
+          commandName,
+          authMethod: 'oauth' as const,
+        };
+
+        await createProfile(answers, templateProvider, cli, config);
+
+        const binDir = config.getBinDir();
+        const pathIncludesBin = (process.env.PATH || '').split(':').includes(binDir);
+        if (!pathIncludesBin) {
+          console.log(chalk.blue('\nℹ'), chalk.gray(`Add to your PATH:`));
+          console.log(chalk.gray(`  export PATH="${binDir}:$PATH"`));
+          console.log(chalk.gray(`  Add this to your ~/.zshrc or ~/.bashrc`));
+        }
+
+        console.log(chalk.green('\nNow run:'), chalk.bold(commandName));
+        return;
+      }
+
       const answers = await interactiveAddProvider(existingProfiles);
 
       // Use custom provider config if provided, otherwise get from registry
@@ -105,7 +160,7 @@ program
 
       console.log(chalk.green('\nNow run:'), chalk.bold(answers.commandName));
       console.log();
-      console.log(chalk.gray('💡 Tip: You can add multiple accounts for the same provider!'));
+      console.log(chalk.gray('Tip: You can add multiple accounts for the same provider!'));
       console.log(chalk.gray('   Example: claude-mini, minimax-work, minimax-personal, etc.'));
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -1341,6 +1396,132 @@ usageCmd
     console.log(chalk.green(`✓ Limits set for ${profile.name}: 5h=${limit5h} 7d=${limit7d}`));
   });
 
+// ── sweech plugins ────────────────────────────────────────────────────────────
+const pluginsCmd = program
+  .command('plugins')
+  .description('Manage sweech plugins');
+
+pluginsCmd
+  .command('list')
+  .alias('ls')
+  .description('List installed plugins')
+  .action(() => {
+    const plugins = listPlugins();
+    if (plugins.length === 0) {
+      console.log(chalk.dim('\nNo plugins installed. Use `sweech plugins install <package>` to add one.\n'));
+      return;
+    }
+    console.log(chalk.bold('\n  sweech · plugins\n'));
+    for (const p of plugins) {
+      const status = p.enabled ? chalk.green('enabled') : chalk.red('disabled');
+      console.log(`  ${chalk.bold(p.name)} ${chalk.dim(`v${p.version}`)} [${status}]`);
+    }
+    console.log();
+  });
+
+pluginsCmd
+  .command('install <package>')
+  .description('Install an npm package as a sweech plugin')
+  .action(async (npmPackage: string) => {
+    try {
+      console.log(chalk.dim(`Installing plugin "${npmPackage}"...`));
+      await installPlugin(npmPackage);
+      console.log(chalk.green(`\n✓ Plugin "${npmPackage}" installed and enabled.\n`));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
+      process.exit(1);
+    }
+  });
+
+pluginsCmd
+  .command('uninstall <name>')
+  .description('Uninstall a sweech plugin')
+  .action(async (name: string) => {
+    try {
+      await uninstallPlugin(name);
+      console.log(chalk.green(`\n✓ Plugin "${name}" uninstalled.\n`));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
+      process.exit(1);
+    }
+  });
+
+// ── sweech templates ──────────────────────────────────────────────────────────
+const templatesCmd = program
+  .command('templates')
+  .description('Manage profile templates');
+
+templatesCmd
+  .command('list')
+  .alias('ls')
+  .description('List available profile templates')
+  .action(() => {
+    const all = getAllTemplates();
+    const custom = loadCustomTemplates();
+    const customNames = new Set(custom.map(t => t.name));
+
+    console.log(chalk.bold('\n  sweech · templates\n'));
+
+    console.log(chalk.cyan('  Built-in:\n'));
+    for (const t of BUILT_IN_TEMPLATES) {
+      const overridden = customNames.has(t.name) ? chalk.yellow(' [overridden]') : '';
+      const modelStr = t.model ? chalk.dim(` model=${t.model}`) : '';
+      console.log(`    ${chalk.bold(t.name)}  ${chalk.dim(t.description)}${modelStr}${overridden}`);
+    }
+
+    if (custom.length > 0) {
+      console.log(chalk.cyan('\n  Custom:\n'));
+      for (const t of custom) {
+        const modelStr = t.model ? chalk.dim(` model=${t.model}`) : '';
+        console.log(`    ${chalk.bold(t.name)}  ${chalk.dim(t.description)}${modelStr}`);
+      }
+    }
+
+    console.log(chalk.dim(`\n  Use: sweech add --template <name>\n`));
+  });
+
+templatesCmd
+  .command('save <name>')
+  .description('Save a custom template')
+  .requiredOption('--cli <type>', 'CLI type (claude or codex)')
+  .requiredOption('--provider <name>', 'Provider name')
+  .option('--description <text>', 'Template description', '')
+  .option('--model <model>', 'Default model')
+  .option('--base-url <url>', 'Base URL for API')
+  .option('--tags <tags>', 'Comma-separated tags')
+  .action((name: string, opts: { cli: string; provider: string; description: string; model?: string; baseUrl?: string; tags?: string }) => {
+    const tpl: ProfileTemplate = {
+      name,
+      description: opts.description || `Custom template: ${name}`,
+      cliType: opts.cli,
+      provider: opts.provider,
+      model: opts.model,
+      baseUrl: opts.baseUrl,
+      tags: opts.tags ? opts.tags.split(',').map(t => t.trim()) : [name],
+    };
+    saveCustomTemplate(tpl);
+    console.log(chalk.green(`\n✓ Template "${name}" saved.\n`));
+  });
+
+templatesCmd
+  .command('remove <name>')
+  .description('Remove a custom template')
+  .action((name: string) => {
+    const custom = loadCustomTemplates();
+    if (!custom.find(t => t.name === name)) {
+      console.error(chalk.red(`Custom template '${name}' not found.`));
+      const builtIn = BUILT_IN_TEMPLATES.find(t => t.name === name);
+      if (builtIn) {
+        console.log(chalk.dim('Note: Built-in templates cannot be removed.'));
+      }
+      process.exit(1);
+    }
+    deleteCustomTemplate(name);
+    console.log(chalk.green(`\n✓ Template "${name}" removed.\n`));
+  });
+
 // Reset command - Uninstall sweetch
 program
   .command('reset')
@@ -1512,40 +1693,74 @@ const teamCmd = program
 teamCmd
   .command('join <invite-code>')
   .description('Join a team using an invite code')
-  .option('--hub <url>', 'Team hub URL')
+  .option('--hub <url>', 'Team hub URL (omit for local-only mode)')
   .action(async (inviteCode: string, opts: { hub?: string }) => {
-    const { joinTeam } = await import('./team');
-    await joinTeam(inviteCode, opts.hub || '');
+    if (opts.hub) {
+      const { joinTeam } = await import('./team');
+      await joinTeam(inviteCode, opts.hub);
+    } else {
+      const { joinTeamLocal } = await import('./team');
+      joinTeamLocal(inviteCode);
+    }
     console.log(chalk.green('✓ Joined team'));
   });
 
 teamCmd
   .command('leave')
   .description('Leave the current team')
-  .action(async () => {
-    const { leaveTeam } = await import('./team');
-    await leaveTeam();
+  .option('--hub', 'Notify hub before leaving')
+  .action(async (opts: { hub?: boolean }) => {
+    if (opts.hub) {
+      const { leaveTeam } = await import('./team');
+      await leaveTeam();
+    } else {
+      const { leaveTeamLocal } = await import('./team');
+      leaveTeamLocal();
+    }
     console.log(chalk.green('✓ Left team'));
   });
 
 teamCmd
   .command('invite <email>')
   .description('Invite a member to the team')
-  .action(async (email: string) => {
-    const { inviteMember } = await import('./team');
-    await inviteMember(email);
+  .option('--hub', 'Send invite via hub (requires admin)')
+  .action(async (email: string, opts: { hub?: boolean }) => {
+    if (opts.hub) {
+      const { inviteMember } = await import('./team');
+      await inviteMember(email);
+    } else {
+      const { addLocalInvite } = await import('./team');
+      addLocalInvite(email);
+    }
     console.log(chalk.green(`✓ Invite sent to ${email}`));
   });
 
 teamCmd
   .command('members')
   .description('List team members')
-  .action(async () => {
-    const { listMembers } = await import('./team');
-    const members = await listMembers();
-    console.log(chalk.bold(`\n  team members (${members.length})\n`));
-    for (const m of members) {
-      console.log(`  ${chalk.white(m.name)} ${chalk.dim(`[${m.role}]`)} ${chalk.dim(`${m.accounts} accounts`)} ${chalk.dim(`last seen: ${m.lastSeen}`)}`);
+  .option('--hub', 'Fetch members from hub')
+  .action(async (opts: { hub?: boolean }) => {
+    if (opts.hub) {
+      const { listMembers } = await import('./team');
+      const members = await listMembers();
+      console.log(chalk.bold(`\n  team members (${members.length})\n`));
+      for (const m of members) {
+        console.log(`  ${chalk.white(m.name)} ${chalk.dim(`[${m.role}]`)} ${chalk.dim(`${m.accounts} accounts`)} ${chalk.dim(`last seen: ${m.lastSeen}`)}`);
+      }
+    } else {
+      const { getLocalMembers, loadTeamConfig } = await import('./team');
+      const members = getLocalMembers();
+      const config = loadTeamConfig();
+      console.log(chalk.bold(`\n  team members (${members.length})\n`));
+      for (const m of members) {
+        console.log(`  ${chalk.white(m.name)} ${chalk.dim(`[${m.role}]`)} ${chalk.dim(m.email)} ${chalk.dim(`joined: ${m.joinedAt}`)}`);
+      }
+      if (config && config.pendingInvites.length > 0) {
+        console.log(chalk.bold(`\n  pending invites (${config.pendingInvites.length})\n`));
+        for (const email of config.pendingInvites) {
+          console.log(`  ${chalk.yellow('○')} ${email}`);
+        }
+      }
     }
     console.log();
   });
@@ -1634,20 +1849,48 @@ const peersCmd = program
 
 peersCmd
   .command('list')
-  .description('List configured federation peers')
-  .action(async () => {
-    const { loadFedPeers, fetchPeerHealth } = await import('./fedClient');
+  .description('List configured federation peers with connectivity status')
+  .option('--json', 'Output machine-readable JSON')
+  .action(async (opts: { json?: boolean }) => {
+    const { loadFedPeers, fetchPeerHealth, updatePeerLastSeen } = await import('./fedClient');
     const peers = loadFedPeers();
     if (peers.length === 0) {
-      console.log(chalk.dim('\n  No peers configured. Add them to ~/.sweech/fed-peers.json\n'));
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ peers: [] }, null, 2) + '\n');
+      } else {
+        console.log(chalk.dim('\n  No peers configured. Run: sweech peers add <name> <host> <port>\n'));
+      }
       return;
     }
-    console.log(chalk.bold(`\n  ${peers.length} peer(s)\n`));
-    for (const p of peers) {
+
+    const results = await Promise.all(peers.map(async p => {
       const health = await fetchPeerHealth(p);
+      if (health?.ok) updatePeerLastSeen(p.name);
+      return { peer: p, health };
+    }));
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        peers: results.map(r => ({
+          name: r.peer.name,
+          host: r.peer.host,
+          port: r.peer.port,
+          addedAt: r.peer.addedAt,
+          lastSeen: r.peer.lastSeen,
+          status: r.health?.ok ? 'ok' : 'down',
+          latencyMs: r.health?.latencyMs ?? null,
+        })),
+      }, null, 2) + '\n');
+      return;
+    }
+
+    console.log(chalk.bold(`\n  ${peers.length} peer(s)\n`));
+    for (const { peer: p, health } of results) {
       const status = health?.ok ? chalk.green('ok') : chalk.red('down');
       const latency = health?.latencyMs ? chalk.dim(`${health.latencyMs}ms`) : '';
-      console.log(`  ${chalk.white(p.name)} ${chalk.dim(`${p.host}:${p.port}`)} ${status} ${latency}`);
+      const addedStr = p.addedAt ? chalk.dim(` added ${new Date(p.addedAt).toLocaleDateString()}`) : '';
+      const lastStr = p.lastSeen ? chalk.dim(` last seen ${new Date(p.lastSeen).toLocaleString()}`) : '';
+      console.log(`  ${chalk.white(p.name)} ${chalk.dim(`${p.host}:${p.port}`)} ${status} ${latency}${addedStr}${lastStr}`);
     }
     console.log();
   });
@@ -1657,81 +1900,188 @@ peersCmd
   .description('Add a federation peer')
   .option('--secret <secret>', 'Shared secret for auth')
   .action(async (name: string, host: string, port: string, opts: { secret?: string }) => {
-    const { loadFedPeers, saveFedPeers } = await import('./fedClient');
-    const peers = loadFedPeers();
-    peers.push({ name, host, port: parseInt(port), secret: opts.secret });
-    saveFedPeers(peers);
-    console.log(chalk.green(`✓ Peer '${name}' added`));
+    const { addPeer } = await import('./fedClient');
+    const portNum = parseInt(port, 10);
+    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+      console.error(chalk.red('Error: Port must be a number between 1 and 65535'));
+      process.exit(1);
+    }
+    addPeer({ name, host, port: portNum, secret: opts.secret, addedAt: new Date().toISOString() });
+    console.log(chalk.green(`✓ Peer '${name}' added (${host}:${portNum})`));
   });
 
 peersCmd
   .command('remove <name>')
   .description('Remove a federation peer')
   .action(async (name: string) => {
-    const { loadFedPeers, saveFedPeers } = await import('./fedClient');
-    const peers = loadFedPeers().filter(p => p.name !== name);
-    saveFedPeers(peers);
+    const { loadFedPeers, removePeer } = await import('./fedClient');
+    const peers = loadFedPeers();
+    if (!peers.find(p => p.name === name)) {
+      console.error(chalk.red(`Peer '${name}' not found`));
+      process.exit(1);
+    }
+    removePeer(name);
     console.log(chalk.green(`✓ Peer '${name}' removed`));
   });
 
-// ── sweech plugins ──────────────────────────────────────────────────────────────
-const pluginsCmd = program
-  .command('plugins')
-  .description('Manage sweech plugins');
-
-pluginsCmd
-  .command('list')
-  .description('List installed plugins')
-  .action(async () => {
-    const { listPlugins } = await import('./plugins');
-    const plugins = listPlugins();
-    if (plugins.length === 0) {
-      console.log(chalk.dim('\n  No plugins installed.\n'));
-      return;
-    }
-    console.log(chalk.bold(`\n  ${plugins.length} plugin(s)\n`));
-    for (const p of plugins) {
-      const status = p.enabled ? chalk.green('enabled') : chalk.red('disabled');
-      console.log(`  ${chalk.white(p.name)} ${chalk.dim(`v${p.version}`)} ${status}`);
-    }
-    console.log();
-  });
-
-pluginsCmd
-  .command('install <package>')
-  .description('Install a plugin from npm')
-  .action(async (pkg: string) => {
-    const { installPlugin } = await import('./plugins');
-    await installPlugin(pkg);
-    console.log(chalk.green(`✓ Plugin '${pkg}' installed`));
-  });
-
-pluginsCmd
-  .command('uninstall <name>')
-  .description('Uninstall a plugin')
-  .action(async (name: string) => {
-    const { uninstallPlugin } = await import('./plugins');
-    await uninstallPlugin(name);
-    console.log(chalk.green(`✓ Plugin '${name}' uninstalled`));
-  });
-
-// ── sweech templates ────────────────────────────────────────────────────────────
+// ── sweech export / import ───────────────────────────────────────────────────
 program
-  .command('templates')
-  .description('List available profile templates')
-  .option('--json', 'Output as JSON')
-  .action(async (opts: { json?: boolean }) => {
-    const { getAllTemplates } = await import('./templates');
-    const templates = getAllTemplates();
-    if (opts.json) {
-      process.stdout.write(JSON.stringify({ templates }, null, 2) + '\n');
-      return;
+  .command('export <name>')
+  .description('Export a profile as a shareable JSON template (sensitive fields stripped)')
+  .option('-o, --output <file>', 'Write to file instead of stdout')
+  .action(async (name: string, opts: { output?: string }) => {
+    try {
+      const config = new ConfigManager();
+      const profiles = config.getProfiles();
+      const aliasManager = new AliasManager();
+
+      const resolvedName = aliasManager.resolveAlias(name);
+      const profile = profiles.find(p => p.commandName === resolvedName);
+
+      if (!profile) {
+        console.error(chalk.red(`Profile '${name}' not found`));
+        process.exit(1);
+      }
+
+      // Build template — strip sensitive fields (apiKey, oauth, accessToken, refreshToken)
+      const template: Record<string, unknown> = {
+        commandName: profile.commandName,
+        cliType: profile.cliType,
+        provider: profile.provider,
+      };
+      if (profile.model) template.model = profile.model;
+      if (profile.smallFastModel) template.smallFastModel = profile.smallFastModel;
+      if (profile.baseUrl) template.baseUrl = profile.baseUrl;
+      if (profile.sharedWith) template.sharedWith = profile.sharedWith;
+
+      const json = JSON.stringify(template, null, 2) + '\n';
+
+      if (opts.output) {
+        fs.writeFileSync(opts.output, json);
+        console.error(chalk.green(`✓ Exported '${resolvedName}' to ${opts.output}`));
+      } else {
+        process.stdout.write(json);
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Export failed:'), msg);
+      process.exit(1);
     }
-    console.log(chalk.bold(`\n  ${templates.length} template(s)\n`));
-    for (const t of templates) {
-      console.log(`  ${chalk.white(t.name)} ${chalk.dim(`[${t.cliType}/${t.provider}]`)} ${chalk.dim(t.description)}`);
+  });
+
+program
+  .command('import <file>')
+  .description('Import a profile from a JSON template')
+  .action(async (file: string) => {
+    try {
+      if (!fs.existsSync(file)) {
+        console.error(chalk.red(`File not found: ${file}`));
+        process.exit(1);
+      }
+
+      const raw = fs.readFileSync(file, 'utf-8');
+      let template: Record<string, unknown>;
+      try {
+        template = JSON.parse(raw);
+      } catch {
+        console.error(chalk.red('Invalid JSON in template file'));
+        process.exit(1);
+      }
+
+      // Validate required fields
+      const required = ['commandName', 'cliType', 'provider'];
+      const missing = required.filter(f => !template[f]);
+      if (missing.length > 0) {
+        console.error(chalk.red(`Missing required fields: ${missing.join(', ')}`));
+        process.exit(1);
+      }
+
+      const commandName = template.commandName as string;
+      const cliType = template.cliType as string;
+      const providerName = template.provider as string;
+
+      // Validate command name format
+      if (!/^[a-z0-9-]+$/.test(commandName)) {
+        console.error(chalk.red(`Invalid command name: '${commandName}' (must be lowercase alphanumeric with dashes)`));
+        process.exit(1);
+      }
+
+      // Check CLI type
+      const cli = getCLI(cliType);
+      if (!cli) {
+        console.error(chalk.red(`Unknown CLI type: '${cliType}' (expected 'claude' or 'codex')`));
+        process.exit(1);
+      }
+
+      // Check provider
+      const provider = getProvider(providerName);
+      if (!provider) {
+        console.error(chalk.red(`Unknown provider: '${providerName}'`));
+        console.log(chalk.dim('Available: ' + getProviderList().map(p => p.name).join(', ')));
+        process.exit(1);
+      }
+
+      const config = new ConfigManager();
+      const profiles = config.getProfiles();
+
+      if (profiles.some(p => p.commandName === commandName)) {
+        console.error(chalk.red(`Profile '${commandName}' already exists`));
+        process.exit(1);
+      }
+
+      // Prompt for API key if TTY
+      console.log(chalk.bold(`\nImporting profile: ${commandName}`));
+      console.log(chalk.dim(`  Provider: ${provider.displayName}`));
+      console.log(chalk.dim(`  CLI: ${cli.displayName}`));
+      if (template.model) console.log(chalk.dim(`  Model: ${template.model}`));
+      console.log();
+
+      let apiKey: string | undefined;
+      if (process.stdout.isTTY) {
+        const inquirer = await import('inquirer');
+        const { key } = await inquirer.default.prompt([{
+          type: 'password',
+          name: 'key',
+          message: `API key for ${provider.displayName} (leave blank to skip):`,
+          mask: '*',
+        }]);
+        apiKey = key || undefined;
+      } else {
+        console.error(chalk.yellow('Non-interactive mode: skipping API key prompt. Run sweech auth to configure later.'));
+      }
+
+      // Create profile
+      const profile: import('./config').ProfileConfig = {
+        name: commandName,
+        commandName,
+        cliType,
+        provider: providerName,
+        apiKey,
+        baseUrl: (template.baseUrl as string) || provider.baseUrl,
+        model: (template.model as string) || provider.defaultModel,
+        smallFastModel: (template.smallFastModel as string) || provider.smallFastModel,
+        sharedWith: template.sharedWith as string | undefined,
+        createdAt: new Date().toISOString(),
+      };
+
+      config.addProfile(profile);
+      config.createProfileConfig(commandName, provider, apiKey, cliType);
+      config.createWrapperScript(commandName, cli);
+
+      if (profile.sharedWith) {
+        config.setupSharedDirs(commandName, profile.sharedWith, cliType);
+      }
+
+      console.log(chalk.green(`\n✓ Imported profile '${commandName}'`));
+      if (!apiKey) {
+        console.log(chalk.yellow('  No API key set — run:'), chalk.bold(`sweech auth ${commandName}`));
+      }
+      console.log(chalk.dim(`  Run: ${commandName}\n`));
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Import failed:'), msg);
+      process.exit(1);
     }
-    console.log();
   });
 
 // ── Startup update check (non-blocking) ────────────────────────────────────────

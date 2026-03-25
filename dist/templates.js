@@ -44,6 +44,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BUILT_IN_TEMPLATES = void 0;
 exports.loadCustomTemplates = loadCustomTemplates;
 exports.saveCustomTemplate = saveCustomTemplate;
+exports.deleteCustomTemplate = deleteCustomTemplate;
 exports.getAllTemplates = getAllTemplates;
 exports.findTemplate = findTemplate;
 const fs = __importStar(require("fs"));
@@ -60,10 +61,18 @@ const CUSTOM_TEMPLATES_PATH = path.join(SWEECH_DIR, 'templates.json');
 exports.BUILT_IN_TEMPLATES = [
     {
         name: 'claude-pro',
-        description: 'Anthropic Claude Pro',
+        description: 'Claude with Pro subscription defaults',
         cliType: 'claude',
         provider: 'anthropic',
         tags: ['claude', 'anthropic', 'pro'],
+    },
+    {
+        name: 'claude-max',
+        description: 'Claude with Max subscription, model overrides',
+        cliType: 'claude',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-6',
+        tags: ['claude', 'anthropic', 'max'],
     },
     {
         name: 'claude-team',
@@ -74,10 +83,17 @@ exports.BUILT_IN_TEMPLATES = [
     },
     {
         name: 'codex-pro',
-        description: 'OpenAI Codex Pro',
+        description: 'Codex with ChatGPT Pro subscription',
         cliType: 'codex',
         provider: 'openai',
         tags: ['codex', 'openai', 'pro'],
+    },
+    {
+        name: 'multi-account',
+        description: 'Second account with shared data (projects, plans, MCP)',
+        cliType: 'claude',
+        provider: 'anthropic',
+        tags: ['claude', 'anthropic', 'multi', 'shared'],
     },
     {
         name: 'deepseek-coder',
@@ -158,6 +174,24 @@ function saveCustomTemplate(template) {
         templates.push(template);
     }
     fs.writeFileSync(CUSTOM_TEMPLATES_PATH, JSON.stringify(templates, null, 2));
+}
+/**
+ * Delete a custom template by name from ~/.sweech/templates.json.
+ *
+ * Returns true when the template was found and removed, false otherwise.
+ * Built-in templates cannot be deleted through this function.
+ */
+function deleteCustomTemplate(name) {
+    const templates = loadCustomTemplates();
+    const filtered = templates.filter((t) => t.name !== name);
+    if (filtered.length === templates.length) {
+        return false; // nothing removed
+    }
+    if (!fs.existsSync(SWEECH_DIR)) {
+        fs.mkdirSync(SWEECH_DIR, { recursive: true });
+    }
+    fs.writeFileSync(CUSTOM_TEMPLATES_PATH, JSON.stringify(filtered, null, 2));
+    return true;
 }
 // ---------------------------------------------------------------------------
 // Query helpers

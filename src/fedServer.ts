@@ -19,6 +19,7 @@ import { ConfigManager } from './config'
 import { getAccountInfo, getKnownAccounts } from './subscriptions'
 import { suggestBestAccount } from './accountSelector'
 import { summarizeAccountsForTelemetry } from './usage'
+import { readAuditLog } from './auditLog'
 
 const packageJsonPath = path.join(__dirname, '../package.json')
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { version: string }
@@ -225,6 +226,18 @@ export function createSweechFedServer(port: number): http.Server {
         uptime: process.uptime(),
         version: packageJson.version,
       })
+      return
+    }
+
+    if (pathname === '/fed/audit') {
+      const limitParam = url.searchParams.get('limit')
+      const actionParam = url.searchParams.get('action') ?? undefined
+      const limit = limitParam ? parseInt(limitParam, 10) : undefined
+      const entries = readAuditLog({
+        limit: (limit && limit > 0) ? limit : undefined,
+        action: actionParam,
+      })
+      sendJson(res, 200, { entries, total: entries.length, timestamp: new Date().toISOString() })
       return
     }
 

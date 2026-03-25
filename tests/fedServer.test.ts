@@ -38,6 +38,10 @@ jest.mock('../src/subscriptions', () => ({
   ]),
 }));
 
+jest.mock('../src/auditLog', () => ({
+  readAuditLog: jest.fn().mockReturnValue([]),
+}));
+
 jest.mock('fs', () => {
   const actual = jest.requireActual('fs');
   return {

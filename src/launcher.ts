@@ -13,6 +13,7 @@ import { getCLI, SUPPORTED_CLIS } from './clis';
 import { getAccountInfo, type AccountInfo } from './subscriptions';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { sweechEvents } from './events';
+import { runHook } from './plugins';
 
 interface UsageBar {
   label: string;
@@ -829,6 +830,9 @@ export async function runLauncher(): Promise<void> {
       }
       if (state.yolo) launchArgs.push(entry.yoloFlag);
       if (state.resume) launchArgs.push(...entry.resumeFlag.split(' '));
+
+      // Run plugin onLaunch hooks (errors are caught inside runHook)
+      try { runHook('onLaunch', entry.name, launchArgs); } catch { /* plugin errors must not crash CLI */ }
 
       const { spawnSync } = require('child_process');
       const result = spawnSync(entry.command, launchArgs, { env, stdio: 'inherit' });

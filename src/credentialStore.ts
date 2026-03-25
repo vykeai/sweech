@@ -1,19 +1,25 @@
 /**
  * Cross-platform credential store abstraction.
  *
- * - macOS: delegates to the system Keychain via `security` CLI
- * - Other platforms: falls back to a JSON file at ~/.sweech/tokens.json
+ * - macOS:   delegates to the system Keychain via `security` CLI
+ * - Linux:   tries `secret-tool` (libsecret) with fallback to file-based store
+ * - Windows: tries `cmdkey` with fallback to file-based store
+ * - Others:  file-based store at ~/.sweech/tokens.json
  *
  * Also exports `computeKeychainServiceName` which centralises the
  * service-name derivation previously duplicated across liveUsage.ts
  * and subscriptions.ts.
+ *
+ * The high-level `readCredential(service, account)` helper provides a
+ * single entry point that auto-selects the right backend.
  */
 
 import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
-import { execSync } from 'node:child_process'
+import { execSync, execFileSync } from 'node:child_process'
+import { isMacOS, isLinux, isWindows } from './platform'
 
 // ── Interface ────────────────────────────────────────────────────────────────
 
@@ -68,6 +74,106 @@ function escapeShellArg(val: string): string {
   return "'" + val.replace(/'/g, "'\\''") + "'"
 }
 
+// ── Linux secret-tool (libsecret/GNOME Keyring) ─────────────────────────────
+
+export class LinuxSecretToolStore implements CredentialStore {
+  async get(service: string, account: string): Promise<string | null> {
+    try {
+      const raw = execFileSync('secret-tool', [
+        'lookup', 'service', service, 'account', account,
+      ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+      return raw || null
+    } catch {
+      return null
+    }
+  }
+
+  async set(service: string, account: string, password: string): Promise<void> {
+    try {
+      // secret-tool reads the secret from stdin
+      execSync(
+        `echo ${escapeShellArg(password)} | secret-tool store --label ${escapeShellArg('sweech:' + service)} service ${escapeShellArg(service)} account ${escapeShellArg(account)}`,
+        { stdio: 'ignore' },
+      )
+    } catch {
+      throw new Error(`Failed to write credential for service="${service}" account="${account}" via secret-tool`)
+    }
+  }
+
+  async delete(service: string, account: string): Promise<void> {
+    try {
+      execFileSync('secret-tool', [
+        'clear', 'service', service, 'account', account,
+      ], { stdio: 'ignore' })
+    } catch {
+      // Not found or already deleted — treat as success.
+    }
+  }
+}
+
+/**
+ * Check whether `secret-tool` is available on PATH.
+ */
+export function isSecretToolAvailable(): boolean {
+  try {
+    execFileSync('which', ['secret-tool'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ── Windows cmdkey ───────────────────────────────────────────────────────────
+
+export class WindowsCmdkeyStore implements CredentialStore {
+  private target(service: string, account: string): string {
+    return `sweech:${service}:${account}`
+  }
+
+  async get(service: string, account: string): Promise<string | null> {
+    // cmdkey /list does not expose passwords via CLI. On Windows, the
+    // file-based store is the practical backend for value retrieval.
+    const file = new FileTokenStore()
+    return file.get(service, account)
+  }
+
+  async set(service: string, account: string, password: string): Promise<void> {
+    // Store in file store (primary) and register with cmdkey for listing.
+    const file = new FileTokenStore()
+    await file.set(service, account, password)
+    try {
+      execSync(
+        `cmdkey /generic:${this.target(service, account)} /user:${account} /pass:*`,
+        { stdio: 'ignore' },
+      )
+    } catch {
+      // Fall through — file store is the primary backend on Windows.
+    }
+  }
+
+  async delete(service: string, account: string): Promise<void> {
+    const file = new FileTokenStore()
+    await file.delete(service, account)
+    try {
+      execSync(`cmdkey /delete:${this.target(service, account)}`, { stdio: 'ignore' })
+    } catch {
+      // Not found or already deleted.
+    }
+  }
+}
+
+/**
+ * Check whether `cmdkey` is available (Windows only).
+ */
+export function isCmdkeyAvailable(): boolean {
+  try {
+    execSync('where cmdkey', { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ── File-based fallback ──────────────────────────────────────────────────────
 
 const TOKENS_DIR = path.join(os.homedir(), '.sweech')
@@ -104,7 +210,11 @@ function writeTokenFile(store: Record<string, string>): void {
   fs.mkdirSync(TOKENS_DIR, { recursive: true })
   fs.writeFileSync(TOKENS_FILE, JSON.stringify(store, null, 2), { mode: 0o600 })
   // Ensure permissions are correct even if the file already existed.
-  fs.chmodSync(TOKENS_FILE, 0o600)
+  try {
+    fs.chmodSync(TOKENS_FILE, 0o600)
+  } catch {
+    // chmod may fail on Windows — file store still works.
+  }
 }
 
 // ── Factory ──────────────────────────────────────────────────────────────────
@@ -112,14 +222,35 @@ function writeTokenFile(store: Record<string, string>): void {
 /**
  * Return the platform-appropriate credential store.
  *
- * - darwin  → MacOSKeychainStore (uses `security` CLI)
- * - others  → FileTokenStore     (uses ~/.sweech/tokens.json)
+ * - macOS   -> MacOSKeychainStore   (uses `security` CLI)
+ * - Linux   -> LinuxSecretToolStore (uses `secret-tool`) with FileTokenStore fallback
+ * - Windows -> WindowsCmdkeyStore   (cmdkey + file fallback)
+ * - Others  -> FileTokenStore       (uses ~/.sweech/tokens.json)
  */
 export function getCredentialStore(): CredentialStore {
-  if (process.platform === 'darwin') {
+  if (isMacOS()) {
     return new MacOSKeychainStore()
   }
+  if (isLinux() && isSecretToolAvailable()) {
+    return new LinuxSecretToolStore()
+  }
+  if (isWindows()) {
+    return new WindowsCmdkeyStore()
+  }
   return new FileTokenStore()
+}
+
+// ── High-level helper ────────────────────────────────────────────────────────
+
+/**
+ * Read a credential from the platform-appropriate store.
+ *
+ * This is the recommended single entry point for callers that just need
+ * to read a stored secret.
+ */
+export async function readCredential(service: string, account: string): Promise<string | null> {
+  const store = getCredentialStore()
+  return store.get(service, account)
 }
 
 // ── Keychain service name helper ─────────────────────────────────────────────

@@ -9,6 +9,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createProfile = createProfile;
 const chalk_1 = __importDefault(require("chalk"));
 const oauth_1 = require("./oauth");
+const plugins_1 = require("./plugins");
 /**
  * Create a new profile with OAuth or API key authentication
  */
@@ -53,6 +54,11 @@ async function createProfile(answers, provider, cli, config) {
     if (answers.sharedWith) {
         config.setupSharedDirs(answers.commandName, answers.sharedWith, answers.cliType);
     }
+    // Run plugin onProfileCreate hooks (errors are caught inside runHook)
+    try {
+        (0, plugins_1.runHook)('onProfileCreate', profile);
+    }
+    catch { /* plugin errors must not crash CLI */ }
     // Display success message
     console.log(chalk_1.default.green('\n✓ Provider added successfully!\n'));
     console.log(chalk_1.default.cyan('Command:'), chalk_1.default.bold(answers.commandName));

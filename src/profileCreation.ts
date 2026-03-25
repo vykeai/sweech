@@ -8,6 +8,7 @@ import { ProviderConfig } from './providers';
 import { CLIConfig } from './clis';
 import { AddProviderAnswers } from './interactive';
 import { getOAuthToken, OAuthToken } from './oauth';
+import { runHook } from './plugins';
 
 /**
  * Create a new profile with OAuth or API key authentication
@@ -70,6 +71,9 @@ export async function createProfile(
   if (answers.sharedWith) {
     config.setupSharedDirs(answers.commandName, answers.sharedWith, answers.cliType);
   }
+
+  // Run plugin onProfileCreate hooks (errors are caught inside runHook)
+  try { runHook('onProfileCreate', profile); } catch { /* plugin errors must not crash CLI */ }
 
   // Display success message
   console.log(chalk.green('\n✓ Provider added successfully!\n'));

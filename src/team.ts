@@ -24,6 +24,15 @@ export interface TeamConfig {
   role: 'admin' | 'member';
   joinedAt: string;
   inviteCode?: string;
+  members: TeamMemberEntry[];
+  pendingInvites: string[];
+}
+
+export interface TeamMemberEntry {
+  email: string;
+  name: string;
+  role: 'admin' | 'member';
+  joinedAt: string;
 }
 
 export interface TeamMember {
@@ -311,4 +320,126 @@ export async function lockAccount(commandName: string): Promise<void> {
  */
 export async function unlockAccount(commandName: string): Promise<void> {
   await teamRequest('POST', '/api/team/unlock', { commandName });
+}
+
+// ---------------------------------------------------------------------------
+// Local team operations (no hub required)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a deterministic team ID from an invite code.
+ * In a real system this would validate against a server; here we derive a
+ * stable identifier so the same code always produces the same teamId.
+ */
+function deriveTeamId(code: string): string {
+  // Simple hash — not cryptographic, just needs to be deterministic
+  let hash = 0;
+  for (let i = 0; i < code.length; i++) {
+    hash = ((hash << 5) - hash + code.charCodeAt(i)) | 0;
+  }
+  return `team-${Math.abs(hash).toString(36)}`;
+}
+
+/**
+ * Join a team locally using an invite code.
+ *
+ * Creates a team config with the current machine as the sole member.
+ * No hub communication is required — this is the "basic" offline join.
+ */
+export function joinTeamLocal(code: string): TeamConfig {
+  const existing = loadTeamConfig();
+  if (existing) {
+    throw new Error(`Already a member of team "${existing.name}". Run \`sweech team leave\` first.`);
+  }
+
+  const teamId = deriveTeamId(code);
+  const now = new Date().toISOString();
+
+  const config: TeamConfig = {
+    teamId,
+    name: `team-${code.slice(0, 8)}`,
+    hubUrl: '',
+    role: 'admin',
+    joinedAt: now,
+    inviteCode: code,
+    members: [
+      {
+        email: `${os.userInfo().username}@local`,
+        name: os.userInfo().username,
+        role: 'admin',
+        joinedAt: now,
+      },
+    ],
+    pendingInvites: [],
+  };
+
+  saveTeamConfig(config);
+  return config;
+}
+
+/**
+ * Leave the current team (local-only).
+ *
+ * Removes ~/.sweech/team.json. Does not contact a hub.
+ */
+export function leaveTeamLocal(): void {
+  const config = loadTeamConfig();
+  if (!config) {
+    throw new Error('Not connected to a team.');
+  }
+
+  try {
+    fs.unlinkSync(TEAM_CONFIG_PATH);
+  } catch { /* file may already be gone */ }
+}
+
+/**
+ * List team members from the local config.
+ */
+export function getLocalMembers(): TeamMemberEntry[] {
+  const config = loadTeamConfig();
+  if (!config) {
+    throw new Error('Not connected to a team. Run `sweech team join` first.');
+  }
+  return config.members;
+}
+
+/**
+ * Add an email to the pending invites list (local-only).
+ *
+ * Does not send any email — just records the intent. A future hub sync
+ * or `sweech team sync` would deliver the invites.
+ */
+export function addLocalInvite(email: string): void {
+  const config = loadTeamConfig();
+  if (!config) {
+    throw new Error('Not connected to a team. Run `sweech team join` first.');
+  }
+
+  if (config.pendingInvites.includes(email)) {
+    throw new Error(`${email} is already in the pending invites list.`);
+  }
+
+  if (config.members.some(m => m.email === email)) {
+    throw new Error(`${email} is already a team member.`);
+  }
+
+  config.pendingInvites.push(email);
+  saveTeamConfig(config);
+}
+
+/**
+ * Remove team config file — exposed for testing.
+ */
+export function removeTeamConfig(): void {
+  try {
+    fs.unlinkSync(TEAM_CONFIG_PATH);
+  } catch { /* file may already be gone */ }
+}
+
+/**
+ * Get the team config path — exposed for testing.
+ */
+export function getTeamConfigPath(): string {
+  return TEAM_CONFIG_PATH;
 }

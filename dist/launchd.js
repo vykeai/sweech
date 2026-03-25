@@ -44,6 +44,7 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
 const chalk_1 = __importDefault(require("chalk"));
+const platform_1 = require("./platform");
 const PLIST_LABEL = 'ai.sweech.serve';
 const PLIST_FILENAME = `${PLIST_LABEL}.plist`;
 const PLIST_DIR = path.join(os.homedir(), 'Library', 'LaunchAgents');
@@ -92,6 +93,10 @@ function generatePlist(port) {
 `;
 }
 function installLaunchd(port) {
+    if (!(0, platform_1.isMacOS)()) {
+        console.error(chalk_1.default.red('launchd is only available on macOS'));
+        throw new Error('launchd is only available on macOS');
+    }
     try {
         const plistContent = generatePlist(port);
         fs.mkdirSync(PLIST_DIR, { recursive: true });
@@ -114,6 +119,10 @@ function installLaunchd(port) {
     }
 }
 function uninstallLaunchd() {
+    if (!(0, platform_1.isMacOS)()) {
+        console.error(chalk_1.default.red('launchd is only available on macOS'));
+        throw new Error('launchd is only available on macOS');
+    }
     try {
         if (!fs.existsSync(PLIST_PATH)) {
             console.error(chalk_1.default.yellow(`Plist not found at ${PLIST_PATH} — nothing to uninstall`));

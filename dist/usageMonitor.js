@@ -14,6 +14,7 @@ exports.checkUsageThresholds = checkUsageThresholds;
 exports.resetAccountState = resetAccountState;
 exports.resetAllState = resetAllState;
 const events_1 = require("./events");
+const plugins_1 = require("./plugins");
 const stateMap = new Map();
 const THRESHOLDS = [70, 90];
 function getState(account) {
@@ -84,6 +85,11 @@ function checkWindow(account, window, pct, state, atLimitKey, firedKey, now) {
             window,
             timestamp: now,
         });
+        // Run plugin onLimitReached hooks (errors are caught inside runHook)
+        try {
+            (0, plugins_1.runHook)('onLimitReached', account, window);
+        }
+        catch { /* plugin errors must not crash CLI */ }
     }
     // Limit recovered (<100% after being at limit)
     if (pct < 100 && wasAtLimit) {

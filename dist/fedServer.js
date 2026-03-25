@@ -59,6 +59,7 @@ const config_1 = require("./config");
 const subscriptions_1 = require("./subscriptions");
 const accountSelector_1 = require("./accountSelector");
 const usage_1 = require("./usage");
+const auditLog_1 = require("./auditLog");
 const packageJsonPath = path.join(__dirname, '../package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 function sendJson(res, status, body) {
@@ -238,6 +239,17 @@ function createSweechFedServer(port) {
                 uptime: process.uptime(),
                 version: packageJson.version,
             });
+            return;
+        }
+        if (pathname === '/fed/audit') {
+            const limitParam = url.searchParams.get('limit');
+            const actionParam = url.searchParams.get('action') ?? undefined;
+            const limit = limitParam ? parseInt(limitParam, 10) : undefined;
+            const entries = (0, auditLog_1.readAuditLog)({
+                limit: (limit && limit > 0) ? limit : undefined,
+                action: actionParam,
+            });
+            sendJson(res, 200, { entries, total: entries.length, timestamp: new Date().toISOString() });
             return;
         }
         sendJson(res, 404, { error: 'Not found' });

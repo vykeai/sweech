@@ -48,6 +48,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadFedPeers = loadFedPeers;
 exports.saveFedPeers = saveFedPeers;
 exports.addPeer = addPeer;
+exports.updatePeerLastSeen = updatePeerLastSeen;
 exports.removePeer = removePeer;
 exports.fetchPeerInfo = fetchPeerInfo;
 exports.fetchPeerRuns = fetchPeerRuns;
@@ -62,15 +63,30 @@ const https = __importStar(require("https"));
 const config_1 = require("./config");
 const subscriptions_1 = require("./subscriptions");
 // ── Config paths ──────────────────────────────────────────────────────────────
-const FED_PEERS_FILE = path.join(os.homedir(), '.sweech', 'fed-peers.json');
+const FED_PEERS_FILE = path.join(os.homedir(), '.sweech', 'peers.json');
+// Legacy path for backwards compatibility
+const LEGACY_PEERS_FILE = path.join(os.homedir(), '.sweech', 'fed-peers.json');
 // ── Peer config management ────────────────────────────────────────────────────
 function loadFedPeers() {
     try {
         const raw = fs.readFileSync(FED_PEERS_FILE, 'utf-8');
-        return JSON.parse(raw);
+        const peers = JSON.parse(raw);
+        // Backfill addedAt for legacy entries
+        return peers.map(p => ({ ...p, addedAt: p.addedAt || new Date().toISOString() }));
     }
     catch {
-        return [];
+        // Migrate from legacy fed-peers.json if it exists
+        try {
+            const legacyRaw = fs.readFileSync(LEGACY_PEERS_FILE, 'utf-8');
+            const legacyPeers = JSON.parse(legacyRaw);
+            const migrated = legacyPeers.map(p => ({ ...p, addedAt: p.addedAt || new Date().toISOString() }));
+            // Save to new location
+            saveFedPeers(migrated);
+            return migrated;
+        }
+        catch {
+            return [];
+        }
     }
 }
 function saveFedPeers(peers) {
@@ -81,12 +97,23 @@ function addPeer(peer) {
     const peers = loadFedPeers();
     const existing = peers.findIndex(p => p.name === peer.name);
     if (existing !== -1) {
-        peers[existing] = peer;
+        peers[existing] = { ...peer, addedAt: peers[existing].addedAt || peer.addedAt || new Date().toISOString() };
     }
     else {
-        peers.push(peer);
+        peers.push({ ...peer, addedAt: peer.addedAt || new Date().toISOString() });
     }
     saveFedPeers(peers);
+}
+/**
+ * Update the lastSeen timestamp for a peer after a successful health check.
+ */
+function updatePeerLastSeen(name) {
+    const peers = loadFedPeers();
+    const peer = peers.find(p => p.name === name);
+    if (peer) {
+        peer.lastSeen = new Date().toISOString();
+        saveFedPeers(peers);
+    }
 }
 function removePeer(name) {
     const peers = loadFedPeers().filter(p => p.name !== name);

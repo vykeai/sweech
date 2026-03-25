@@ -14,6 +14,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { execSync, execFileSync } from 'child_process'
+import { isMacOS } from './platform'
+import { readCredential, computeKeychainServiceName } from './credentialStore'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -144,16 +146,31 @@ interface OAuthReadResult {
 }
 
 async function readOAuthToken(configDir: string): Promise<OAuthReadResult> {
-  if (process.platform !== 'darwin') return { token: null, tokenStatus: 'no_token' }
   const service = keychainServiceName(configDir)
   const profileName = path.basename(configDir)
+
   try {
+    // Use cross-platform credential store for reading
     const username = process.env.USER || os.userInfo().username
-    const raw = execSync(
-      `security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`,
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim()
+    let raw: string | null = null
+
+    if (isMacOS()) {
+      // macOS: use Keychain directly (existing path — preserves refresh flow)
+      try {
+        raw = execSync(
+          `security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`,
+          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+        ).trim() || null
+      } catch {
+        raw = null
+      }
+    } else {
+      // Linux/Windows: use cross-platform credential store
+      raw = await readCredential(service, username)
+    }
+
     if (!raw) return { token: null, tokenStatus: 'no_token' }
+
     const payload = JSON.parse(raw) as Record<string, unknown>
     const token = payload.claudeAiOauth as OAuthEntry | undefined
     if (!token?.accessToken) return { token: null, tokenStatus: 'no_token' }
@@ -188,12 +205,21 @@ async function readOAuthToken(configDir: string): Promise<OAuthReadResult> {
             expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
           },
         }
-        execFileSync('security', [
-          'add-generic-password', '-U',
-          '-a', username,
-          '-s', service,
-          '-w', JSON.stringify(updatedPayload),
-        ], { stdio: 'ignore' })
+
+        // Write updated token back using platform-appropriate method
+        if (isMacOS()) {
+          execFileSync('security', [
+            'add-generic-password', '-U',
+            '-a', username,
+            '-s', service,
+            '-w', JSON.stringify(updatedPayload),
+          ], { stdio: 'ignore' })
+        } else {
+          const { getCredentialStore } = require('./credentialStore')
+          const store = getCredentialStore()
+          await store.set(service, username, JSON.stringify(updatedPayload))
+        }
+
         const refreshed = updatedPayload.claudeAiOauth as OAuthEntry
         return {
           token: refreshed,

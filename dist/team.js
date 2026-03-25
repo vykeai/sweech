@@ -52,6 +52,12 @@ exports.setBudget = setBudget;
 exports.getBudgets = getBudgets;
 exports.lockAccount = lockAccount;
 exports.unlockAccount = unlockAccount;
+exports.joinTeamLocal = joinTeamLocal;
+exports.leaveTeamLocal = leaveTeamLocal;
+exports.getLocalMembers = getLocalMembers;
+exports.addLocalInvite = addLocalInvite;
+exports.removeTeamConfig = removeTeamConfig;
+exports.getTeamConfigPath = getTeamConfigPath;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
 const os = __importStar(require("node:os"));
@@ -287,4 +293,113 @@ async function lockAccount(commandName) {
  */
 async function unlockAccount(commandName) {
     await teamRequest('POST', '/api/team/unlock', { commandName });
+}
+// ---------------------------------------------------------------------------
+// Local team operations (no hub required)
+// ---------------------------------------------------------------------------
+/**
+ * Generate a deterministic team ID from an invite code.
+ * In a real system this would validate against a server; here we derive a
+ * stable identifier so the same code always produces the same teamId.
+ */
+function deriveTeamId(code) {
+    // Simple hash — not cryptographic, just needs to be deterministic
+    let hash = 0;
+    for (let i = 0; i < code.length; i++) {
+        hash = ((hash << 5) - hash + code.charCodeAt(i)) | 0;
+    }
+    return `team-${Math.abs(hash).toString(36)}`;
+}
+/**
+ * Join a team locally using an invite code.
+ *
+ * Creates a team config with the current machine as the sole member.
+ * No hub communication is required — this is the "basic" offline join.
+ */
+function joinTeamLocal(code) {
+    const existing = loadTeamConfig();
+    if (existing) {
+        throw new Error(`Already a member of team "${existing.name}". Run \`sweech team leave\` first.`);
+    }
+    const teamId = deriveTeamId(code);
+    const now = new Date().toISOString();
+    const config = {
+        teamId,
+        name: `team-${code.slice(0, 8)}`,
+        hubUrl: '',
+        role: 'admin',
+        joinedAt: now,
+        inviteCode: code,
+        members: [
+            {
+                email: `${os.userInfo().username}@local`,
+                name: os.userInfo().username,
+                role: 'admin',
+                joinedAt: now,
+            },
+        ],
+        pendingInvites: [],
+    };
+    saveTeamConfig(config);
+    return config;
+}
+/**
+ * Leave the current team (local-only).
+ *
+ * Removes ~/.sweech/team.json. Does not contact a hub.
+ */
+function leaveTeamLocal() {
+    const config = loadTeamConfig();
+    if (!config) {
+        throw new Error('Not connected to a team.');
+    }
+    try {
+        fs.unlinkSync(TEAM_CONFIG_PATH);
+    }
+    catch { /* file may already be gone */ }
+}
+/**
+ * List team members from the local config.
+ */
+function getLocalMembers() {
+    const config = loadTeamConfig();
+    if (!config) {
+        throw new Error('Not connected to a team. Run `sweech team join` first.');
+    }
+    return config.members;
+}
+/**
+ * Add an email to the pending invites list (local-only).
+ *
+ * Does not send any email — just records the intent. A future hub sync
+ * or `sweech team sync` would deliver the invites.
+ */
+function addLocalInvite(email) {
+    const config = loadTeamConfig();
+    if (!config) {
+        throw new Error('Not connected to a team. Run `sweech team join` first.');
+    }
+    if (config.pendingInvites.includes(email)) {
+        throw new Error(`${email} is already in the pending invites list.`);
+    }
+    if (config.members.some(m => m.email === email)) {
+        throw new Error(`${email} is already a team member.`);
+    }
+    config.pendingInvites.push(email);
+    saveTeamConfig(config);
+}
+/**
+ * Remove team config file — exposed for testing.
+ */
+function removeTeamConfig() {
+    try {
+        fs.unlinkSync(TEAM_CONFIG_PATH);
+    }
+    catch { /* file may already be gone */ }
+}
+/**
+ * Get the team config path — exposed for testing.
+ */
+function getTeamConfigPath() {
+    return TEAM_CONFIG_PATH;
 }
