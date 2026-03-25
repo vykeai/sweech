@@ -60,6 +60,7 @@ const launcher_1 = require("./launcher");
 const subscriptions_1 = require("./subscriptions");
 const usageHistory_1 = require("./usageHistory");
 const fedServer_1 = require("./fedServer");
+const updateChecker_1 = require("./updateChecker");
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 // Read version from package.json
@@ -316,7 +317,7 @@ program
     .command('info')
     .description('Show sweech configuration info')
     .option('--json', 'Output as JSON')
-    .action((opts) => {
+    .action(async (opts) => {
     const config = new config_1.ConfigManager();
     const profiles = config.getProfiles();
     const os = require('os');
@@ -332,17 +333,27 @@ program
     catch { }
     const claudeProfiles = profiles.filter(p => p.cliType !== 'codex');
     const codexProfiles = profiles.filter(p => p.cliType === 'codex');
+    // Include update info (uses cached check — fast, no network if fresh)
+    const updateResult = await (0, updateChecker_1.checkForUpdate)(version).catch(() => null);
+    const updateInfo = updateResult ? {
+        latestVersion: updateResult.latest,
+        updateAvailable: updateResult.updateAvailable,
+    } : null;
     if (opts.json) {
         process.stdout.write(JSON.stringify({
             version: packageJson.version,
             configDir, binDir, cacheAge,
             profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length },
             platform: process.platform, node: process.version,
+            ...(updateInfo && { latestVersion: updateInfo.latestVersion, updateAvailable: updateInfo.updateAvailable }),
         }, null, 2) + '\n');
         return;
     }
     console.log(chalk_1.default.bold('\n🍭 sweech\n'));
     console.log(chalk_1.default.cyan('  Version:'), packageJson.version);
+    if (updateInfo?.updateAvailable) {
+        console.log(chalk_1.default.yellow('  Update: '), `${version} → ${updateInfo.latestVersion} — run \`sweech update\``);
+    }
     console.log(chalk_1.default.cyan('  Node:'), process.version);
     console.log(chalk_1.default.cyan('  Platform:'), process.platform);
     console.log(chalk_1.default.cyan('  Config:'), configDir);
@@ -1180,12 +1191,39 @@ program
 program
     .command('update')
     .description('Update sweech to the latest version from GitHub')
-    .action(async () => {
+    .option('--check', 'Only check for updates, do not install')
+    .action(async (opts) => {
     try {
-        console.log(chalk_1.default.bold('\n🔄 Updating sweech...\n'));
+        console.log(chalk_1.default.bold('\n🔄 Checking for updates...\n'));
+        const result = await (0, updateChecker_1.checkForUpdate)(version);
+        if (!result) {
+            console.log(chalk_1.default.yellow('  Could not reach the update server. Check your network connection.\n'));
+            if (!opts.check)
+                process.exit(1);
+            return;
+        }
+        console.log(chalk_1.default.cyan('  Current:'), result.current);
+        console.log(chalk_1.default.cyan('  Latest: '), result.latest);
+        if (!result.updateAvailable) {
+            console.log(chalk_1.default.green('\n  ✓ You are on the latest version.\n'));
+            return;
+        }
+        console.log(chalk_1.default.yellow(`\n  Update available: ${result.current} → ${result.latest}\n`));
+        // Fetch and display changelog
+        const changelog = await (0, updateChecker_1.fetchChangelog)(result.current, result.latest);
+        if (changelog) {
+            console.log(chalk_1.default.bold('  What\'s new:\n'));
+            for (const line of changelog.split('\n')) {
+                console.log(chalk_1.default.dim(`    ${line}`));
+            }
+            console.log();
+        }
+        if (opts.check)
+            return;
+        console.log(chalk_1.default.bold('  Installing update...\n'));
         const { execSync: execSyncUpdate } = require('child_process');
         execSyncUpdate('npm install -g github:vykeai/sweech', { stdio: 'inherit' });
-        console.log(chalk_1.default.green('\n✓ sweech updated successfully\n'));
+        console.log(chalk_1.default.green('\n✓ sweech updated to ' + result.latest + '\n'));
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -1496,6 +1534,17 @@ program
     }
     console.log();
 });
+// ── Startup update check (non-blocking) ────────────────────────────────────────
+// Fire-and-forget: if the check completes before parse finishes, print a notice.
+// Skip for --help, --version, --complete, and the update command itself.
+const skipUpdateCheck = process.argv.some(a => a === '--help' || a === '-h' || a === '--version' || a === '-v' || a === 'update' || a === '--complete');
+if (!skipUpdateCheck && process.argv.length > 2) {
+    (0, updateChecker_1.checkForUpdate)(version).then(result => {
+        if (result && result.updateAvailable) {
+            process.stderr.write(chalk_1.default.dim(`[sweech] Update available: ${result.current} → ${result.latest} — run \`sweech update\`\n`));
+        }
+    }).catch(() => { });
+}
 // Default action: interactive launcher when no command given
 if (process.argv.length <= 2) {
     // First run: no profiles configured → run onboarding instead of empty launcher

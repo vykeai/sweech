@@ -153,6 +153,12 @@ struct UsageResponse: Codable {
     let accounts: [SweechAccount]
 }
 
+struct SweechInfo: Codable {
+    let version: String?
+    let latestVersion: String?
+    let updateAvailable: Bool?
+}
+
 class SweechService: ObservableObject {
     @Published var accounts: [SweechAccount] = []
     @Published var isConnected = false
@@ -160,10 +166,14 @@ class SweechService: ObservableObject {
     @Published var lastError: String?
     @Published var lastFetched: Date?
     @Published var accountOrder: [String] = []
+    @Published var latestVersion: String?
+    @Published var updateAvailable: Bool = false
+    @Published var currentVersion: String?
 
     private var previousStatuses: [String: String] = [:]  // commandName → liveStatus
     private var previousUtilizations: [String: Double] = [:]  // commandName → utilization7d
     private var consecutiveFailures = 0
+    private var lastInfoCheck: Date?
 
     var worstStatus: String {
         var worst = "allowed"
@@ -190,6 +200,7 @@ class SweechService: ObservableObject {
         requestNotificationPermission()
         setupTimer()
         fetch()
+        fetchInfo()
     }
 
     func applyRefreshInterval() {
@@ -203,6 +214,10 @@ class SweechService: ObservableObject {
         let interval = stored > 0 ? Double(stored) : 30.0
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             self?.fetch()
+            // Re-check for updates once per hour
+            if let self, self.lastInfoCheck == nil || Date().timeIntervalSince(self.lastInfoCheck!) > 3600 {
+                self.fetchInfo()
+            }
         }
     }
 
@@ -322,6 +337,29 @@ class SweechService: ObservableObject {
                         NSLog("SweechBar: 3 consecutive failures, auto-restarting daemon...")
                         self.restartDaemon()
                     }
+                }
+            }
+        }
+    }
+
+    func fetchInfo() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Self.runSweech(["info", "--json"])
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let data):
+                    do {
+                        let info = try JSONDecoder().decode(SweechInfo.self, from: data)
+                        self.currentVersion = info.version
+                        self.latestVersion = info.latestVersion
+                        self.updateAvailable = info.updateAvailable ?? false
+                        self.lastInfoCheck = Date()
+                    } catch {
+                        NSLog("SweechBar info parse error: %@", error.localizedDescription)
+                    }
+                case .failure(let error):
+                    NSLog("SweechBar info fetch error: %@", error.localizedDescription)
                 }
             }
         }

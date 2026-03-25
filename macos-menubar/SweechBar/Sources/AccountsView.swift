@@ -315,6 +315,17 @@ struct AccountsView: View {
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(Sweech.Color.textPrimary)
 
+            if service.updateAvailable, let latest = service.latestVersion {
+                Text("v\(latest)")
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Sweech.Color.accent)
+                    .clipShape(Capsule())
+                    .help("Update available: \(service.currentVersion ?? "?") → \(latest). Run `sweech update` to install.")
+            }
+
             Spacer()
 
             Circle()
