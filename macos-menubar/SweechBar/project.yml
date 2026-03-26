@@ -1,6 +1,6 @@
 name: SweechBar
 options:
-  bundleIdPrefix: ai.sweech
+  bundleIdPrefix: ai.vyke
   deploymentTarget:
     macOS: "13.0"
 
@@ -16,10 +16,9 @@ targets:
       - path: Sources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.sweech.bar
+        PRODUCT_BUNDLE_IDENTIFIER: ai.vyke.sweech
         PRODUCT_NAME: SweechBar
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Automatic
         INFOPLIST_FILE: Info.plist
         GENERATE_INFOPLIST_FILE: false
 
@@ -30,10 +29,9 @@ targets:
       - path: WidgetSources
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.sweech.bar.widget
+        PRODUCT_BUNDLE_IDENTIFIER: ai.vyke.sweech.widget
         PRODUCT_NAME: SweechBarWidget
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Automatic
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         GENERATE_INFOPLIST_FILE: true
 
@@ -43,3 +41,7 @@ schemes:
       targets:
         SweechBar: all
         SweechBarWidget: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -30,3 +30,4 @@ Thumbs.db
 # macOS app bundles / local builds
 *.app
 macos-menubar/*.app/
+macos-menubar/SweechBar/SweechBar.xcodeproj/project.xcworkspace/xcuserdata/

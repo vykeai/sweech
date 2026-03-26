@@ -225,7 +225,7 @@ struct SweechWidgetBundle: WidgetBundle {
 }
 
 struct SweechWidget: Widget {
-    let kind = "ai.sweech.bar.widget"
+    let kind = "ai.vyke.sweech.widget"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: SweechProvider()) { entry in

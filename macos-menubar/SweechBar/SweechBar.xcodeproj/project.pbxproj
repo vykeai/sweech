@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -112,10 +112,10 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					9CC4B22C9FC2E887F37555CA = {
-						ProvisioningStyle = Manual;
+						ProvisioningStyle = Automatic;
 					};
 					BC2EFFF08B202E09CED091EC = {
-						ProvisioningStyle = Manual;
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -129,7 +129,6 @@
 			);
 			mainGroup = B404B61A0083B59634A357CF;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -167,16 +166,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 22ZJQFSW22;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.vyke.sweech;
 				PRODUCT_NAME = SweechBar;
 				SDKROOT = macosx;
 			};
@@ -185,9 +184,9 @@
 		34B67ACD02C7DAD6C34828FE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 22ZJQFSW22;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -195,7 +194,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.vyke.sweech.widget;
 				PRODUCT_NAME = SweechBarWidget;
 				SDKROOT = macosx;
 			};
@@ -204,9 +203,9 @@
 		699DE96038393643FAB27CCC /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 22ZJQFSW22;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -214,7 +213,7 @@
 					"@executable_path/../../../../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar.widget;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.vyke.sweech.widget;
 				PRODUCT_NAME = SweechBarWidget;
 				SDKROOT = macosx;
 			};
@@ -343,16 +342,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = 22ZJQFSW22;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = ai.sweech.bar;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.vyke.sweech;
 				PRODUCT_NAME = SweechBar;
 				SDKROOT = macosx;
 			};
