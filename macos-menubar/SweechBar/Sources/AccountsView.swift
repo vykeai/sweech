@@ -107,7 +107,12 @@ struct AccountsView: View {
     // Sorting
     private func apply(sort: String, to accounts: [SweechAccount]) -> [SweechAccount] {
         switch sort {
-        case "smart":  return accounts.sorted { $0.smartScore > $1.smartScore }
+        case "smart":
+            // Use precomputed sortRank from CLI when available (single source of truth)
+            if accounts.allSatisfy({ $0.sortRank != nil }) {
+                return accounts.sorted { ($0.sortRank ?? 999) < ($1.sortRank ?? 999) }
+            }
+            return accounts.sorted { $0.smartScore > $1.smartScore }
         case "status": return accounts.sorted { statusRank($0) < statusRank($1) }
         default:       return accounts
         }
@@ -138,9 +143,18 @@ struct AccountsView: View {
     private func tier(for account: SweechAccount, rank: Int) -> CardTier {
         if account.needsReauth == true           { return .needsReauth }
         if account.liveStatus == "limit_reached" { return .limitReached }
-        // use-first / use-next badges only apply in smart sort mode (parity with CLI launcher)
         guard sortMode == "smart" else { return .normal }
-        // No live data — we can't rank this account confidently; no badge
+
+        // Use precomputed tier from CLI when available (single source of truth)
+        if let t = account.tier {
+            switch t {
+            case "use_first": return .useFirst(urgent: account.tierUrgent ?? false)
+            case "use_next":  return .useNext
+            default:          return .normal
+            }
+        }
+
+        // Fallback for older CLI versions
         guard account.live != nil else { return .normal }
         switch rank {
         case 0:  return .useFirst(urgent: hasExpiryUrgency(account))

@@ -1256,11 +1256,34 @@ const usageCmd = program
     try { appendSnapshot(accounts); } catch {}
 
     if (opts.json) {
+      // Sort by smart score within groups, add precomputed fields
+      const { computeSmartScore, computeTier } = require('./liveUsage');
+      const grouped = new Map<string, typeof accounts>();
+      for (const a of accounts) {
+        const g = a.cliType ?? 'claude';
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g)!.push(a);
+      }
+      const enriched: any[] = [];
+      for (const [, group] of grouped) {
+        group.sort((a: any, b: any) => computeSmartScore(b) - computeSmartScore(a));
+        group.forEach((a: any, i: number) => {
+          const score = computeSmartScore(a);
+          const tierInfo = computeTier(a, i === 0);
+          enriched.push({
+            ...a,
+            smartScore: Math.round(score * 1000) / 1000,
+            tier: tierInfo.tier,
+            tierUrgent: tierInfo.urgent,
+            sortRank: enriched.length,
+          });
+        });
+      }
       process.stdout.write(JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         generatedAt: new Date().toISOString(),
         summary: summarizeAccountsForTelemetry(accounts),
-        accounts,
+        accounts: enriched,
       }, null, 2) + '\n');
       return;
     }
@@ -1283,21 +1306,8 @@ const usageCmd = program
 
     console.log(chalk.bold('\n  sweech · usage\n'));
 
-    // Scoring helpers
-    const smartScore = (a: typeof accounts[0]): number => {
-      if (a.needsReauth) return -2;
-      if (a.live?.status === 'limit_reached') return -1;
-      const remaining7d = 1 - (a.live?.utilization7d ?? 0);
-      const reset7dAt = a.live?.reset7dAt;
-      if (!reset7dAt) return remaining7d / 7;
-      const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
-      const daysLeft = hoursLeft / 24;
-      const baseScore = remaining7d / daysLeft;
-      // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
-      // rank above non-expiring ones — "don't waste what resets soonest"
-      if (hoursLeft < 72 && remaining7d > 0) return 100 + baseScore;
-      return baseScore;
-    };
+    // Scoring — shared with launcher and SweechBar (via JSON precomputed fields)
+    const { computeSmartScore: smartScore } = require('./liveUsage');
 
     const statusRank = (a: typeof accounts[0]): number => {
       if (a.needsReauth) return 4;

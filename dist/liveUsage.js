@@ -43,6 +43,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.computeSmartScore = computeSmartScore;
+exports.computeTier = computeTier;
 exports.getLiveUsage = getLiveUsage;
 exports.refreshLiveUsage = refreshLiveUsage;
 const crypto = __importStar(require("crypto"));
@@ -52,6 +54,55 @@ const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
 const platform_1 = require("./platform");
 const credentialStore_1 = require("./credentialStore");
+/**
+ * Smart priority score: higher = use this account first.
+ * Uses the "All models" bucket when available. Identical logic for CLI, launcher, and SweechBar.
+ */
+function computeSmartScore(account) {
+    if (account.needsReauth)
+        return -2;
+    if (account.live?.status === 'limit_reached')
+        return -1;
+    if (!account.live)
+        return 0;
+    // Prefer "All models" bucket, fall back to first bucket
+    const allModels = account.live.buckets.find(b => b.label === 'All models');
+    const bucket = allModels || account.live.buckets[0];
+    // If there's no weekly data at all, fall back to session data
+    const hasWeekly = bucket?.weekly?.utilization !== undefined || account.live.utilization7d !== undefined;
+    if (!hasWeekly) {
+        const session = bucket?.session;
+        if (session)
+            return (1 - session.utilization);
+        return 0;
+    }
+    const remaining7d = 1 - (bucket?.weekly?.utilization ?? account.live.utilization7d ?? 0);
+    const reset7dAt = bucket?.weekly?.resetsAt ?? account.live.reset7dAt;
+    if (!reset7dAt)
+        return remaining7d / 7;
+    const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
+    const daysLeft = hoursLeft / 24;
+    const baseScore = remaining7d / daysLeft;
+    if (hoursLeft < 72 && remaining7d > 0)
+        return 100 + baseScore;
+    return baseScore;
+}
+/**
+ * Compute tier label for an account: "use_first", "use_next", or "normal".
+ * The "urgent" flag is set when expiring <72h with ≥5% remaining.
+ */
+function computeTier(account, isTopInGroup) {
+    if (!isTopInGroup)
+        return { tier: 'normal', urgent: false };
+    const score = computeSmartScore(account);
+    if (score < 0)
+        return { tier: 'normal', urgent: false };
+    const allModels = account.live?.buckets.find(b => b.label === 'All models');
+    const reset7dAt = allModels?.weekly?.resetsAt ?? account.live?.reset7dAt;
+    const remaining7d = 1 - (allModels?.weekly?.utilization ?? account.live?.utilization7d ?? 0);
+    const urgent = !!(reset7dAt && ((reset7dAt - Date.now() / 1000) / 3600) < 72 && remaining7d >= 0.05);
+    return { tier: 'use_first', urgent };
+}
 // ── Cache ─────────────────────────────────────────────────────────────────────
 const CACHE_FILE = path.join(os.homedir(), '.sweech', 'rate-limit-cache.json');
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes

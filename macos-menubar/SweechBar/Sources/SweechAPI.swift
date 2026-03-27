@@ -54,6 +54,20 @@ struct SweechAccount: Codable, Identifiable {
     let tokenRefreshedAt: Double?
     let tokenExpiresAt: Double?
 
+    // Precomputed by CLI — single source of truth for sorting/ranking
+    let precomputedSmartScore: Double?
+    let tier: String?          // "use_first", "use_next", "normal"
+    let tierUrgent: Bool?
+    let sortRank: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, commandName, cliType, meta, messages5h, messages7d, totalMessages
+        case minutesUntilFirstCapacity, hoursUntilWeeklyReset, oldest5hMessageAt
+        case lastActive, needsReauth, live, tokenStatus, tokenRefreshedAt, tokenExpiresAt
+        case precomputedSmartScore = "smartScore"
+        case tier, tierUrgent, sortRank
+    }
+
     struct AccountMeta: Codable {
         let plan: String?
         let limits: AccountLimits?
@@ -107,24 +121,19 @@ struct SweechAccount: Codable, Identifiable {
     var reset5hRelative: String? { resetTimeRelative(live?.reset5hAt) }
     var reset7dRelative: String? { resetTimeRelative(live?.reset7dAt) }
 
-    /// Smart priority score: higher = use this account first.
-    /// Rewards accounts with lots of weekly quota that's expiring soon.
-    /// Disqualified (limit_reached / needsReauth) always sort to bottom.
+    /// Smart priority score: precomputed by CLI (single source of truth).
+    /// Falls back to basic heuristic if CLI doesn't provide it (schema v1).
     var smartScore: Double {
+        if let score = precomputedSmartScore { return score }
+        // Fallback for older CLI versions without precomputed score
         if needsReauth == true { return -2 }
         if liveStatus == "limit_reached" { return -1 }
-        // No live data — rank below all accounts with real data, but above limit_reached
         guard let live else { return 0 }
         let remaining7d = 1.0 - (live.utilization7d ?? 0)
-        guard let reset7dAt = live.reset7dAt else {
-            // No reset time = no expiry urgency; treat as if reset is in 7d (the full window)
-            return remaining7d / 7.0
-        }
+        guard let reset7dAt = live.reset7dAt else { return remaining7d / 7.0 }
         let hoursUntilReset = max(0.5, Date(timeIntervalSince1970: reset7dAt).timeIntervalSince(Date()) / 3600)
         let daysLeft = hoursUntilReset / 24.0
         let baseScore = remaining7d / daysLeft
-        // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
-        // rank above non-expiring ones — "don't waste what resets soonest"
         if hoursUntilReset < 72 && remaining7d > 0 { return 100 + baseScore }
         return baseScore
     }

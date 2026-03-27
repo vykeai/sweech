@@ -52,6 +52,7 @@ const chalk_1 = __importDefault(require("chalk"));
 const readline = __importStar(require("readline"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const liveUsage_1 = require("./liveUsage");
 const os = __importStar(require("os"));
 const config_1 = require("./config");
 const providers_1 = require("./providers");
@@ -268,30 +269,25 @@ function buildEntry(name, command, configDir, label, yoloFlag, resumeFlag, isDef
         promotion: account.live?.promotion,
     };
 }
+/** Score a LaunchEntry by converting it to the shared ScorableAccount interface */
 function entrySmartScore(e) {
-    if (e.needsReauth)
-        return -2;
-    // Use "All models" bucket for scoring (matches SweechBar which uses legacy utilization7d)
-    const bar5h = e.bars.find(b => b.windowMins === 300 && b.label.startsWith('All models'))
+    // Convert LaunchEntry bars back to LiveRateLimitData shape for the shared scorer
+    const allModels5h = e.bars.find(b => b.windowMins === 300 && b.label.startsWith('All models'))
         || e.bars.find(b => b.windowMins === 300);
-    if (bar5h && bar5h.pct >= 100)
-        return -1;
-    const bar7d = e.bars.find(b => b.windowMins === 10080 && b.label.startsWith('All models'))
+    const allModels7d = e.bars.find(b => b.windowMins === 10080 && b.label.startsWith('All models'))
         || e.bars.find(b => b.windowMins === 10080);
-    if (!bar7d)
-        return bar5h ? (100 - bar5h.pct) / 100 : 0;
-    const remaining7d = (100 - bar7d.pct) / 100;
-    // No reset time = no expiry urgency; treat as if reset is in 7d (the full window)
-    if (!bar7d.resetsAt)
-        return remaining7d / 7;
-    const hoursLeft = Math.max(0.5, (bar7d.resetsAt - Date.now() / 1000) / 3600);
-    const daysLeft = hoursLeft / 24;
-    const baseScore = remaining7d / daysLeft;
-    // Tier boost: profiles with expiring capacity (resets < 3d, > 10% left) always
-    // rank above non-expiring ones — "don't waste what resets soonest"
-    if (hoursLeft < 72 && remaining7d > 0)
-        return 100 + baseScore;
-    return baseScore;
+    return (0, liveUsage_1.computeSmartScore)({
+        needsReauth: e.needsReauth,
+        live: e.bars.length > 0 ? {
+            buckets: [{
+                    label: 'All models',
+                    session: allModels5h ? { utilization: allModels5h.pct / 100, resetsAt: allModels5h.resetsAt } : undefined,
+                    weekly: allModels7d ? { utilization: allModels7d.pct / 100, resetsAt: allModels7d.resetsAt } : undefined,
+                }],
+            capturedAt: Date.now(),
+            status: allModels5h && allModels5h.pct >= 100 ? 'limit_reached' : 'allowed',
+        } : null,
+    });
 }
 function sortedWithinGroup(list, mode) {
     if (mode === 'manual')
@@ -314,7 +310,7 @@ function getSorted(allEntries, mode, grouped = true) {
 }
 function expiryAlert(e) {
     const bar7d = e.bars.find(b => b.windowMins === 10080 && b.label.startsWith('All models'))
-        || e.bars.find(b => b.windowMins === 10080);
+        ?? e.bars.find(b => b.windowMins === 10080);
     if (!bar7d?.resetsAt)
         return '';
     const hoursLeft = (bar7d.resetsAt - Date.now() / 1000) / 3600;
