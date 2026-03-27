@@ -51,6 +51,13 @@ export interface LiveRateLimitData {
   /** Token expiry time (ms epoch), if known */
   tokenExpiresAt?: number
 
+  /** Promotion info — detected from API headers or manual config */
+  promotion?: {
+    label: string         // e.g. "2x Tokens", "Double Usage"
+    multiplier?: number   // e.g. 2
+    expiresAt?: number    // epoch ms, if known
+  }
+
   // Legacy fields for backward compat with existing code
   /** @deprecated use buckets[0].session.utilization */
   utilization5h?: number
@@ -382,6 +389,51 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
   })
 }
 
+// ── Promotions ───────────────────────────────────────────────────────────────
+
+interface PromotionConfig {
+  /** Which CLI type this applies to: "claude", "codex", or "*" */
+  cliType: string
+  /** Display label, e.g. "2x Tokens" */
+  label: string
+  /** Multiplier, e.g. 2 */
+  multiplier?: number
+  /** ISO date when promotion expires */
+  expiresAt?: string
+}
+
+const PROMOTIONS_FILE = path.join(os.homedir(), '.sweech', 'promotions.json')
+
+function loadPromotions(): PromotionConfig[] {
+  try {
+    const data = JSON.parse(fs.readFileSync(PROMOTIONS_FILE, 'utf-8'))
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
+function getActivePromotion(cliType: string): LiveRateLimitData['promotion'] | undefined {
+  const promos = loadPromotions()
+  const now = Date.now()
+  for (const p of promos) {
+    if (p.cliType !== '*' && p.cliType !== cliType) continue
+    if (p.expiresAt && new Date(p.expiresAt).getTime() < now) continue
+    return {
+      label: p.label,
+      multiplier: p.multiplier,
+      expiresAt: p.expiresAt ? new Date(p.expiresAt).getTime() : undefined,
+    }
+  }
+  return undefined
+}
+
+function applyPromotion(data: LiveRateLimitData, cliType: string): LiveRateLimitData {
+  const promo = getActivePromotion(cliType)
+  if (promo) data.promotion = promo
+  return data
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -392,20 +444,21 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
  */
 export async function getLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
   const cached = getCached(configDir)
-  if (cached) return cached
+  if (cached) return applyPromotion(cached, cliType || 'claude')
 
   // Codex: use app-server JSON-RPC
   if (cliType === 'codex') {
     const data = await fetchCodexRateLimits(configDir)
-    if (data) { setCached(configDir, data); return data }
-    return getStaleCache(configDir)
+    if (data) { setCached(configDir, data); return applyPromotion(data, 'codex') }
+    const stale = getStaleCache(configDir)
+    return stale ? applyPromotion(stale, 'codex') : null
   }
 
   // Claude: use OAuth token + Anthropic API headers
   const result = await readOAuthToken(configDir)
   if (!result.token) {
     const stale = getStaleCache(configDir)
-    if (stale) { stale.tokenStatus = result.tokenStatus; return stale }
+    if (stale) { stale.tokenStatus = result.tokenStatus; return applyPromotion(stale, 'claude') }
     return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus }
   }
 
@@ -415,10 +468,11 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
     data.tokenRefreshedAt = result.tokenRefreshedAt
     data.tokenExpiresAt = result.tokenExpiresAt
     setCached(configDir, data)
-    return data
+    return applyPromotion(data, 'claude')
   }
 
-  return getStaleCache(configDir)
+  const stale = getStaleCache(configDir)
+  return stale ? applyPromotion(stale, 'claude') : null
 }
 
 /**

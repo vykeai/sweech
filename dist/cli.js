@@ -817,6 +817,86 @@ program
         process.exit(1);
     }
 });
+// Promo command — manage active promotions (e.g. "2x Tokens Live")
+program
+    .command('promo [action]')
+    .description('Manage provider promotions (list, add, remove, clear)')
+    .option('--cli <type>', 'CLI type: claude, codex, or * for all', '*')
+    .option('--label <text>', 'Promotion label, e.g. "2x Tokens"')
+    .option('--multiplier <n>', 'Usage multiplier, e.g. 2', parseFloat)
+    .option('--expires <date>', 'Expiry date (ISO format or relative like "in 7d")')
+    .action((action, opts) => {
+    const promoFile = path.join(require('os').homedir(), '.sweech', 'promotions.json');
+    const load = () => { try {
+        return JSON.parse(fs.readFileSync(promoFile, 'utf-8'));
+    }
+    catch {
+        return [];
+    } };
+    const save = (p) => { fs.mkdirSync(path.dirname(promoFile), { recursive: true }); fs.writeFileSync(promoFile, JSON.stringify(p, null, 2)); };
+    if (!action || action === 'list') {
+        const promos = load();
+        if (promos.length === 0) {
+            console.log(chalk_1.default.dim('\n  No active promotions.\n'));
+            console.log(chalk_1.default.gray('  Add one: sweech promo add --cli claude --label "2x Tokens" --multiplier 2 --expires "2026-04-01"\n'));
+            return;
+        }
+        console.log(chalk_1.default.bold('\n  Active Promotions:\n'));
+        for (const p of promos) {
+            const expired = p.expiresAt && new Date(p.expiresAt).getTime() < Date.now();
+            const expiry = p.expiresAt ? (expired ? chalk_1.default.red('expired') : chalk_1.default.green(`until ${p.expiresAt}`)) : chalk_1.default.dim('no expiry');
+            const icon = expired ? chalk_1.default.red('✗') : chalk_1.default.green('✓');
+            console.log(`  ${icon} ${chalk_1.default.bold(p.label)} · ${p.cliType} · ${p.multiplier || '?'}x · ${expiry}`);
+        }
+        console.log();
+        return;
+    }
+    if (action === 'add') {
+        if (!opts.label) {
+            console.error(chalk_1.default.red('--label required'));
+            process.exit(1);
+        }
+        const promos = load();
+        const entry = { cliType: opts.cli, label: opts.label };
+        if (opts.multiplier)
+            entry.multiplier = opts.multiplier;
+        if (opts.expires) {
+            // Support relative dates like "in 7d"
+            const match = opts.expires.match(/^in\s+(\d+)([dhm])$/);
+            if (match) {
+                const n = parseInt(match[1]);
+                const unit = match[2] === 'd' ? 86400000 : match[2] === 'h' ? 3600000 : 60000;
+                entry.expiresAt = new Date(Date.now() + n * unit).toISOString();
+            }
+            else {
+                entry.expiresAt = opts.expires;
+            }
+        }
+        promos.push(entry);
+        save(promos);
+        console.log(chalk_1.default.green(`\n  ✓ Added promotion: ${entry.label} (${entry.cliType})\n`));
+        return;
+    }
+    if (action === 'clear') {
+        save([]);
+        console.log(chalk_1.default.green('\n  ✓ All promotions cleared.\n'));
+        return;
+    }
+    if (action === 'remove') {
+        const promos = load();
+        const idx = promos.findIndex((p) => p.label === opts.label || p.cliType === opts.cli);
+        if (idx === -1) {
+            console.error(chalk_1.default.red('Promotion not found'));
+            process.exit(1);
+        }
+        const removed = promos.splice(idx, 1)[0];
+        save(promos);
+        console.log(chalk_1.default.green(`\n  ✓ Removed: ${removed.label}\n`));
+        return;
+    }
+    console.error(chalk_1.default.red(`Unknown action: ${action}. Use: list, add, remove, clear`));
+    process.exit(1);
+});
 // Alias command
 program
     .command('alias [action] [value]')

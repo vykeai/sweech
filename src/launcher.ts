@@ -45,6 +45,8 @@ export interface LaunchEntry {
   tokenStatus?: string;
   /** Token expiry time (ms epoch) */
   tokenExpiresAt?: number;
+  /** Active promotion info */
+  promotion?: { label: string; multiplier?: number; expiresAt?: number };
 }
 
 export interface LaunchState {
@@ -259,6 +261,7 @@ export function buildEntry(
     bars,
     tokenStatus: account.tokenStatus,
     tokenExpiresAt: account.tokenExpiresAt,
+    promotion: account.live?.promotion,
   };
 }
 
@@ -418,6 +421,16 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
       tokenStr = chalk.dim(' 🔑 no token');
     }
 
+    // Promotion badge
+    let promoStr = '';
+    const promo = entry.bars.length > 0 ? (entry as any).promotion : undefined;
+    if (promo) {
+      const expiryLabel = promo.expiresAt
+        ? (() => { const h = Math.max(0, (promo.expiresAt - Date.now()) / 3600000); return h < 24 ? ` · ${Math.round(h)}h left` : ` · ${Math.floor(h/24)}d left`; })()
+        : '';
+      promoStr = chalk.bgCyan.black(` ${promo.label} `) + chalk.cyan(expiryLabel);
+    }
+
     // Provider line
     const providerStr = entry.isDefault
       ? (entry.command === 'codex' ? 'OpenAI' : 'Anthropic')
@@ -466,7 +479,7 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
 
     if (selected) {
       body.push(chalk.yellowBright(`  ┏${'━'.repeat(W)}┓`));
-      body.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
+      body.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr + (promoStr ? ' ' + promoStr : ''));
       body.push(chalk.yellowBright('  ┃ ') + chalk.gray(infoLine) + (hasData ? tokenStr : ''));
 
       if (state.usage) {
@@ -475,7 +488,7 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
 
       body.push(chalk.yellowBright(`  ┗${'━'.repeat(W)}┛`));
     } else {
-      body.push(chalk.dim('  │ ') + chalk.bold.white(entry.name) + chalk.dim(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
+      body.push(chalk.dim('  │ ') + chalk.bold.white(entry.name) + chalk.dim(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr + (promoStr ? ' ' + promoStr : ''));
       body.push(chalk.dim('  │ ') + chalk.gray(infoLine) + (hasData ? tokenStr : ''));
 
       if (state.usage) {

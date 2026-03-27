@@ -328,6 +328,38 @@ async function fetchCodexRateLimits(configDir) {
         proc.stdin.write(init + '\n');
     });
 }
+const PROMOTIONS_FILE = path.join(os.homedir(), '.sweech', 'promotions.json');
+function loadPromotions() {
+    try {
+        const data = JSON.parse(fs.readFileSync(PROMOTIONS_FILE, 'utf-8'));
+        return Array.isArray(data) ? data : [];
+    }
+    catch {
+        return [];
+    }
+}
+function getActivePromotion(cliType) {
+    const promos = loadPromotions();
+    const now = Date.now();
+    for (const p of promos) {
+        if (p.cliType !== '*' && p.cliType !== cliType)
+            continue;
+        if (p.expiresAt && new Date(p.expiresAt).getTime() < now)
+            continue;
+        return {
+            label: p.label,
+            multiplier: p.multiplier,
+            expiresAt: p.expiresAt ? new Date(p.expiresAt).getTime() : undefined,
+        };
+    }
+    return undefined;
+}
+function applyPromotion(data, cliType) {
+    const promo = getActivePromotion(cliType);
+    if (promo)
+        data.promotion = promo;
+    return data;
+}
 // ── Public API ────────────────────────────────────────────────────────────────
 /**
  * Get live rate limit data for a profile. Returns cached data if fresh,
@@ -338,15 +370,16 @@ async function fetchCodexRateLimits(configDir) {
 async function getLiveUsage(configDir, cliType) {
     const cached = getCached(configDir);
     if (cached)
-        return cached;
+        return applyPromotion(cached, cliType || 'claude');
     // Codex: use app-server JSON-RPC
     if (cliType === 'codex') {
         const data = await fetchCodexRateLimits(configDir);
         if (data) {
             setCached(configDir, data);
-            return data;
+            return applyPromotion(data, 'codex');
         }
-        return getStaleCache(configDir);
+        const stale = getStaleCache(configDir);
+        return stale ? applyPromotion(stale, 'codex') : null;
     }
     // Claude: use OAuth token + Anthropic API headers
     const result = await readOAuthToken(configDir);
@@ -354,7 +387,7 @@ async function getLiveUsage(configDir, cliType) {
         const stale = getStaleCache(configDir);
         if (stale) {
             stale.tokenStatus = result.tokenStatus;
-            return stale;
+            return applyPromotion(stale, 'claude');
         }
         return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus };
     }
@@ -364,9 +397,10 @@ async function getLiveUsage(configDir, cliType) {
         data.tokenRefreshedAt = result.tokenRefreshedAt;
         data.tokenExpiresAt = result.tokenExpiresAt;
         setCached(configDir, data);
-        return data;
+        return applyPromotion(data, 'claude');
     }
-    return getStaleCache(configDir);
+    const stale = getStaleCache(configDir);
+    return stale ? applyPromotion(stale, 'claude') : null;
 }
 /**
  * Force-refresh live rate limit data, bypassing the cache.

@@ -756,6 +756,20 @@ struct AccountCard: View {
                         .help("Subscription plan: \(plan)")
                 }
 
+                if let promo = account.live?.promotion {
+                    HStack(spacing: 3) {
+                        Image(systemName: "sparkles").font(.system(size: 8))
+                        Text(promo.label).font(.system(size: 9, weight: .bold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(
+                        LinearGradient(colors: [Sweech.Color.accent, Sweech.Color.core], startPoint: .leading, endPoint: .trailing)
+                    )
+                    .clipShape(Capsule())
+                    .help(promo.expiresAt.map { "Promotion active — expires \(Date(timeIntervalSince1970: $0 / 1000).formatted())" } ?? "Promotion active")
+                }
+
                 if let label = tier.badgeLabel {
                     HStack(spacing: 3) {
                         Image(systemName: tier.badgeIcon).font(.system(size: 8))

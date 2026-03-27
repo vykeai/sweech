@@ -26,6 +26,13 @@ struct LiveData: Codable {
     let tokenStatus: String?
     let tokenRefreshedAt: Double?
     let tokenExpiresAt: Double?
+    let promotion: Promotion?
+
+    struct Promotion: Codable {
+        let label: String
+        let multiplier: Double?
+        let expiresAt: Double?
+    }
 }
 
 struct SweechAccount: Codable, Identifiable {
