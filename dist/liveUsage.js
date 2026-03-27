@@ -235,10 +235,25 @@ async function fetchRateLimitHeaders(accessToken) {
                 weekly: { utilization: uSonnet7d, resetsAt: r7d },
             });
         }
+        // Detect promotions from fallback/overage headers
+        const fallback = get('anthropic-ratelimit-unified-fallback');
+        const fallbackPct = num('anthropic-ratelimit-unified-fallback-percentage');
+        const overageStatus = get('anthropic-ratelimit-unified-overage-status');
+        let promotion;
+        // If fallback is available with >0% extra capacity, or overage is allowed — that's a promo
+        if (fallback === 'available' && fallbackPct && fallbackPct > 0) {
+            const multiplier = 1 + fallbackPct; // 0.5 fallback = 1.5x, 1.0 fallback = 2x
+            const label = multiplier >= 2 ? `${multiplier}x Tokens` : `+${Math.round(fallbackPct * 100)}% Bonus`;
+            promotion = { label, multiplier };
+        }
+        if (overageStatus === 'allowed') {
+            promotion = promotion || { label: 'Overage Active', multiplier: undefined };
+        }
         return {
             buckets,
             status: get('anthropic-ratelimit-unified-status') ?? undefined,
             capturedAt: Date.now(),
+            promotion,
             // Legacy
             utilization5h: u5h, utilization7d: u7d, utilizationSonnet7d: uSonnet7d,
             reset5hAt: r5h, reset7dAt: r7d,
@@ -309,11 +324,22 @@ async function fetchCodexRateLimits(configDir) {
                                 r7d = limit.secondary?.resetsAt;
                             }
                         }
+                        // Detect codex promotions from credits or unlimited fields
+                        let codexPromo;
+                        for (const [, limit] of Object.entries(byId)) {
+                            if (limit.credits?.unlimited) {
+                                codexPromo = { label: 'Unlimited', multiplier: undefined };
+                            }
+                            else if (limit.credits?.hasCredits && Number(limit.credits.balance) > 0) {
+                                codexPromo = { label: `+${limit.credits.balance} Credits`, multiplier: undefined };
+                            }
+                        }
                         resolve({
                             buckets,
                             status: mainStatus,
                             planType: mainPlanType,
                             capturedAt: Date.now(),
+                            promotion: codexPromo,
                             utilization5h: u5h, utilization7d: u7d,
                             reset5hAt: r5h, reset7dAt: r7d,
                         });
@@ -355,9 +381,11 @@ function getActivePromotion(cliType) {
     return undefined;
 }
 function applyPromotion(data, cliType) {
-    const promo = getActivePromotion(cliType);
-    if (promo)
-        data.promotion = promo;
+    // Manual config overrides API-detected; API-detected is the fallback
+    const manual = getActivePromotion(cliType);
+    if (manual)
+        data.promotion = manual;
+    // data.promotion may already be set from API headers (auto-detected)
     return data;
 }
 // ── Public API ────────────────────────────────────────────────────────────────
