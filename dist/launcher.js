@@ -104,8 +104,8 @@ function getDirSize(dir) {
  * Green: on pace or under  |  Yellow: burning faster than sustainable  |  Red: will hit limit
  */
 function renderBar(pct, width, ub) {
-    const filled = Math.round((pct / 100) * width);
-    const empty = width - filled;
+    const filled = Math.min(width, Math.max(0, Math.round((pct / 100) * width)));
+    const empty = Math.max(0, width - filled);
     const bar = '█'.repeat(filled) + '░'.repeat(empty);
     const free = Math.max(0, 100 - pct);
     const usedStr = `${pct}%`;

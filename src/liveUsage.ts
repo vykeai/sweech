@@ -295,8 +295,8 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
     const fallbackPct = num('anthropic-ratelimit-unified-fallback-percentage')
     const overageStatus = get('anthropic-ratelimit-unified-overage-status')
     let promotion: LiveRateLimitData['promotion'] | undefined
-    // If fallback is available with >0% extra capacity, or overage is allowed — that's a promo
-    if (fallback === 'available' && fallbackPct && fallbackPct > 0) {
+    // If fallback percentage > 0, that's bonus capacity (the "available" header may or may not be present)
+    if (fallbackPct && fallbackPct > 0) {
       const multiplier = 1 + fallbackPct  // 0.5 fallback = 1.5x, 1.0 fallback = 2x
       const label = multiplier >= 2 ? `${multiplier}x Tokens` : `+${Math.round(fallbackPct * 100)}% Bonus`
       promotion = { label, multiplier }
