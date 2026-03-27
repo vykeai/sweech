@@ -271,10 +271,13 @@ function buildEntry(name, command, configDir, label, yoloFlag, resumeFlag, isDef
 function entrySmartScore(e) {
     if (e.needsReauth)
         return -2;
-    const bar5h = e.bars.find(b => b.windowMins === 300);
+    // Use "All models" bucket for scoring (matches SweechBar which uses legacy utilization7d)
+    const bar5h = e.bars.find(b => b.windowMins === 300 && b.label.startsWith('All models'))
+        || e.bars.find(b => b.windowMins === 300);
     if (bar5h && bar5h.pct >= 100)
         return -1;
-    const bar7d = e.bars.find(b => b.windowMins === 10080);
+    const bar7d = e.bars.find(b => b.windowMins === 10080 && b.label.startsWith('All models'))
+        || e.bars.find(b => b.windowMins === 10080);
     if (!bar7d)
         return bar5h ? (100 - bar5h.pct) / 100 : 0;
     const remaining7d = (100 - bar7d.pct) / 100;
@@ -310,7 +313,8 @@ function getSorted(allEntries, mode, grouped = true) {
     return [...sortedWithinGroup(claude, mode), ...sortedWithinGroup(codex, mode)];
 }
 function expiryAlert(e) {
-    const bar7d = e.bars.find(b => b.windowMins === 10080);
+    const bar7d = e.bars.find(b => b.windowMins === 10080 && b.label.startsWith('All models'))
+        || e.bars.find(b => b.windowMins === 10080);
     if (!bar7d?.resetsAt)
         return '';
     const hoursLeft = (bar7d.resetsAt - Date.now() / 1000) / 3600;

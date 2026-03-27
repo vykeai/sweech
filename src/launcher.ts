@@ -267,9 +267,12 @@ export function buildEntry(
 
 export function entrySmartScore(e: LaunchEntry): number {
   if (e.needsReauth) return -2;
-  const bar5h = e.bars.find(b => b.windowMins === 300);
+  // Use "All models" bucket for scoring (matches SweechBar which uses legacy utilization7d)
+  const bar5h = e.bars.find(b => b.windowMins === 300 && b.label.startsWith('All models'))
+    || e.bars.find(b => b.windowMins === 300);
   if (bar5h && bar5h.pct >= 100) return -1;
-  const bar7d = e.bars.find(b => b.windowMins === 10080);
+  const bar7d = e.bars.find(b => b.windowMins === 10080 && b.label.startsWith('All models'))
+    || e.bars.find(b => b.windowMins === 10080);
   if (!bar7d) return bar5h ? (100 - bar5h.pct) / 100 : 0;
   const remaining7d = (100 - bar7d.pct) / 100;
   // No reset time = no expiry urgency; treat as if reset is in 7d (the full window)
@@ -304,7 +307,8 @@ export function getSorted(allEntries: LaunchEntry[], mode: string, grouped: bool
 }
 
 export function expiryAlert(e: LaunchEntry): string {
-  const bar7d = e.bars.find(b => b.windowMins === 10080);
+  const bar7d = e.bars.find(b => b.windowMins === 10080 && b.label.startsWith('All models'))
+    || e.bars.find(b => b.windowMins === 10080);
   if (!bar7d?.resetsAt) return '';
   const hoursLeft = (bar7d.resetsAt - Date.now() / 1000) / 3600;
   const remaining = (100 - bar7d.pct) / 100;
