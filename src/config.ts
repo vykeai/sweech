@@ -39,15 +39,18 @@ export const SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'] as const;
 
 // Codex-specific shareable dirs.
 // NOT included: auth.json, log, shell_snapshots, sqlite (auth/runtime)
-export const CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'memories', 'rules', 'skills'] as const;
+// Codex shareable dirs — only conversation data and skills.
+// NOT shared: config.toml (may have account-specific settings), state_5.sqlite (rate limit cache).
+export const CODEX_SHAREABLE_DIRS = ['sessions', 'archived_sessions', 'skills'] as const;
 
-// Codex-specific shareable files.
-export const CODEX_SHAREABLE_FILES = ['config.toml', 'history.jsonl', 'models_cache.json'] as const;
+// Codex-specific shareable files — only models cache (cosmetic).
+// NOT shared: config.toml (account settings), history.jsonl (per-account command history).
+export const CODEX_SHAREABLE_FILES = ['models_cache.json'] as const;
 
-// Codex SQLite databases — shared so sessions/transcripts created by one profile are visible
-// in the other. Usage stats (total, last active) come from history.jsonl anyway, and rate
-// limits come from auth.json/API — not from these DBs. Auth stays in auth.json (never shared).
-export const CODEX_SHAREABLE_DBS = ['state_5.sqlite', 'logs_1.sqlite'] as const;
+// Codex SQLite databases — only logs (transcripts). state_5.sqlite is NOT shared because
+// the codex app-server caches per-account rate limits there — sharing it causes all
+// profiles to report the same account's usage.
+export const CODEX_SHAREABLE_DBS = ['logs_1.sqlite'] as const;
 
 export class ConfigManager {
   private configDir: string;
