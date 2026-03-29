@@ -380,8 +380,9 @@ program
         cacheAge = mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
     }
     catch { }
-    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex');
-    const codexProfiles = profiles.filter(p => p.cliType === 'codex');
+    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex' && !(0, providers_1.isExternalProvider)(p.provider));
+    const codexProfiles = profiles.filter(p => p.cliType === 'codex' && !(0, providers_1.isExternalProvider)(p.provider));
+    const externalProfiles = profiles.filter(p => (0, providers_1.isExternalProvider)(p.provider));
     // Include update info (uses cached check — fast, no network if fresh)
     const updateResult = await (0, updateChecker_1.checkForUpdate)(version).catch(() => null);
     const updateInfo = updateResult ? {
@@ -392,7 +393,7 @@ program
         process.stdout.write(JSON.stringify({
             version: packageJson.version,
             configDir, binDir, cacheAge,
-            profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length },
+            profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length, external: externalProfiles.length },
             platform: process.platform, node: process.version,
             ...(updateInfo && { latestVersion: updateInfo.latestVersion, updateAvailable: updateInfo.updateAvailable }),
         }, null, 2) + '\n');
@@ -407,7 +408,10 @@ program
     console.log(chalk_1.default.cyan('  Platform:'), process.platform);
     console.log(chalk_1.default.cyan('  Config:'), configDir);
     console.log(chalk_1.default.cyan('  Wrappers:'), binDir);
-    console.log(chalk_1.default.cyan('  Profiles:'), `${profiles.length} total (${claudeProfiles.length} Claude, ${codexProfiles.length} Codex)`);
+    const profileParts = [`${claudeProfiles.length} Claude`, `${codexProfiles.length} Codex`];
+    if (externalProfiles.length > 0)
+        profileParts.push(`${externalProfiles.length} External`);
+    console.log(chalk_1.default.cyan('  Profiles:'), `${profiles.length} total (${profileParts.join(', ')})`);
     if (cacheAge)
         console.log(chalk_1.default.cyan('  Cache:'), `updated ${cacheAge}`);
     console.log();
@@ -1294,7 +1298,7 @@ const usageCmd = program
         const { computeSmartScore, computeTier } = require('./liveUsage');
         const grouped = new Map();
         for (const a of accounts) {
-            const g = a.cliType ?? 'claude';
+            const g = (0, providers_1.displayGroup)(a.provider);
             if (!grouped.has(g))
                 grouped.set(g, []);
             grouped.get(g).push(a);
@@ -1363,12 +1367,12 @@ const usageCmd = program
     if (opts.group !== false) {
         const map = new Map();
         for (const a of accounts) {
-            const g = a.cliType ?? 'claude';
+            const g = (0, providers_1.displayGroup)(a.provider);
             if (!map.has(g))
                 map.set(g, []);
             map.get(g).push(a);
         }
-        const groupOrder = ['claude', ...Array.from(map.keys()).filter(k => k !== 'claude').sort()];
+        const groupOrder = ['claude', 'codex', ...Array.from(map.keys()).filter(k => k !== 'claude' && k !== 'codex').sort()];
         groups = groupOrder.filter(g => map.has(g)).map(g => ({ name: g, items: applySort(map.get(g)) }));
     }
     else {

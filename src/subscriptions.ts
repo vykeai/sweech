@@ -30,6 +30,9 @@ export interface AccountInfo {
   cliType: string
   configDir: string
 
+  /** Provider key from sweech config (e.g. 'anthropic', 'dashscope', 'minimax') */
+  provider?: string
+
   // From .claude.json or .credentials.json
   displayName?: string
   emailAddress?: string
@@ -75,6 +78,7 @@ export interface AccountRef {
   name: string
   commandName: string
   cliType?: string
+  provider?: string
   isDefault?: boolean
 }
 
@@ -294,7 +298,7 @@ function computeWeeklyReset(subscriptionCreatedAt: string): { weeklyResetAt: str
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function getKnownAccounts(
-  profiles: Array<{ name: string; commandName: string; cliType?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string }>,
 ): AccountRef[] {
   const seen = new Set<string>()
   const accounts: AccountRef[] = []
@@ -306,6 +310,7 @@ export function getKnownAccounts(
       name: cli.command,
       commandName: cli.name,
       cliType: cli.name,
+      provider: cli.name === 'claude' ? 'anthropic' : 'openai',
       isDefault: true,
     })
   }
@@ -317,6 +322,7 @@ export function getKnownAccounts(
       name: profile.name,
       commandName: profile.commandName,
       cliType: profile.cliType,
+      provider: profile.provider,
       isDefault: false,
     })
   }
@@ -325,7 +331,7 @@ export function getKnownAccounts(
 }
 
 export async function getAccountInfo(
-  profiles: Array<{ name: string; commandName: string; cliType?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string }>,
   options: { refresh?: boolean } = {},
 ): Promise<AccountInfo[]> {
   const allMeta = readMeta()
@@ -395,6 +401,7 @@ export async function getAccountInfo(
       commandName: p.commandName,
       cliType,
       configDir,
+      provider: p.provider,
       displayName: sub?.displayName,
       emailAddress: sub?.emailAddress,
       billingType: sub?.billingType,

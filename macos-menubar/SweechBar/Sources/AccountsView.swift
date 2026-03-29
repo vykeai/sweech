@@ -95,14 +95,32 @@ struct AccountsView: View {
     @State private var showSettings = false
     @State private var miniExpanded = false
 
-    // Raw account groups
+    // Raw account groups — by display group (claude / codex / external providers)
     private var rawClaude: [SweechAccount] {
-        service.sortedAccounts.filter { ($0.cliType ?? "claude") == "claude" }
+        service.sortedAccounts.filter { $0.displayGroup == "claude" }
     }
     private var rawCodex: [SweechAccount] {
-        service.sortedAccounts.filter { $0.cliType == "codex" }
+        service.sortedAccounts.filter { $0.displayGroup == "codex" }
     }
-    private var hasBothTypes: Bool { !rawClaude.isEmpty && !rawCodex.isEmpty }
+    private var rawExternal: [SweechAccount] {
+        service.sortedAccounts.filter { $0.isExternal }
+    }
+
+    /// Distinct group names among external providers (e.g. ["Alibaba Cloud", "MiniMax"])
+    private var externalGroupNames: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for a in rawExternal {
+            let g = a.displayGroup
+            if seen.insert(g).inserted { result.append(g) }
+        }
+        return result
+    }
+
+    private var hasMultipleGroups: Bool {
+        let groupCount = (rawClaude.isEmpty ? 0 : 1) + (rawCodex.isEmpty ? 0 : 1) + externalGroupNames.count
+        return groupCount > 1
+    }
 
     // Sorting
     private func apply(sort: String, to accounts: [SweechAccount]) -> [SweechAccount] {
@@ -128,6 +146,10 @@ struct AccountsView: View {
 
     private var sortedClaude: [SweechAccount] { apply(sort: sortMode, to: rawClaude) }
     private var sortedCodex:  [SweechAccount] { apply(sort: sortMode, to: rawCodex) }
+    private var sortedExternal: [SweechAccount] { apply(sort: sortMode, to: rawExternal) }
+    private func sortedForGroup(_ name: String) -> [SweechAccount] {
+        apply(sort: sortMode, to: rawExternal.filter { $0.displayGroup == name })
+    }
     private var sortedAll:    [SweechAccount] { apply(sort: sortMode, to: service.sortedAccounts) }
 
     /// Mini mode is active when the toggle is on and the user hasn't tapped "Show all"
@@ -175,7 +197,7 @@ struct AccountsView: View {
                     disconnectedView
                 } else if activeMiniMode {
                     miniLayout
-                } else if hasBothTypes && grouped {
+                } else if hasMultipleGroups && grouped {
                     groupedLayout
                 } else {
                     singleColumnLayout
@@ -190,7 +212,7 @@ struct AccountsView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(width: activeMiniMode ? 360 : (hasBothTypes && grouped ? 680 : 360))
+        .frame(width: activeMiniMode ? 360 : (hasMultipleGroups && grouped && !rawClaude.isEmpty && !rawCodex.isEmpty ? 680 : 360))
         .background(KeyboardShortcuts(
             onRefresh: { service.fetch() },
             onCycleSort: {
@@ -216,30 +238,54 @@ struct AccountsView: View {
     private var groupedLayout: some View {
         VStack(spacing: 10) {
             summaryHeader
-            HStack(alignment: .top, spacing: 10) {
-                VStack(spacing: 8) {
-                    columnHeader(title: "claude", count: sortedClaude.count)
-                        .help("\(sortedClaude.count) Claude Code account(s) — sorted by \(sortMode) mode")
-                    ForEach(Array(sortedClaude.enumerated()), id: \.element.id) { i, account in
-                        AccountCard(account: account, tier: tier(for: account, rank: i))
-                            .transition(cardTransition)
-                    }
-                }
-                .frame(minWidth: 290, maxWidth: .infinity)
-                .animation(Sweech.Animation.medium, value: sortMode)
 
+            // Official CLI columns (claude + codex side by side if both exist)
+            let hasOfficials = !rawClaude.isEmpty || !rawCodex.isEmpty
+            if hasOfficials {
+                HStack(alignment: .top, spacing: 10) {
+                    if !rawClaude.isEmpty {
+                        VStack(spacing: 8) {
+                            columnHeader(title: "claude", count: sortedClaude.count)
+                                .help("\(sortedClaude.count) Claude Code account(s) — sorted by \(sortMode) mode")
+                            ForEach(Array(sortedClaude.enumerated()), id: \.element.id) { i, account in
+                                AccountCard(account: account, tier: tier(for: account, rank: i))
+                                    .transition(cardTransition)
+                            }
+                        }
+                        .frame(minWidth: 290, maxWidth: .infinity)
+                        .animation(Sweech.Animation.medium, value: sortMode)
+                    }
+
+                    if !rawCodex.isEmpty {
+                        VStack(spacing: 8) {
+                            columnHeader(title: "codex", count: sortedCodex.count)
+                                .help("\(sortedCodex.count) Codex CLI account(s) — sorted by \(sortMode) mode")
+                            ForEach(Array(sortedCodex.enumerated()), id: \.element.id) { i, account in
+                                AccountCard(account: account, tier: tier(for: account, rank: i))
+                                    .transition(cardTransition)
+                            }
+                        }
+                        .frame(minWidth: 290, maxWidth: .infinity)
+                        .animation(Sweech.Animation.medium, value: sortMode)
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+
+            // External provider groups — stacked below officials
+            ForEach(externalGroupNames, id: \.self) { groupName in
+                let items = sortedForGroup(groupName)
                 VStack(spacing: 8) {
-                    columnHeader(title: "codex", count: sortedCodex.count)
-                        .help("\(sortedCodex.count) Codex CLI account(s) — sorted by \(sortMode) mode")
-                    ForEach(Array(sortedCodex.enumerated()), id: \.element.id) { i, account in
+                    columnHeader(title: groupName, count: items.count)
+                        .help("\(items.count) \(groupName) account(s) — sorted by \(sortMode) mode")
+                    ForEach(Array(items.enumerated()), id: \.element.id) { i, account in
                         AccountCard(account: account, tier: tier(for: account, rank: i))
                             .transition(cardTransition)
                     }
                 }
-                .frame(minWidth: 290, maxWidth: .infinity)
+                .padding(.horizontal, 4)
                 .animation(Sweech.Animation.medium, value: sortMode)
             }
-            .padding(.horizontal, 4)
         }
         .padding(12)
     }
@@ -494,7 +540,7 @@ struct AccountsView: View {
 
                 Divider()
 
-                if hasBothTypes {
+                if hasMultipleGroups {
                     Button { grouped.toggle() } label: {
                         Label(grouped ? "Ungroup providers" : "Group by provider",
                               systemImage: grouped ? "rectangle.split.2x1" : "square.grid.2x2")
@@ -750,7 +796,15 @@ struct AccountCard: View {
                 .buttonStyle(.plain)
                 .help("Tap to copy: sweech use \(account.commandName)")
 
-                if let cliType = account.cliType {
+                if account.isExternal {
+                    Text(account.providerLabel)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Sweech.Color.warm)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(Sweech.Color.warm.opacity(0.1))
+                        .clipShape(Capsule())
+                        .help("\(account.providerLabel) — via Claude Code CLI")
+                } else if let cliType = account.cliType {
                     Text(cliType)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Sweech.Color.accent)

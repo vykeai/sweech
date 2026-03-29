@@ -8,6 +8,8 @@ exports.getProviderList = getProviderList;
 exports.getProvidersForCLI = getProvidersForCLI;
 exports.getProvider = getProvider;
 exports.isProviderCompatible = isProviderCompatible;
+exports.displayGroup = displayGroup;
+exports.isExternalProvider = isExternalProvider;
 exports.getProvidersByFormat = getProvidersByFormat;
 exports.PROVIDERS = {
     // ═══════════════════════════════════════════════════════════
@@ -244,6 +246,26 @@ function getProvider(name) {
 function isProviderCompatible(providerName, cliType) {
     const provider = exports.PROVIDERS[providerName];
     return provider ? provider.compatibility.includes(cliType) : false;
+}
+/**
+ * Display group for UI grouping/labeling.
+ *
+ * Official providers map to their CLI name ('claude', 'codex').
+ * Third-party providers get their display name (e.g. 'Alibaba Cloud', 'MiniMax').
+ */
+function displayGroup(providerKey) {
+    if (!providerKey || providerKey === 'anthropic')
+        return 'claude';
+    if (providerKey === 'openai')
+        return 'codex';
+    const p = exports.PROVIDERS[providerKey];
+    return p?.displayName || providerKey;
+}
+/**
+ * Whether a provider key is a third-party (non-official) provider
+ */
+function isExternalProvider(providerKey) {
+    return !!providerKey && providerKey !== 'anthropic' && providerKey !== 'openai';
 }
 /**
  * Get providers grouped by API format

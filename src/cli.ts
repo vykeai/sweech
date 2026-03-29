@@ -7,7 +7,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { ConfigManager } from './config';
-import { getProvider, getProviderList, PROVIDERS } from './providers';
+import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider } from './providers';
 import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
 import { backupSweetch, restoreSweetch, backupClaude } from './backup';
@@ -375,8 +375,9 @@ program
       cacheAge = mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
     } catch {}
 
-    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex');
-    const codexProfiles = profiles.filter(p => p.cliType === 'codex');
+    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex' && !isExternalProvider(p.provider));
+    const codexProfiles = profiles.filter(p => p.cliType === 'codex' && !isExternalProvider(p.provider));
+    const externalProfiles = profiles.filter(p => isExternalProvider(p.provider));
 
     // Include update info (uses cached check — fast, no network if fresh)
     const updateResult = await checkForUpdate(version).catch(() => null);
@@ -389,7 +390,7 @@ program
       process.stdout.write(JSON.stringify({
         version: packageJson.version,
         configDir, binDir, cacheAge,
-        profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length },
+        profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length, external: externalProfiles.length },
         platform: process.platform, node: process.version,
         ...(updateInfo && { latestVersion: updateInfo.latestVersion, updateAvailable: updateInfo.updateAvailable }),
       }, null, 2) + '\n');
@@ -405,7 +406,9 @@ program
     console.log(chalk.cyan('  Platform:'), process.platform);
     console.log(chalk.cyan('  Config:'), configDir);
     console.log(chalk.cyan('  Wrappers:'), binDir);
-    console.log(chalk.cyan('  Profiles:'), `${profiles.length} total (${claudeProfiles.length} Claude, ${codexProfiles.length} Codex)`);
+    const profileParts = [`${claudeProfiles.length} Claude`, `${codexProfiles.length} Codex`];
+    if (externalProfiles.length > 0) profileParts.push(`${externalProfiles.length} External`);
+    console.log(chalk.cyan('  Profiles:'), `${profiles.length} total (${profileParts.join(', ')})`);
     if (cacheAge) console.log(chalk.cyan('  Cache:'), `updated ${cacheAge}`);
     console.log();
   });
@@ -1348,7 +1351,7 @@ const usageCmd = program
       const { computeSmartScore, computeTier } = require('./liveUsage');
       const grouped = new Map<string, typeof accounts>();
       for (const a of accounts) {
-        const g = a.cliType ?? 'claude';
+        const g = displayGroup(a.provider);
         if (!grouped.has(g)) grouped.set(g, []);
         grouped.get(g)!.push(a);
       }
@@ -1416,11 +1419,11 @@ const usageCmd = program
     if (opts.group !== false) {
       const map = new Map<string, typeof accounts>();
       for (const a of accounts) {
-        const g = a.cliType ?? 'claude';
+        const g = displayGroup(a.provider);
         if (!map.has(g)) map.set(g, []);
         map.get(g)!.push(a);
       }
-      const groupOrder = ['claude', ...Array.from(map.keys()).filter(k => k !== 'claude').sort()];
+      const groupOrder = ['claude', 'codex', ...Array.from(map.keys()).filter(k => k !== 'claude' && k !== 'codex').sort()];
       groups = groupOrder.filter(g => map.has(g)).map(g => ({ name: g, items: applySort(map.get(g)!) }));
     } else {
       groups = [{ name: '', items: applySort(accounts) }];

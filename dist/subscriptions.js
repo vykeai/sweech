@@ -226,6 +226,7 @@ function getKnownAccounts(profiles) {
             name: cli.command,
             commandName: cli.name,
             cliType: cli.name,
+            provider: cli.name === 'claude' ? 'anthropic' : 'openai',
             isDefault: true,
         });
     }
@@ -237,6 +238,7 @@ function getKnownAccounts(profiles) {
             name: profile.name,
             commandName: profile.commandName,
             cliType: profile.cliType,
+            provider: profile.provider,
             isDefault: false,
         });
     }
@@ -306,6 +308,7 @@ async function getAccountInfo(profiles, options = {}) {
             commandName: p.commandName,
             cliType,
             configDir,
+            provider: p.provider,
             displayName: sub?.displayName,
             emailAddress: sub?.emailAddress,
             billingType: sub?.billingType,

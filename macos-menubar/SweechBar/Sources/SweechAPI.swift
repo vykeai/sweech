@@ -40,6 +40,7 @@ struct SweechAccount: Codable, Identifiable {
     let name: String
     let commandName: String
     let cliType: String?
+    let provider: String?
     let meta: AccountMeta?
     let messages5h: Int?
     let messages7d: Int?
@@ -61,7 +62,7 @@ struct SweechAccount: Codable, Identifiable {
     let sortRank: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case name, commandName, cliType, meta, messages5h, messages7d, totalMessages
+        case name, commandName, cliType, provider, meta, messages5h, messages7d, totalMessages
         case minutesUntilFirstCapacity, hoursUntilWeeklyReset, oldest5hMessageAt
         case lastActive, needsReauth, live, tokenStatus, tokenRefreshedAt, tokenExpiresAt
         case precomputedSmartScore = "smartScore"
@@ -87,6 +88,41 @@ struct SweechAccount: Codable, Identifiable {
 
     var liveStatus: String { live?.status ?? "unknown" }
     var planType: String? { live?.planType ?? meta?.plan }
+
+    /// Display group for UI grouping: 'claude', 'codex', or provider name
+    var displayGroup: String {
+        guard let provider else { return cliType ?? "claude" }
+        switch provider {
+        case "anthropic": return "claude"
+        case "openai":    return "codex"
+        default:          return providerLabel
+        }
+    }
+
+    /// Short human-readable provider label for external providers
+    var providerLabel: String {
+        guard let provider else { return cliType ?? "claude" }
+        // Map provider keys to short display names
+        let labels: [String: String] = [
+            "anthropic": "Claude",
+            "openai": "OpenAI",
+            "dashscope": "Alibaba Cloud",
+            "glm": "ZAI (Zhipu)",
+            "minimax": "MiniMax",
+            "kimi-coding": "Kimi",
+            "kimi": "Kimi",
+            "deepseek": "DeepSeek",
+            "qwen": "Qwen",
+            "openrouter": "OpenRouter",
+        ]
+        return labels[provider] ?? provider
+    }
+
+    /// Whether this is an external (non-official) provider
+    var isExternal: Bool {
+        guard let provider else { return false }
+        return provider != "anthropic" && provider != "openai"
+    }
 
     var buckets: [LiveBucket] { live?.buckets ?? [] }
 
