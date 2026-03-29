@@ -92,7 +92,7 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
     description: 'GLM models via Alibaba Cloud Coding Plan',
     cliType: 'claude',
     provider: 'dashscope',
-    model: 'glm-5',
+    model: 'glm-5.1',
     tags: ['glm', 'zhipu', 'alibaba', 'dashscope', 'coding-plan'],
   },
   {
@@ -100,8 +100,16 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
     description: 'MiniMax coding models',
     cliType: 'claude',
     provider: 'minimax',
-    model: 'MiniMax-M2.5',
+    model: 'MiniMax-M2.7',
     tags: ['minimax', 'mini', 'coding-plan'],
+  },
+  {
+    name: 'claude-kimi',
+    description: 'Kimi for Coding (Moonshot AI) — 262K context',
+    cliType: 'claude',
+    provider: 'kimi-coding',
+    model: 'kimi-for-coding',
+    tags: ['kimi', 'moonshot', 'coding-plan'],
   },
   {
     name: 'openrouter-default',

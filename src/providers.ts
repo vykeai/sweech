@@ -73,13 +73,14 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     name: 'minimax',
     displayName: 'MiniMax',
     baseUrl: 'https://api.minimax.io/anthropic',
-    defaultModel: 'MiniMax-M2.5',
+    defaultModel: 'MiniMax-M2.7',
     description: 'MiniMax coding models',
     pricing: '$10/month coding plan',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
-      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k', note: 'Best quality' },
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', type: 'reasoning', context: '200k', note: 'Latest, best quality' },
+      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k' },
     ]
   },
   kimi: {
@@ -91,6 +92,19 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     pricing: '$0.14-$2.49 per million tokens',
     compatibility: ['claude'],
     apiFormat: 'anthropic'
+  },
+  'kimi-coding': {
+    name: 'kimi-coding',
+    displayName: 'Kimi for Coding (Moonshot AI)',
+    baseUrl: 'https://api.kimi.com/coding',
+    defaultModel: 'kimi-for-coding',
+    description: 'Kimi for Coding plan — 262K context, 32K output',
+    pricing: 'Subscription plan',
+    compatibility: ['claude'],
+    apiFormat: 'anthropic',
+    availableModels: [
+      { id: 'kimi-for-coding', name: 'Kimi for Coding (k2p5)', type: 'reasoning', context: '262k', note: '32K output, vision support' },
+    ]
   },
   deepseek: {
     name: 'deepseek',
@@ -106,13 +120,14 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     name: 'glm',
     displayName: 'GLM (Zhipu/ZAI)',
     baseUrl: 'https://api.z.ai/api/anthropic',
-    defaultModel: 'glm-5',
+    defaultModel: 'glm-5.1',
     description: 'Zhipu GLM models via ZAI',
     pricing: '$3/month coding plan',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
-      { id: 'glm-5', name: 'GLM-5', type: 'reasoning', context: '128k', note: 'Best quality, deep thinking' },
+      { id: 'glm-5.1', name: 'GLM-5.1', type: 'reasoning', context: '128k', note: 'Latest, best quality' },
+      { id: 'glm-5', name: 'GLM-5', type: 'reasoning', context: '128k', note: 'Deep thinking' },
       { id: 'glm-4.7', name: 'GLM-4.7', type: 'reasoning', context: '128k', note: 'Strong general model' },
       { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', type: 'reasoning', context: '128k', note: 'Free tier' },
       { id: 'glm-4-plus', name: 'GLM-4 Plus', type: 'text', context: '128k' },
@@ -133,10 +148,12 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
       { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus', type: 'text', context: '131k' },
       { id: 'qwen3-max-2026-01-23', name: 'Qwen3 Max', type: 'reasoning', context: '131k' },
       { id: 'qwen3.5-plus', name: 'Qwen3.5 Plus', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
-      { id: 'glm-5', name: 'GLM-5 (Zhipu)', type: 'reasoning', context: '131k', note: 'Best GLM quality' },
+      { id: 'glm-5.1', name: 'GLM-5.1 (Zhipu)', type: 'reasoning', context: '131k', note: 'Latest GLM' },
+      { id: 'glm-5', name: 'GLM-5 (Zhipu)', type: 'reasoning', context: '131k' },
       { id: 'glm-4.7', name: 'GLM-4.7 (Zhipu)', type: 'reasoning', context: '131k' },
       { id: 'kimi-k2.5', name: 'Kimi K2.5 (Moonshot)', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
-      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k', note: 'Long context' },
+      { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', type: 'reasoning', context: '200k', note: 'Long context' },
+      { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k' },
     ]
   },
 
