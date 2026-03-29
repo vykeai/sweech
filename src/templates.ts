@@ -88,12 +88,20 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
     tags: ['qwen', 'coder'],
   },
   {
-    name: 'claude-glm',
-    description: 'GLM models via Alibaba Cloud Coding Plan',
+    name: 'claude-ali',
+    description: 'Alibaba Cloud Coding Plan — Qwen, GLM, Kimi, MiniMax',
     cliType: 'claude',
     provider: 'dashscope',
+    model: 'qwen3-coder-next',
+    tags: ['alibaba', 'ali', 'dashscope', 'qwen', 'glm', 'kimi', 'minimax', 'coding-plan'],
+  },
+  {
+    name: 'claude-z',
+    description: 'Zhipu GLM models via z.ai direct',
+    cliType: 'claude',
+    provider: 'glm',
     model: 'glm-5.1',
-    tags: ['glm', 'zhipu', 'alibaba', 'dashscope', 'coding-plan'],
+    tags: ['zai', 'z', 'zhipu', 'glm', 'coding-plan'],
   },
   {
     name: 'claude-mini',

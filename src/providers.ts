@@ -121,16 +121,28 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     displayName: 'GLM (Zhipu/ZAI)',
     baseUrl: 'https://api.z.ai/api/anthropic',
     defaultModel: 'glm-5.1',
-    description: 'Zhipu GLM models via ZAI',
+    description: 'Zhipu GLM models via z.ai direct API',
     pricing: '$3/month coding plan',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
+      // ── Reasoning / Language ──
       { id: 'glm-5.1', name: 'GLM-5.1', type: 'reasoning', context: '128k', note: 'Latest, best quality' },
       { id: 'glm-5', name: 'GLM-5', type: 'reasoning', context: '128k', note: 'Deep thinking' },
-      { id: 'glm-4.7', name: 'GLM-4.7', type: 'reasoning', context: '128k', note: 'Strong general model' },
+      { id: 'glm-4.7', name: 'GLM-4.7', type: 'reasoning', context: '128k', note: 'Strong general' },
       { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', type: 'reasoning', context: '128k', note: 'Free tier' },
+      { id: 'glm-4.7-flashx', name: 'GLM-4.7 FlashX', type: 'text', context: '128k' },
+      { id: 'glm-4.5', name: 'GLM-4.5', type: 'text', context: '128k' },
+      { id: 'glm-4.5-air', name: 'GLM-4.5 Air', type: 'text', context: '128k' },
+      { id: 'glm-4.5-airx', name: 'GLM-4.5 AirX', type: 'text', context: '128k' },
+      { id: 'glm-4.5-flash', name: 'GLM-4.5 Flash', type: 'text', context: '128k' },
       { id: 'glm-4-plus', name: 'GLM-4 Plus', type: 'text', context: '128k' },
+      // ── Vision ──
+      { id: 'glm-4v-plus', name: 'GLM-4V Plus', type: 'vision', context: '128k' },
+      { id: 'glm-4v', name: 'GLM-4V', type: 'vision', context: '128k' },
+      { id: 'glm-4v-flash', name: 'GLM-4V Flash', type: 'vision', context: '128k' },
+      // ── OCR ──
+      { id: 'glm-ocr', name: 'GLM OCR', type: 'ocr', context: '128k' },
     ]
   },
   dashscope: {
@@ -144,14 +156,18 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
+      // ── Qwen (native) ──
       { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', type: 'text', context: '131k', note: 'Latest Qwen coder' },
       { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus', type: 'text', context: '131k' },
       { id: 'qwen3-max-2026-01-23', name: 'Qwen3 Max', type: 'reasoning', context: '131k' },
       { id: 'qwen3.5-plus', name: 'Qwen3.5 Plus', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
+      // ── Zhipu GLM (bundled) ──
       { id: 'glm-5.1', name: 'GLM-5.1 (Zhipu)', type: 'reasoning', context: '131k', note: 'Latest GLM' },
       { id: 'glm-5', name: 'GLM-5 (Zhipu)', type: 'reasoning', context: '131k' },
       { id: 'glm-4.7', name: 'GLM-4.7 (Zhipu)', type: 'reasoning', context: '131k' },
+      // ── Kimi (bundled) ──
       { id: 'kimi-k2.5', name: 'Kimi K2.5 (Moonshot)', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
+      // ── MiniMax (bundled) ──
       { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', type: 'reasoning', context: '200k', note: 'Long context' },
       { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k' },
     ]
