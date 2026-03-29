@@ -134,7 +134,8 @@ export class ConfigManager {
     apiKey: string | undefined,
     cliType: string = 'claude',
     oauthToken?: OAuthToken,
-    useNativeAuth: boolean = false
+    useNativeAuth: boolean = false,
+    modelOverride?: string
   ): void {
     const profileDir = this.getProfileDir(commandName);
 
@@ -149,6 +150,9 @@ export class ConfigManager {
       // Determine authentication source
       const authToken = apiKey || (oauthToken?.accessToken ? `bearer_${oauthToken.accessToken}` : '');
 
+      // Resolve effective model (profile override > provider default)
+      const effectiveModel = modelOverride || provider.defaultModel;
+
       // Set environment variables based on CLI type
       if (cliType === 'codex') {
         // Codex CLI uses OpenAI environment variables
@@ -158,8 +162,8 @@ export class ConfigManager {
           settings.env.OPENAI_BASE_URL = provider.baseUrl;
         }
 
-        if (provider.defaultModel) {
-          settings.env.OPENAI_MODEL = provider.defaultModel;
+        if (effectiveModel) {
+          settings.env.OPENAI_MODEL = effectiveModel;
         }
 
         if (provider.smallFastModel) {
@@ -173,8 +177,8 @@ export class ConfigManager {
           settings.env.ANTHROPIC_BASE_URL = provider.baseUrl;
         }
 
-        if (provider.defaultModel) {
-          settings.env.ANTHROPIC_MODEL = provider.defaultModel;
+        if (effectiveModel) {
+          settings.env.ANTHROPIC_MODEL = effectiveModel;
         }
 
         if (provider.smallFastModel) {
@@ -253,14 +257,32 @@ case "\${1:-}" in
   --help|-h|--version|-V) exec ${cli.command} "$@" ;;
 esac
 
-# Transform arguments: --yolo -> --dangerously-skip-permissions (Claude Code only)
+# Transform arguments and intercept --model <id>
 ARGS=()
-for arg in "$@"; do
-  if [ "$arg" = "--yolo" ] && [ "${cli.command}" = "claude" ]; then
-    ARGS+=("--dangerously-skip-permissions")
-  else
-    ARGS+=("$arg")
-  fi
+while [ $# -gt 0 ]; do
+  case "\$1" in
+    --model)
+      # Set model via env var instead of passing to CLI
+      if [ "${cli.command}" = "claude" ]; then
+        export ANTHROPIC_MODEL="\$2"
+      else
+        export OPENAI_MODEL="\$2"
+      fi
+      shift 2
+      ;;
+    --yolo)
+      if [ "${cli.command}" = "claude" ]; then
+        ARGS+=("--dangerously-skip-permissions")
+      else
+        ARGS+=("--yolo")
+      fi
+      shift
+      ;;
+    *)
+      ARGS+=("\$1")
+      shift
+      ;;
+  esac
 done
 
 export ${cli.configDirEnvVar}="${profileDir}"

@@ -88,6 +88,22 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
     tags: ['qwen', 'coder'],
   },
   {
+    name: 'claude-glm',
+    description: 'GLM models via Alibaba Cloud Coding Plan',
+    cliType: 'claude',
+    provider: 'dashscope',
+    model: 'glm-5',
+    tags: ['glm', 'zhipu', 'alibaba', 'dashscope', 'coding-plan'],
+  },
+  {
+    name: 'claude-mini',
+    description: 'MiniMax coding models',
+    cliType: 'claude',
+    provider: 'minimax',
+    model: 'MiniMax-M2.5',
+    tags: ['minimax', 'mini', 'coding-plan'],
+  },
+  {
     name: 'openrouter-default',
     description: 'OpenRouter Multi-model',
     cliType: 'claude',

@@ -52,11 +52,14 @@ exports.PROVIDERS = {
         name: 'minimax',
         displayName: 'MiniMax',
         baseUrl: 'https://api.minimax.io/anthropic',
-        defaultModel: 'MiniMax-M2',
-        description: 'MiniMax M2 coding model',
+        defaultModel: 'MiniMax-M2.5',
+        description: 'MiniMax coding models',
         pricing: '$10/month coding plan',
         compatibility: ['claude'],
-        apiFormat: 'anthropic'
+        apiFormat: 'anthropic',
+        availableModels: [
+            { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k', note: 'Best quality' },
+        ]
     },
     kimi: {
         name: 'kimi',
@@ -80,13 +83,19 @@ exports.PROVIDERS = {
     },
     glm: {
         name: 'glm',
-        displayName: 'GLM 4.6 (Zhipu/ZAI)',
+        displayName: 'GLM (Zhipu/ZAI)',
         baseUrl: 'https://api.z.ai/api/anthropic',
-        defaultModel: 'glm-4-plus',
-        description: 'Zhipu GLM 4.6 models',
+        defaultModel: 'glm-5',
+        description: 'Zhipu GLM models via ZAI',
         pricing: '$3/month coding plan',
         compatibility: ['claude'],
-        apiFormat: 'anthropic'
+        apiFormat: 'anthropic',
+        availableModels: [
+            { id: 'glm-5', name: 'GLM-5', type: 'reasoning', context: '128k', note: 'Best quality, deep thinking' },
+            { id: 'glm-4.7', name: 'GLM-4.7', type: 'reasoning', context: '128k', note: 'Strong general model' },
+            { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', type: 'reasoning', context: '128k', note: 'Free tier' },
+            { id: 'glm-4-plus', name: 'GLM-4 Plus', type: 'text', context: '128k' },
+        ]
     },
     dashscope: {
         name: 'dashscope',
@@ -97,7 +106,17 @@ exports.PROVIDERS = {
         description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via Anthropic-compat API (sk-sp-... key)',
         pricing: 'Subscription plan',
         compatibility: ['claude'],
-        apiFormat: 'anthropic'
+        apiFormat: 'anthropic',
+        availableModels: [
+            { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', type: 'text', context: '131k', note: 'Latest Qwen coder' },
+            { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus', type: 'text', context: '131k' },
+            { id: 'qwen3-max-2026-01-23', name: 'Qwen3 Max', type: 'reasoning', context: '131k' },
+            { id: 'qwen3.5-plus', name: 'Qwen3.5 Plus', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
+            { id: 'glm-5', name: 'GLM-5 (Zhipu)', type: 'reasoning', context: '131k', note: 'Best GLM quality' },
+            { id: 'glm-4.7', name: 'GLM-4.7 (Zhipu)', type: 'reasoning', context: '131k' },
+            { id: 'kimi-k2.5', name: 'Kimi K2.5 (Moonshot)', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
+            { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k', note: 'Long context' },
+        ]
     },
     // ═══════════════════════════════════════════════════════════
     // OPENAI-COMPATIBLE PROVIDERS (for Codex CLI)

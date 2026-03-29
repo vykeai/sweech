@@ -12,7 +12,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, CODEX_SHAREABLE_FILES, CODEX_SHAREABLE_DBS } from './config';
 import { getCLI } from './clis';
-import { getProvider } from './providers';
+import { getProvider, ModelInfo } from './providers';
 import { detectInstalledCLIs } from './cliDetection';
 import { getAccountInfo, getKnownAccounts } from './subscriptions';
 
@@ -581,16 +581,55 @@ export async function runEdit(commandName: string): Promise<void> {
     ]);
     newValue = answer.value.trim();
   } else if (field === 'model') {
-    const answer = await inquirer.prompt([
-      {
-        type: 'input',
-        name: 'value',
-        message: 'Enter new model name:',
-        default: profile.model,
-        validate: (input: string) => input.trim().length > 0 || 'Model name required'
+    // If provider has a model catalog, show a selector
+    const models = provider?.availableModels;
+    if (models && models.length > 0) {
+      const choices = models.map((m: ModelInfo) => {
+        const meta = [m.type, m.context, m.note].filter(Boolean).join(', ');
+        const current = m.id === profile.model ? chalk.green(' ← current') : '';
+        return {
+          name: `${m.name}  ${chalk.dim(meta)}${current}`,
+          value: m.id
+        };
+      });
+      choices.push({ name: chalk.dim('Custom model ID...'), value: '__custom__' });
+
+      const { selected } = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selected',
+          message: 'Select model:',
+          choices,
+          default: profile.model
+        }
+      ]);
+
+      if (selected === '__custom__') {
+        const custom = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'value',
+            message: 'Enter model ID:',
+            default: profile.model,
+            validate: (input: string) => input.trim().length > 0 || 'Model name required'
+          }
+        ]);
+        newValue = custom.value.trim();
+      } else {
+        newValue = selected;
       }
-    ]);
-    newValue = answer.value.trim();
+    } else {
+      const answer = await inquirer.prompt([
+        {
+          type: 'input',
+          name: 'value',
+          message: 'Enter new model name:',
+          default: profile.model,
+          validate: (input: string) => input.trim().length > 0 || 'Model name required'
+        }
+      ]);
+      newValue = answer.value.trim();
+    }
   } else if (field === 'baseUrl') {
     const answer = await inquirer.prompt([
       {
@@ -615,9 +654,10 @@ export async function runEdit(commandName: string): Promise<void> {
   );
   fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
 
-  // Update settings.json
+  // Update settings.json (pass model override if model was changed)
   if (provider) {
-    config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType);
+    const modelOverride = field === 'model' ? newValue : profile.model;
+    config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType, undefined, false, modelOverride);
   }
 
   console.log(chalk.green(`\n✓ Updated ${field} for ${commandName}\n`));

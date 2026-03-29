@@ -589,16 +589,55 @@ async function runEdit(commandName) {
         newValue = answer.value.trim();
     }
     else if (field === 'model') {
-        const answer = await inquirer_1.default.prompt([
-            {
-                type: 'input',
-                name: 'value',
-                message: 'Enter new model name:',
-                default: profile.model,
-                validate: (input) => input.trim().length > 0 || 'Model name required'
+        // If provider has a model catalog, show a selector
+        const models = provider?.availableModels;
+        if (models && models.length > 0) {
+            const choices = models.map((m) => {
+                const meta = [m.type, m.context, m.note].filter(Boolean).join(', ');
+                const current = m.id === profile.model ? chalk_1.default.green(' ← current') : '';
+                return {
+                    name: `${m.name}  ${chalk_1.default.dim(meta)}${current}`,
+                    value: m.id
+                };
+            });
+            choices.push({ name: chalk_1.default.dim('Custom model ID...'), value: '__custom__' });
+            const { selected } = await inquirer_1.default.prompt([
+                {
+                    type: 'list',
+                    name: 'selected',
+                    message: 'Select model:',
+                    choices,
+                    default: profile.model
+                }
+            ]);
+            if (selected === '__custom__') {
+                const custom = await inquirer_1.default.prompt([
+                    {
+                        type: 'input',
+                        name: 'value',
+                        message: 'Enter model ID:',
+                        default: profile.model,
+                        validate: (input) => input.trim().length > 0 || 'Model name required'
+                    }
+                ]);
+                newValue = custom.value.trim();
             }
-        ]);
-        newValue = answer.value.trim();
+            else {
+                newValue = selected;
+            }
+        }
+        else {
+            const answer = await inquirer_1.default.prompt([
+                {
+                    type: 'input',
+                    name: 'value',
+                    message: 'Enter new model name:',
+                    default: profile.model,
+                    validate: (input) => input.trim().length > 0 || 'Model name required'
+                }
+            ]);
+            newValue = answer.value.trim();
+        }
     }
     else if (field === 'baseUrl') {
         const answer = await inquirer_1.default.prompt([
@@ -620,9 +659,10 @@ async function runEdit(commandName) {
     // Save to config.json
     const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
     fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
-    // Update settings.json
+    // Update settings.json (pass model override if model was changed)
     if (provider) {
-        config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType);
+        const modelOverride = field === 'model' ? newValue : profile.model;
+        config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType, undefined, false, modelOverride);
     }
     console.log(chalk_1.default.green(`\n✓ Updated ${field} for ${commandName}\n`));
 }

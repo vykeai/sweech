@@ -1092,6 +1092,87 @@ program
         process.exit(1);
     }
 });
+// Model command - Quick model switch for a profile
+program
+    .command('model <command-name> [model-id]')
+    .description('View or switch the active model for a profile')
+    .action(async (commandName, modelId) => {
+    try {
+        const config = new config_1.ConfigManager();
+        const profiles = config.getProfiles();
+        const profile = profiles.find(p => p.commandName === commandName);
+        if (!profile) {
+            console.error(chalk_1.default.red(`\nProfile '${commandName}' not found\n`));
+            process.exit(1);
+        }
+        const provider = (0, providers_1.getProvider)(profile.provider);
+        const models = provider?.availableModels;
+        // If model-id given directly, switch to it
+        if (modelId) {
+            profile.model = modelId;
+            const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
+            fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+            if (provider) {
+                config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType, undefined, false, modelId);
+            }
+            console.log(chalk_1.default.green(`\n✓ ${commandName} model → ${chalk_1.default.bold(modelId)}\n`));
+            return;
+        }
+        // Show current model and catalog
+        console.log(chalk_1.default.bold(`\n  ${commandName} · model\n`));
+        console.log(`  Current: ${chalk_1.default.cyan(profile.model || provider?.defaultModel || 'default')}\n`);
+        if (models && models.length > 0) {
+            // Interactive model selector
+            const inquirer = (await Promise.resolve().then(() => __importStar(require('inquirer')))).default;
+            const choices = models.map(m => {
+                const meta = [m.type, m.context, m.note].filter(Boolean).join(', ');
+                const current = m.id === (profile.model || provider?.defaultModel) ? chalk_1.default.green(' ← current') : '';
+                return {
+                    name: `${m.name}  ${chalk_1.default.dim(meta)}${current}`,
+                    value: m.id
+                };
+            });
+            choices.push({ name: chalk_1.default.dim('Custom model ID...'), value: '__custom__' });
+            const { selected } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'selected',
+                    message: 'Select model:',
+                    choices,
+                    default: profile.model || provider?.defaultModel
+                }
+            ]);
+            let finalModel = selected;
+            if (selected === '__custom__') {
+                const { value } = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'value',
+                        message: 'Enter model ID:',
+                        validate: (input) => input.trim().length > 0 || 'Model ID required'
+                    }
+                ]);
+                finalModel = value.trim();
+            }
+            profile.model = finalModel;
+            const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
+            fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+            if (provider) {
+                config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType, undefined, false, finalModel);
+            }
+            console.log(chalk_1.default.green(`\n✓ ${commandName} model → ${chalk_1.default.bold(finalModel)}\n`));
+        }
+        else {
+            console.log(chalk_1.default.dim('  No model catalog for this provider.'));
+            console.log(chalk_1.default.dim(`  Use: sweech model ${commandName} <model-id>\n`));
+        }
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
+});
 // Clone command - Clone an existing profile
 program
     .command('clone <source> <target>')
