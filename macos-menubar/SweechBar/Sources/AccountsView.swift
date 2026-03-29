@@ -87,10 +87,11 @@ enum CardTier {
 struct AccountsView: View {
     @ObservedObject var service: SweechService
 
-    @AppStorage("sweechSortMode") private var sortMode: String = "smart"
-    @AppStorage("sweechGrouped")  private var grouped: Bool = true
-    @AppStorage("sweechCompact")  private var compact: Bool = false
-    @AppStorage("sweechMiniMode") private var miniMode: Bool = false
+    @AppStorage("sweechSortMode")   private var sortMode: String = "smart"
+    @AppStorage("sweechGrouped")    private var grouped: Bool = true
+    @AppStorage("sweechCompact")    private var compact: Bool = false
+    @AppStorage("sweechMiniMode")   private var miniMode: Bool = false
+    @AppStorage("sweechAppearance") private var appearance: String = "system"  // "system", "light", "dark"
     @State private var showGuide    = false
     @State private var showSettings = false
     @State private var miniExpanded = false
@@ -212,7 +213,8 @@ struct AccountsView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(width: activeMiniMode ? 360 : (hasMultipleGroups && grouped && !rawClaude.isEmpty && !rawCodex.isEmpty ? 680 : 360))
+        .frame(width: activeMiniMode ? 360 : (!hasMultipleGroups || !grouped ? 360 : columnCount >= 3 ? 980 : 680))
+        .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .background(KeyboardShortcuts(
             onRefresh: { service.fetch() },
             onCycleSort: {
@@ -235,59 +237,66 @@ struct AccountsView: View {
         )
     }
 
-    private var groupedLayout: some View {
-        VStack(spacing: 10) {
-            summaryHeader
-
-            // Official CLI columns (claude + codex side by side if both exist)
-            let hasOfficials = !rawClaude.isEmpty || !rawCodex.isEmpty
-            if hasOfficials {
-                HStack(alignment: .top, spacing: 10) {
-                    if !rawClaude.isEmpty {
-                        VStack(spacing: 8) {
-                            columnHeader(title: "claude", count: sortedClaude.count)
-                                .help("\(sortedClaude.count) Claude Code account(s) — sorted by \(sortMode) mode")
-                            ForEach(Array(sortedClaude.enumerated()), id: \.element.id) { i, account in
-                                AccountCard(account: account, tier: tier(for: account, rank: i))
-                                    .transition(cardTransition)
-                            }
-                        }
-                        .frame(minWidth: 290, maxWidth: .infinity)
-                        .animation(Sweech.Animation.medium, value: sortMode)
-                    }
-
-                    if !rawCodex.isEmpty {
-                        VStack(spacing: 8) {
-                            columnHeader(title: "codex", count: sortedCodex.count)
-                                .help("\(sortedCodex.count) Codex CLI account(s) — sorted by \(sortMode) mode")
-                            ForEach(Array(sortedCodex.enumerated()), id: \.element.id) { i, account in
-                                AccountCard(account: account, tier: tier(for: account, rank: i))
-                                    .transition(cardTransition)
-                            }
-                        }
-                        .frame(minWidth: 290, maxWidth: .infinity)
-                        .animation(Sweech.Animation.medium, value: sortMode)
-                    }
-                }
-                .padding(.horizontal, 4)
-            }
-
-            // External provider groups — stacked below officials
-            ForEach(externalGroupNames, id: \.self) { groupName in
-                let items = sortedForGroup(groupName)
-                VStack(spacing: 8) {
-                    columnHeader(title: groupName, count: items.count)
-                        .help("\(items.count) \(groupName) account(s) — sorted by \(sortMode) mode")
-                    ForEach(Array(items.enumerated()), id: \.element.id) { i, account in
-                        AccountCard(account: account, tier: tier(for: account, rank: i))
-                            .transition(cardTransition)
-                    }
-                }
-                .padding(.horizontal, 4)
-                .animation(Sweech.Animation.medium, value: sortMode)
-            }
+    /// All display groups as (title, sorted accounts) — masonry input
+    private var allGroups: [(title: String, accounts: [SweechAccount])] {
+        var groups: [(String, [SweechAccount])] = []
+        if !rawClaude.isEmpty  { groups.append(("claude", sortedClaude)) }
+        if !rawCodex.isEmpty   { groups.append(("codex", sortedCodex)) }
+        for name in externalGroupNames {
+            let items = sortedForGroup(name)
+            if !items.isEmpty { groups.append((name, items)) }
         }
-        .padding(12)
+        return groups
+    }
+
+    /// Number of masonry columns: 2 when ≤2 groups, 3 when more
+    private var columnCount: Int { allGroups.count > 2 ? 3 : 2 }
+
+    /// Distribute groups across N columns, greedy by weight
+    private var masonryColumns: [[( String, [SweechAccount])]] {
+        let n = columnCount
+        var cols = Array(repeating: [(String, [SweechAccount])](), count: n)
+        var weights = Array(repeating: 0, count: n)
+        for group in allGroups {
+            let weight = group.accounts.count + 1
+            let minIdx = weights.enumerated().min(by: { $0.element < $1.element })!.offset
+            cols[minIdx].append(group)
+            weights[minIdx] += weight
+        }
+        return cols
+    }
+
+    private var groupedLayout: some View {
+        ScrollView {
+            VStack(spacing: 10) {
+                summaryHeader
+
+                let cols = masonryColumns
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(Array(cols.enumerated()), id: \.offset) { _, column in
+                        if !column.isEmpty {
+                            VStack(spacing: 12) {
+                                ForEach(Array(column.enumerated()), id: \.offset) { _, group in
+                                    VStack(spacing: 8) {
+                                        columnHeader(title: group.0, count: group.1.count)
+                                            .help("\(group.1.count) \(group.0) account(s) — sorted by \(sortMode) mode")
+                                        ForEach(Array(group.1.enumerated()), id: \.element.id) { i, account in
+                                            AccountCard(account: account, tier: tier(for: account, rank: i))
+                                                .transition(cardTransition)
+                                        }
+                                    }
+                                }
+                            }
+                            .frame(minWidth: 240, maxWidth: .infinity)
+                            .animation(Sweech.Animation.medium, value: sortMode)
+                        }
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+            .padding(12)
+        }
+        .frame(maxHeight: 800)
     }
 
     private var singleColumnLayout: some View {
@@ -547,6 +556,22 @@ struct AccountsView: View {
                     }
                     Divider()
                 }
+
+                Menu {
+                    Button { appearance = "system" } label: {
+                        Label(appearance == "system" ? "✓ System" : "System", systemImage: "circle.lefthalf.filled")
+                    }
+                    Button { appearance = "light" } label: {
+                        Label(appearance == "light" ? "✓ Light" : "Light", systemImage: "sun.max")
+                    }
+                    Button { appearance = "dark" } label: {
+                        Label(appearance == "dark" ? "✓ Dark" : "Dark", systemImage: "moon")
+                    }
+                } label: {
+                    Label("Appearance", systemImage: "paintbrush")
+                }
+
+                Divider()
 
                 Button { service.setLaunchAtLogin(!service.launchAtLogin) } label: {
                     Label(service.launchAtLogin ? "Remove from Login Items" : "Launch at Login",

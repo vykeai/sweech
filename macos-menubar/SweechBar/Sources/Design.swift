@@ -31,9 +31,17 @@ enum Sweech {
 
     enum Gradient {
         static let backgroundRadial = RadialGradient(
-            colors: [SwiftUI.Color(hex: "#1A1040").opacity(0.8), Sweech.Color.background],
+            colors: [adaptiveColor(dark: "#1A1040", light: "#E8E0F8").opacity(0.8), Sweech.Color.background],
             center: .top, startRadius: 0, endRadius: 300
         )
+
+        private static func adaptiveColor(dark: String, light: String) -> SwiftUI.Color {
+            SwiftUI.Color(nsColor: NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                    ? NSColor(SwiftUI.Color(hex: dark))
+                    : NSColor(SwiftUI.Color(hex: light))
+            })
+        }
     }
 
     enum Animation {
