@@ -138,7 +138,7 @@ exports.BUILT_IN_TEMPLATES = [
         description: 'Kimi for Coding (Moonshot AI) — 262K context',
         cliType: 'claude',
         provider: 'kimi-coding',
-        model: 'kimi-for-coding',
+        model: 'k2p5',
         tags: ['kimi', 'moonshot', 'coding-plan'],
     },
     {

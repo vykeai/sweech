@@ -78,13 +78,13 @@ exports.PROVIDERS = {
         name: 'kimi-coding',
         displayName: 'Kimi for Coding (Moonshot AI)',
         baseUrl: 'https://api.kimi.com/coding',
-        defaultModel: 'kimi-for-coding',
+        defaultModel: 'k2p5',
         description: 'Kimi for Coding plan — 262K context, 32K output',
         pricing: 'Subscription plan',
         compatibility: ['claude'],
         apiFormat: 'anthropic',
         availableModels: [
-            { id: 'kimi-for-coding', name: 'Kimi for Coding (k2p5)', type: 'reasoning', context: '262k', note: '32K output, vision support' },
+            { id: 'k2p5', name: 'Kimi K2.5', type: 'reasoning', context: '262k', note: '32K output, vision support' },
         ]
     },
     deepseek: {
