@@ -9,7 +9,7 @@ import * as path from 'path';
 import { computeSmartScore } from './liveUsage';
 import * as os from 'os';
 import { ConfigManager } from './config';
-import { getProvider } from './providers';
+import { getProvider, isExternalProvider, type ModelInfo } from './providers';
 import { getCLI, SUPPORTED_CLIS } from './clis';
 import { getAccountInfo, type AccountInfo } from './subscriptions';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
@@ -34,6 +34,7 @@ export interface LaunchEntry {
   resumeFlag: string;
   sharedWith?: string;
   model?: string;
+  providerKey?: string;
   isDefault: boolean;
   // Stats
   dataDir: string;
@@ -531,13 +532,14 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
 function buildStaticEntry(
   name: string, command: string, configDir: string | null, label: string,
   yoloFlag: string, resumeFlag: string, isDefault: boolean,
-  opts?: { sharedWith?: string; model?: string }
+  opts?: { sharedWith?: string; model?: string; providerKey?: string }
 ): LaunchEntry {
   const dataDir = configDir ?? path.join(os.homedir(), `.${name}`);
   return {
     name, command, configDir, label, yoloFlag, resumeFlag, isDefault,
     sharedWith: opts?.sharedWith,
     model: opts?.model,
+    providerKey: opts?.providerKey,
     dataDir,
     dataSizeMB: '',
     authType: '',
@@ -582,7 +584,7 @@ export async function runLauncher(): Promise<void> {
       cli?.yoloFlag || '--dangerously-skip-permissions',
       cli?.resumeFlag || '--continue',
       false,
-      { sharedWith: profile.sharedWith, model: profile.model }
+      { sharedWith: profile.sharedWith, model: profile.model, providerKey: profile.provider }
     );
   });
 
@@ -804,7 +806,7 @@ export async function runLauncher(): Promise<void> {
         if (sortedNow[state.selectedIndex].isDefault) return;
         cleanup(); runSubcommand('edit', sortedNow[state.selectedIndex].name);
       } else if (key.name === 'return') {
-        cleanup(); launch();
+        launch();
       }
     };
 
@@ -827,10 +829,55 @@ export async function runLauncher(): Promise<void> {
       process.exit(0);
     };
 
-    const launch = () => {
+    const launch = async () => {
       cleanup();
       saveState(state);
       const entry = getSorted(entries, state.sortMode, state.grouped)[state.selectedIndex];
+
+      const env = { ...process.env };
+      const launchArgs: string[] = [];
+      if (entry.configDir) {
+        const cli = getCLI(entry.command === 'codex' ? 'codex' : 'claude');
+        if (cli) env[cli.configDirEnvVar] = entry.configDir;
+      }
+
+      // Model picker for external providers with model catalogs
+      if (entry.providerKey && isExternalProvider(entry.providerKey)) {
+        const provider = getProvider(entry.providerKey);
+        const models = provider?.availableModels;
+        if (models && models.length > 0) {
+          const inquirer = (await import('inquirer')).default;
+          const choices = models.map((m: ModelInfo) => {
+            const meta = [m.type, m.context, m.note].filter(Boolean).join(', ');
+            const current = m.id === entry.model ? chalk.green(' ← default') : '';
+            return {
+              name: `${m.name}  ${chalk.dim(meta)}${current}`,
+              value: m.id,
+            };
+          });
+
+          const { selectedModel } = await inquirer.prompt([
+            {
+              type: 'list',
+              name: 'selectedModel',
+              message: `${entry.name} · select model:`,
+              choices,
+              default: entry.model || provider?.defaultModel,
+            },
+          ]);
+
+          // Set model via env var
+          if (entry.command === 'codex') {
+            env.OPENAI_MODEL = selectedModel;
+          } else {
+            env.ANTHROPIC_MODEL = selectedModel;
+          }
+        }
+      }
+
+      if (state.yolo) launchArgs.push(entry.yoloFlag);
+      if (state.resume) launchArgs.push(...entry.resumeFlag.split(' '));
+
       const preview = buildCommandPreview(entry, state);
       console.log(chalk.gray(`→ ${preview}\n`));
 
@@ -840,17 +887,12 @@ export async function runLauncher(): Promise<void> {
         timestamp: new Date().toISOString(),
       });
 
-      const env = { ...process.env };
-      const launchArgs: string[] = [];
-      if (entry.configDir) {
-        const cli = getCLI(entry.command === 'codex' ? 'codex' : 'claude');
-        if (cli) env[cli.configDirEnvVar] = entry.configDir;
-      }
-      if (state.yolo) launchArgs.push(entry.yoloFlag);
-      if (state.resume) launchArgs.push(...entry.resumeFlag.split(' '));
-
       // Run plugin onLaunch hooks (errors are caught inside runHook)
       try { runHook('onLaunch', entry.name, launchArgs); } catch { /* plugin errors must not crash CLI */ }
+
+      // Strip nesting vars per AGENTS.md
+      delete env.CLAUDECODE;
+      delete env.CLAUDE_CODE_ENTRYPOINT;
 
       const { spawnSync } = require('child_process');
       const result = spawnSync(entry.command, launchArgs, { env, stdio: 'inherit' });

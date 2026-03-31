@@ -520,6 +520,7 @@ function buildStaticEntry(name, command, configDir, label, yoloFlag, resumeFlag,
         name, command, configDir, label, yoloFlag, resumeFlag, isDefault,
         sharedWith: opts?.sharedWith,
         model: opts?.model,
+        providerKey: opts?.providerKey,
         dataDir,
         dataSizeMB: '',
         authType: '',
@@ -551,7 +552,7 @@ async function runLauncher() {
             return buildStaticEntry(a.command, a.command, null, 'default', cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', true);
         }
         const profile = profiles.find(p => p.commandName === a.commandName);
-        return buildStaticEntry(profile.commandName, a.command, config.getProfileDir(profile.commandName), (0, providers_1.getProvider)(profile.provider)?.displayName || profile.provider, cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', false, { sharedWith: profile.sharedWith, model: profile.model });
+        return buildStaticEntry(profile.commandName, a.command, config.getProfileDir(profile.commandName), (0, providers_1.getProvider)(profile.provider)?.displayName || profile.provider, cli?.yoloFlag || '--dangerously-skip-permissions', cli?.resumeFlag || '--continue', false, { sharedWith: profile.sharedWith, model: profile.model, providerKey: profile.provider });
     });
     const entries = [
         ...unsorted.filter(e => e.command !== 'codex' && e.isDefault),
@@ -782,7 +783,6 @@ async function runLauncher() {
                 runSubcommand('edit', sortedNow[state.selectedIndex].name);
             }
             else if (key.name === 'return') {
-                cleanup();
                 launch();
             }
         };
@@ -804,17 +804,10 @@ async function runLauncher() {
             spawnSync(process.argv[0], [process.argv[1]], { stdio: 'inherit' });
             process.exit(0);
         };
-        const launch = () => {
+        const launch = async () => {
             cleanup();
             saveState(state);
             const entry = getSorted(entries, state.sortMode, state.grouped)[state.selectedIndex];
-            const preview = buildCommandPreview(entry, state);
-            console.log(chalk_1.default.gray(`→ ${preview}\n`));
-            // Emit profile_switch event
-            events_1.sweechEvents.emit('profile_switch', {
-                account: entry.name,
-                timestamp: new Date().toISOString(),
-            });
             const env = { ...process.env };
             const launchArgs = [];
             if (entry.configDir) {
@@ -822,15 +815,57 @@ async function runLauncher() {
                 if (cli)
                     env[cli.configDirEnvVar] = entry.configDir;
             }
+            // Model picker for external providers with model catalogs
+            if (entry.providerKey && (0, providers_1.isExternalProvider)(entry.providerKey)) {
+                const provider = (0, providers_1.getProvider)(entry.providerKey);
+                const models = provider?.availableModels;
+                if (models && models.length > 0) {
+                    const inquirer = (await Promise.resolve().then(() => __importStar(require('inquirer')))).default;
+                    const choices = models.map((m) => {
+                        const meta = [m.type, m.context, m.note].filter(Boolean).join(', ');
+                        const current = m.id === entry.model ? chalk_1.default.green(' ← default') : '';
+                        return {
+                            name: `${m.name}  ${chalk_1.default.dim(meta)}${current}`,
+                            value: m.id,
+                        };
+                    });
+                    const { selectedModel } = await inquirer.prompt([
+                        {
+                            type: 'list',
+                            name: 'selectedModel',
+                            message: `${entry.name} · select model:`,
+                            choices,
+                            default: entry.model || provider?.defaultModel,
+                        },
+                    ]);
+                    // Set model via env var
+                    if (entry.command === 'codex') {
+                        env.OPENAI_MODEL = selectedModel;
+                    }
+                    else {
+                        env.ANTHROPIC_MODEL = selectedModel;
+                    }
+                }
+            }
             if (state.yolo)
                 launchArgs.push(entry.yoloFlag);
             if (state.resume)
                 launchArgs.push(...entry.resumeFlag.split(' '));
+            const preview = buildCommandPreview(entry, state);
+            console.log(chalk_1.default.gray(`→ ${preview}\n`));
+            // Emit profile_switch event
+            events_1.sweechEvents.emit('profile_switch', {
+                account: entry.name,
+                timestamp: new Date().toISOString(),
+            });
             // Run plugin onLaunch hooks (errors are caught inside runHook)
             try {
                 (0, plugins_1.runHook)('onLaunch', entry.name, launchArgs);
             }
             catch { /* plugin errors must not crash CLI */ }
+            // Strip nesting vars per AGENTS.md
+            delete env.CLAUDECODE;
+            delete env.CLAUDE_CODE_ENTRYPOINT;
             const { spawnSync } = require('child_process');
             const result = spawnSync(entry.command, launchArgs, { env, stdio: 'inherit' });
             // If resume failed (no conversation to continue), fall back to a fresh session
