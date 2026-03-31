@@ -262,11 +262,14 @@ ARGS=()
 while [ $# -gt 0 ]; do
   case "\$1" in
     --model)
-      # Set model via env var instead of passing to CLI
-      if [ "${cli.command}" = "claude" ]; then
-        export ANTHROPIC_MODEL="\$2"
-      else
-        export OPENAI_MODEL="\$2"
+      # Update settings.json so Claude Code picks up the model (env vars get overridden by settings.json)
+      SETTINGS="${profileDir}/settings.json"
+      if [ -f "\$SETTINGS" ] && command -v python3 &>/dev/null; then
+        if [ "${cli.command}" = "claude" ]; then
+          python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['ANTHROPIC_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
+        else
+          python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['OPENAI_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
+        fi
       fi
       shift 2
       ;;

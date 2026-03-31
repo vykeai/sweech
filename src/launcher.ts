@@ -849,7 +849,7 @@ export async function runLauncher(): Promise<void> {
           const inquirer = (await import('inquirer')).default;
           const choices = models.map((m: ModelInfo) => {
             const meta = [m.type, m.context, m.note].filter(Boolean).join(', ');
-            const current = m.id === entry.model ? chalk.green(' ← default') : '';
+            const current = m.id === entry.model ? chalk.green(' ← current') : '';
             return {
               name: `${m.name}  ${chalk.dim(meta)}${current}`,
               value: m.id,
@@ -866,11 +866,16 @@ export async function runLauncher(): Promise<void> {
             },
           ]);
 
-          // Set model via env var
-          if (entry.command === 'codex') {
-            env.OPENAI_MODEL = selectedModel;
-          } else {
-            env.ANTHROPIC_MODEL = selectedModel;
+          // Write model to settings.json (Claude Code reads env from there, not process env)
+          if (entry.configDir) {
+            const settingsPath = path.join(entry.configDir, 'settings.json');
+            try {
+              const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+              const modelKey = entry.command === 'codex' ? 'OPENAI_MODEL' : 'ANTHROPIC_MODEL';
+              settings.env = settings.env || {};
+              settings.env[modelKey] = selectedModel;
+              fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+            } catch {}
           }
         }
       }
