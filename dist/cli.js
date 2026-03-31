@@ -54,6 +54,7 @@ const completion_1 = require("./completion");
 const chatBackup_1 = require("./chatBackup");
 const reset_1 = require("./reset");
 const utilityCommands_1 = require("./utilityCommands");
+const shareCommands_1 = require("./shareCommands");
 const reset_2 = require("./reset");
 const init_1 = require("./init");
 const profileCreation_1 = require("./profileCreation");
@@ -1198,6 +1199,46 @@ program
     .action(async (oldName, newName) => {
     try {
         await (0, utilityCommands_1.runRename)(oldName, newName);
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
+});
+// Share command — selective symlink management
+program
+    .command('share [profile]')
+    .description('Share dirs/files from another profile via symlinks')
+    .option('--from <source>', 'Source profile to share from', 'claude')
+    .option('--all', 'Share all shareable items without prompting')
+    .option('--status', 'Show sharing status for all profiles')
+    .action(async (profile, opts) => {
+    try {
+        if (opts.status) {
+            await (0, shareCommands_1.runShareStatus)();
+            return;
+        }
+        if (!profile) {
+            console.error(chalk_1.default.red('\nProfile name required. Use --status to see all.\n'));
+            process.exit(1);
+        }
+        await (0, shareCommands_1.runShare)(profile, opts);
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
+});
+// Unshare command — remove shared symlinks
+program
+    .command('unshare <profile>')
+    .description('Remove shared symlinks and restore isolated dirs/files')
+    .option('--all', 'Remove all shared symlinks without prompting')
+    .action(async (profile, opts) => {
+    try {
+        await (0, shareCommands_1.runUnshare)(profile, opts);
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);

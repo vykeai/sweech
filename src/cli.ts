@@ -18,6 +18,7 @@ import { generateBashCompletion, generateZshCompletion, handleComplete } from '.
 import { confirmChatBackupBeforeRemoval, backupChatHistory } from './chatBackup';
 import { isDefaultCLIDirectory } from './reset';
 import { runDoctor, runPath, runTest, runEdit, runClone, runRename } from './utilityCommands';
+import { runShare, runUnshare, runShareStatus } from './shareCommands';
 import { runReset } from './reset';
 import { runInit, isFirstRun } from './init';
 import { createProfile } from './profileCreation';
@@ -1249,6 +1250,46 @@ program
   .action(async (oldName: string, newName: string) => {
     try {
       await runRename(oldName, newName);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
+      process.exit(1);
+    }
+  });
+
+// Share command — selective symlink management
+program
+  .command('share [profile]')
+  .description('Share dirs/files from another profile via symlinks')
+  .option('--from <source>', 'Source profile to share from', 'claude')
+  .option('--all', 'Share all shareable items without prompting')
+  .option('--status', 'Show sharing status for all profiles')
+  .action(async (profile: string | undefined, opts: { from?: string; all?: boolean; status?: boolean }) => {
+    try {
+      if (opts.status) {
+        await runShareStatus();
+        return;
+      }
+      if (!profile) {
+        console.error(chalk.red('\nProfile name required. Use --status to see all.\n'));
+        process.exit(1);
+      }
+      await runShare(profile, opts);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('Error:'), msg);
+      process.exit(1);
+    }
+  });
+
+// Unshare command — remove shared symlinks
+program
+  .command('unshare <profile>')
+  .description('Remove shared symlinks and restore isolated dirs/files')
+  .option('--all', 'Remove all shared symlinks without prompting')
+  .action(async (profile: string, opts: { all?: boolean }) => {
+    try {
+      await runUnshare(profile, opts);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(chalk.red('Error:'), msg);

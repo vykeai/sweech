@@ -13,12 +13,12 @@ const ALL_COMMANDS = [
   'doctor', 'path', 'test', 'edit', 'clone', 'rename',
   'backup-chats', 'serve', 'usage', 'reset', 'update',
   'sessions', 'sync', 'audit', 'team', 'plugins',
-  'peers', 'templates',
+  'peers', 'templates', 'share', 'unshare',
 ];
 
 /** Commands that accept a profile name as first argument */
 const PROFILE_COMMANDS = new Set([
-  'remove', 'rm', 'show', 'stats', 'test', 'edit', 'clone', 'rename', 'backup-chats', 'use', 'auth',
+  'remove', 'rm', 'show', 'stats', 'test', 'edit', 'clone', 'rename', 'backup-chats', 'use', 'auth', 'share', 'unshare',
 ]);
 
 /** Sort modes for `usage --sort` */
