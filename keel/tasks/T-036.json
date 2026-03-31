@@ -1,0 +1,12 @@
+{
+  "id": "T-036",
+  "title": "sweech query \u2014 CLI command to query profile details: model, effort levels, provider, capabilities",
+  "status": "todo",
+  "priority": "high",
+  "acceptanceCriteria": [
+    "sweech query <profile> shows: model, provider, effort levels, config dir",
+    "sweech query --json <profile> outputs machine-readable JSON",
+    "Works for all profiles including defaults (claude, codex)",
+    "loopy can call this to discover available models and effort levels"
+  ]
+}
