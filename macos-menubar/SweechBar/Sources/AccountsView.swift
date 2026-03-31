@@ -929,60 +929,62 @@ struct AccountCard: View {
                 .help("OAuth token is valid but expires soon")
             }
 
-            // Usage rows — "All models" first, specific model buckets after
-            if account.buckets.count > 1 {
-                let sorted = account.buckets.sorted { a, _ in a.label == "All models" }
-                let visible = showExtraBuckets ? sorted : sorted.filter { $0.label == "All models" }
-                ForEach(Array(visible.enumerated()), id: \.offset) { _, bucket in
-                    BucketCard(bucket: bucket)
-                }
-            } else {
-                Text("All models")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Sweech.Color.textPrimary.opacity(0.7))
-
-                // Column labels — USED / LEFT — aligned above the % columns
-                HStack(spacing: 6) {
-                    Color.clear.frame(width: 34, height: 1)
-                    Text("USED")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
-                        .frame(width: 46, alignment: .trailing)
-                    Color.clear.frame(height: 1) // flexible bar spacer
-                    Text("LEFT")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
-                        .frame(width: 46, alignment: .leading)
-                    Color.clear.frame(width: 76, height: 1)
-                }
-                UsageRow(
-                    label: "week",
-                    messages: account.messages7dDisplay,
-                    utilization: account.utilization7d,
-                    resetIn: account.reset7dRelative,
-                    resetsAt: account.live?.reset7dAt,
-                    capacityNote: nil
-                )
-                .fontWeight(.medium)
-                UsageRow(
-                    label: "5h",
-                    messages: account.messages5hDisplay,
-                    utilization: account.utilization5h,
-                    resetIn: account.reset5hRelative,
-                    resetsAt: account.live?.reset5hAt,
-                    capacityNote: account.minutesUntilFirstCapacity.map { $0 > 0 ? "capacity in \($0)m" : nil } ?? nil
-                )
-                .opacity(0.85)
-
-                if account.live?.isStale == true {
-                    HStack(spacing: 3) {
-                        Image(systemName: "clock.badge.exclamationmark")
-                            .font(.system(size: 9))
-                        Text("stale data · tap ↻ to retry")
-                            .font(.system(size: 9))
+            // Usage rows — hide for external providers (no real usage data)
+            if !account.isExternal {
+                if account.buckets.count > 1 {
+                    let sorted = account.buckets.sorted { a, _ in a.label == "All models" }
+                    let visible = showExtraBuckets ? sorted : sorted.filter { $0.label == "All models" }
+                    ForEach(Array(visible.enumerated()), id: \.offset) { _, bucket in
+                        BucketCard(bucket: bucket)
                     }
-                    .foregroundStyle(Sweech.Color.warning.opacity(0.7))
-                    .padding(.top, 2)
+                } else {
+                    Text("All models")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Sweech.Color.textPrimary.opacity(0.7))
+
+                    // Column labels — USED / LEFT — aligned above the % columns
+                    HStack(spacing: 6) {
+                        Color.clear.frame(width: 34, height: 1)
+                        Text("USED")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
+                            .frame(width: 46, alignment: .trailing)
+                        Color.clear.frame(height: 1) // flexible bar spacer
+                        Text("LEFT")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
+                            .frame(width: 46, alignment: .leading)
+                        Color.clear.frame(width: 76, height: 1)
+                    }
+                    UsageRow(
+                        label: "week",
+                        messages: account.messages7dDisplay,
+                        utilization: account.utilization7d,
+                        resetIn: account.reset7dRelative,
+                        resetsAt: account.live?.reset7dAt,
+                        capacityNote: nil
+                    )
+                    .fontWeight(.medium)
+                    UsageRow(
+                        label: "5h",
+                        messages: account.messages5hDisplay,
+                        utilization: account.utilization5h,
+                        resetIn: account.reset5hRelative,
+                        resetsAt: account.live?.reset5hAt,
+                        capacityNote: account.minutesUntilFirstCapacity.map { $0 > 0 ? "capacity in \($0)m" : nil } ?? nil
+                    )
+                    .opacity(0.85)
+
+                    if account.live?.isStale == true {
+                        HStack(spacing: 3) {
+                            Image(systemName: "clock.badge.exclamationmark")
+                                .font(.system(size: 9))
+                            Text("stale data · tap ↻ to retry")
+                                .font(.system(size: 9))
+                        }
+                        .foregroundStyle(Sweech.Color.warning.opacity(0.7))
+                        .padding(.top, 2)
+                    }
                 }
             }
 
@@ -1007,17 +1009,19 @@ struct AccountCard: View {
                     }
                 }
 
-                HStack(spacing: 4) {
-                    Image(systemName: "clock").font(.system(size: 11))
-                    Text(account.lastActiveRelative).font(.system(size: 12))
-                }
-                .help("Last time a request was made through this account")
+                if !account.isExternal {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock").font(.system(size: 11))
+                        Text(account.lastActiveRelative).font(.system(size: 12))
+                    }
+                    .help("Last time a request was made through this account")
 
-                HStack(spacing: 4) {
-                    Image(systemName: "text.bubble").font(.system(size: 11))
-                    Text("\(account.totalMessagesDisplay) total").font(.system(size: 12))
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.bubble").font(.system(size: 11))
+                        Text("\(account.totalMessagesDisplay) total").font(.system(size: 12))
+                    }
+                    .help("Total messages ever sent through this account")
                 }
-                .help("Total messages ever sent through this account")
 
                 Spacer()
 
