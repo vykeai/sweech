@@ -58,6 +58,7 @@ const shareCommands_1 = require("./shareCommands");
 const reset_2 = require("./reset");
 const init_1 = require("./init");
 const profileCreation_1 = require("./profileCreation");
+const profileManagement_1 = require("./profileManagement");
 const launcher_1 = require("./launcher");
 const subscriptions_1 = require("./subscriptions");
 const usageHistory_1 = require("./usageHistory");
@@ -353,7 +354,7 @@ program
             console.log(chalk_1.default.yellow('Cancelled'));
             return;
         }
-        config.removeProfile(commandName);
+        (0, profileManagement_1.removeManagedProfile)(commandName, { forceDependents: true }, config);
         console.log(chalk_1.default.green(`\n✓ Removed '${commandName}' successfully\n`));
     }
     catch (error) {
@@ -1198,11 +1199,144 @@ program
     .description('Rename an existing profile')
     .action(async (oldName, newName) => {
     try {
-        await (0, utilityCommands_1.runRename)(oldName, newName);
+        const result = await (0, profileManagement_1.renameManagedProfile)(oldName, newName);
+        console.log(chalk_1.default.bold(`\n✏️  Renaming ${oldName} → ${result.newName}...\n`));
+        console.log(chalk_1.default.green(`✓ Renamed ${oldName} → ${result.newName}\n`));
+        console.log(chalk_1.default.gray('  Command: ' + result.newName));
+        console.log(chalk_1.default.gray('  Config: ' + result.profileDir));
+        if (result.updatedDependents.length > 0) {
+            console.log(chalk_1.default.gray('  Updated shared profiles: ' + result.updatedDependents.join(', ')));
+        }
+        console.log();
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
+});
+const profileCmd = program
+    .command('profile')
+    .description('Non-interactive profile management');
+profileCmd
+    .command('providers')
+    .description('List createable providers for a CLI')
+    .requiredOption('--cli <type>', 'CLI type: claude or codex')
+    .option('--json', 'Output machine-readable JSON')
+    .action((opts) => {
+    try {
+        const providers = (0, profileManagement_1.getManageableProviders)(opts.cli);
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ providers }, null, 2) + '\n');
+            return;
+        }
+        console.log(chalk_1.default.bold(`\n  sweech profile providers · ${opts.cli}\n`));
+        providers.forEach(provider => {
+            const auth = provider.supportsOAuth ? 'oauth or api-key' : 'api-key';
+            console.log(`  ${chalk_1.default.white(provider.displayName)} ${chalk_1.default.dim(`(${auth})`)}`);
+            console.log(chalk_1.default.dim(`    ${provider.description}`));
+            console.log(chalk_1.default.dim(`    suggested: ${provider.defaultCommandName}`));
+        });
+        console.log();
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(chalk_1.default.red('Error:'), msg);
+        process.exit(1);
+    }
+});
+profileCmd
+    .command('create')
+    .description('Create a profile without interactive prompts')
+    .requiredOption('--cli <type>', 'CLI type: claude or codex')
+    .requiredOption('--provider <name>', 'Provider name')
+    .requiredOption('--name <command-name>', 'Profile command name')
+    .option('--auth <method>', 'Authentication method: oauth or api-key', 'oauth')
+    .option('--api-key <key>', 'API key for api-key auth')
+    .option('--shared-with <name>', 'Share memory/data with another profile or default account')
+    .option('--model <model>', 'Override the provider default model')
+    .option('--base-url <url>', 'Override the provider base URL')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (opts) => {
+    try {
+        const result = await (0, profileManagement_1.createManagedProfile)({
+            cliType: opts.cli,
+            provider: opts.provider,
+            commandName: opts.name,
+            authMethod: opts.auth,
+            apiKey: opts.apiKey,
+            sharedWith: opts.sharedWith,
+            model: opts.model,
+            baseUrl: opts.baseUrl,
+        });
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: true, profile: result }, null, 2) + '\n');
+            return;
+        }
+        console.log(chalk_1.default.green(`\n✓ Created '${result.commandName}' successfully\n`));
+        console.log(chalk_1.default.gray('  Config: ' + result.profileDir));
+        console.log();
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
+            console.error(msg);
+        }
+        else {
+            console.error(chalk_1.default.red('Error:'), msg);
+        }
+        process.exit(1);
+    }
+});
+profileCmd
+    .command('rename <old-name> <new-name>')
+    .description('Rename a profile without interactive prompts')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (oldName, newName, opts) => {
+    try {
+        const result = await (0, profileManagement_1.renameManagedProfile)(oldName, newName);
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: true, profile: result }, null, 2) + '\n');
+            return;
+        }
+        console.log(chalk_1.default.green(`\n✓ Renamed '${oldName}' to '${result.newName}'\n`));
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
+            console.error(msg);
+        }
+        else {
+            console.error(chalk_1.default.red('Error:'), msg);
+        }
+        process.exit(1);
+    }
+});
+profileCmd
+    .command('remove <name>')
+    .description('Remove a profile without interactive prompts')
+    .option('--force-dependents', 'Allow removal even if other profiles share this profile')
+    .option('--json', 'Output machine-readable JSON')
+    .action((name, opts) => {
+    try {
+        const result = (0, profileManagement_1.removeManagedProfile)(name, { forceDependents: opts.forceDependents });
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: true, profile: result }, null, 2) + '\n');
+            return;
+        }
+        console.log(chalk_1.default.green(`\n✓ Removed '${name}' successfully\n`));
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
+            console.error(msg);
+        }
+        else {
+            console.error(chalk_1.default.red('Error:'), msg);
+        }
         process.exit(1);
     }
 });

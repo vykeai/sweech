@@ -240,6 +240,7 @@ function getKnownAccounts(profiles) {
             cliType: profile.cliType,
             provider: profile.provider,
             isDefault: false,
+            sharedWith: profile.sharedWith,
         });
     }
     return accounts;
@@ -308,6 +309,8 @@ async function getAccountInfo(profiles, options = {}) {
             commandName: p.commandName,
             cliType,
             configDir,
+            isDefault: p.isDefault,
+            sharedWith: p.sharedWith,
             provider: p.provider,
             displayName: sub?.displayName,
             emailAddress: sub?.emailAddress,

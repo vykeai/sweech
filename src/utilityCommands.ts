@@ -14,6 +14,7 @@ import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SH
 import { getCLI } from './clis';
 import { getProvider, ModelInfo } from './providers';
 import { detectInstalledCLIs } from './cliDetection';
+import { renameManagedProfile } from './profileManagement';
 import { getAccountInfo, getKnownAccounts } from './subscriptions';
 
 const execFileAsync = promisify(execFile);
@@ -756,55 +757,13 @@ export async function runClone(sourceName: string, targetName: string): Promise<
  * sweetch rename - Rename a profile
  */
 export async function runRename(oldName: string, newName: string): Promise<void> {
-  const config = new ConfigManager();
-  const profiles = config.getProfiles();
-  const profile = profiles.find(p => p.commandName === oldName);
-
-  if (!profile) {
-    console.error(chalk.red(`\nProfile '${oldName}' not found\n`));
-    process.exit(1);
+  const result = await renameManagedProfile(oldName, newName);
+  console.log(chalk.bold(`\n✏️  Renaming ${oldName} → ${result.newName}...\n`));
+  console.log(chalk.green(`✓ Renamed ${oldName} → ${result.newName}\n`));
+  console.log(chalk.gray('  Command: ' + result.newName));
+  console.log(chalk.gray('  Config: ' + result.profileDir));
+  if (result.updatedDependents.length > 0) {
+    console.log(chalk.gray('  Updated shared profiles: ' + result.updatedDependents.join(', ')));
   }
-
-  if (profiles.some(p => p.commandName === newName)) {
-    console.error(chalk.red(`\nProfile '${newName}' already exists\n`));
-    process.exit(1);
-  }
-
-  console.log(chalk.bold(`\n✏️  Renaming ${oldName} → ${newName}...\n`));
-
-  // Remove old
-  const oldProfileDir = config.getProfileDir(oldName);
-  const oldWrapperPath = path.join(config.getBinDir(), oldName);
-
-  // Update profile
-  profile.name = newName;
-  profile.commandName = newName;
-
-  // Save updated profiles
-  const updatedProfiles = profiles.map(p =>
-    p.commandName === oldName ? profile : p
-  );
-  fs.writeFileSync(config.getConfigFile(), JSON.stringify(updatedProfiles, null, 2));
-
-  // Rename profile directory
-  const newProfileDir = config.getProfileDir(newName);
-  if (fs.existsSync(oldProfileDir)) {
-    fs.renameSync(oldProfileDir, newProfileDir);
-  }
-
-  // Remove old wrapper and create new one
-  if (fs.existsSync(oldWrapperPath)) {
-    fs.unlinkSync(oldWrapperPath);
-  }
-
-  const cli = getCLI(profile.cliType);
-  if (cli) {
-    config.createWrapperScript(newName, cli);
-  }
-
-  console.log(chalk.green(`✓ Renamed ${oldName} → ${newName}\n`));
-  console.log(chalk.gray('  Command: ' + newName));
-  console.log(chalk.gray('  Config: ' + newProfileDir));
   console.log();
 }
-

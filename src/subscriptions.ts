@@ -29,6 +29,8 @@ export interface AccountInfo {
   commandName: string
   cliType: string
   configDir: string
+  isDefault?: boolean
+  sharedWith?: string
 
   /** Provider key from sweech config (e.g. 'anthropic', 'dashscope', 'minimax') */
   provider?: string
@@ -80,6 +82,7 @@ export interface AccountRef {
   cliType?: string
   provider?: string
   isDefault?: boolean
+  sharedWith?: string
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────
@@ -298,7 +301,7 @@ function computeWeeklyReset(subscriptionCreatedAt: string): { weeklyResetAt: str
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function getKnownAccounts(
-  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; sharedWith?: string }>,
 ): AccountRef[] {
   const seen = new Set<string>()
   const accounts: AccountRef[] = []
@@ -324,6 +327,7 @@ export function getKnownAccounts(
       cliType: profile.cliType,
       provider: profile.provider,
       isDefault: false,
+      sharedWith: profile.sharedWith,
     })
   }
 
@@ -331,7 +335,7 @@ export function getKnownAccounts(
 }
 
 export async function getAccountInfo(
-  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; isDefault?: boolean; sharedWith?: string }>,
   options: { refresh?: boolean } = {},
 ): Promise<AccountInfo[]> {
   const allMeta = readMeta()
@@ -401,6 +405,8 @@ export async function getAccountInfo(
       commandName: p.commandName,
       cliType,
       configDir,
+      isDefault: p.isDefault,
+      sharedWith: p.sharedWith,
       provider: p.provider,
       displayName: sub?.displayName,
       emailAddress: sub?.emailAddress,

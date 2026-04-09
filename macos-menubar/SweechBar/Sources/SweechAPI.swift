@@ -40,6 +40,8 @@ struct SweechAccount: Codable, Identifiable {
     let name: String
     let commandName: String
     let cliType: String?
+    let isDefault: Bool?
+    let sharedWith: String?
     let provider: String?
     let meta: AccountMeta?
     let messages5h: Int?
@@ -62,7 +64,7 @@ struct SweechAccount: Codable, Identifiable {
     let sortRank: Int?
 
     private enum CodingKeys: String, CodingKey {
-        case name, commandName, cliType, provider, meta, messages5h, messages7d, totalMessages
+        case name, commandName, cliType, isDefault, sharedWith, provider, meta, messages5h, messages7d, totalMessages
         case minutesUntilFirstCapacity, hoursUntilWeeklyReset, oldest5hMessageAt
         case lastActive, needsReauth, live, tokenStatus, tokenRefreshedAt, tokenExpiresAt
         case precomputedSmartScore = "smartScore"
@@ -82,6 +84,7 @@ struct SweechAccount: Codable, Identifiable {
     var messages5hDisplay: Int { messages5h ?? 0 }
     var messages7dDisplay: Int { messages7d ?? 0 }
     var totalMessagesDisplay: Int { totalMessages ?? 0 }
+    var isDefaultAccount: Bool { isDefault ?? false }
 
     var utilization5h: Double { live?.utilization5h ?? 0 }
     var utilization7d: Double { live?.utilization7d ?? 0 }
@@ -205,6 +208,39 @@ struct UsageResponse: Codable {
     let accounts: [SweechAccount]
 }
 
+struct ManageableProvider: Codable, Identifiable {
+    var id: String { "\(cliType)-\(name)" }
+    let name: String
+    let displayName: String
+    let description: String
+    let cliType: String
+    let supportsOAuth: Bool
+    let requiresApiKey: Bool
+    let defaultCommandName: String
+}
+
+struct ProviderListResponse: Codable {
+    let providers: [ManageableProvider]
+}
+
+struct ManagedProfileResponse<T: Codable>: Codable {
+    let ok: Bool?
+    let error: String?
+    let profile: T?
+}
+
+struct ManagedProfileMutation: Codable {
+    let commandName: String?
+    let profileDir: String?
+    let cliType: String?
+    let provider: String?
+    let sharedWith: String?
+    let oldName: String?
+    let newName: String?
+    let updatedDependents: [String]?
+    let removedDependents: [String]?
+}
+
 struct SweechInfo: Codable {
     let version: String?
     let latestVersion: String?
@@ -221,6 +257,9 @@ class SweechService: ObservableObject {
     @Published var latestVersion: String?
     @Published var updateAvailable: Bool = false
     @Published var currentVersion: String?
+    @Published var manageableProviders: [ManageableProvider] = []
+    @Published var isMutatingProfiles = false
+    @Published var profileMutationError: String?
 
     private var previousStatuses: [String: String] = [:]  // commandName → liveStatus
     private var previousUtilizations: [String: Double] = [:]  // commandName → utilization7d
@@ -417,6 +456,97 @@ class SweechService: ObservableObject {
         }
     }
 
+    func loadProfileManagementOptions() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                let claudeData = try Self.dataFromSweech(["profile", "providers", "--cli", "claude", "--json"])
+                let codexData = try Self.dataFromSweech(["profile", "providers", "--cli", "codex", "--json"])
+                let claudeProviders = try JSONDecoder().decode(ProviderListResponse.self, from: claudeData).providers
+                let codexProviders = try JSONDecoder().decode(ProviderListResponse.self, from: codexData).providers
+
+                DispatchQueue.main.async {
+                    self?.manageableProviders = claudeProviders + codexProviders
+                    self?.profileMutationError = nil
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.profileMutationError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func createProfile(
+        cliType: String,
+        provider: String,
+        commandName: String,
+        authMethod: String,
+        apiKey: String?,
+        sharedWith: String?
+    ) {
+        mutateProfiles {
+            var args = [
+                "profile", "create",
+                "--cli", cliType,
+                "--provider", provider,
+                "--name", commandName,
+                "--auth", authMethod,
+                "--json"
+            ]
+            if let apiKey, !apiKey.isEmpty {
+                args += ["--api-key", apiKey]
+            }
+            if let sharedWith, !sharedWith.isEmpty {
+                args += ["--shared-with", sharedWith]
+            }
+
+            let data = try Self.dataFromSweech(args)
+            let response = try JSONDecoder().decode(ManagedProfileResponse<ManagedProfileMutation>.self, from: data)
+            if let error = response.error {
+                throw NSError(domain: "SweechBar", code: 1, userInfo: [NSLocalizedDescriptionKey: error])
+            }
+            if let name = response.profile?.commandName {
+                DispatchQueue.main.async {
+                    self.appendAccountOrder(name)
+                }
+            }
+        }
+    }
+
+    func renameProfile(oldName: String, newName: String) {
+        mutateProfiles {
+            let data = try Self.dataFromSweech(["profile", "rename", oldName, newName, "--json"])
+            let response = try JSONDecoder().decode(ManagedProfileResponse<ManagedProfileMutation>.self, from: data)
+            if let error = response.error {
+                throw NSError(domain: "SweechBar", code: 1, userInfo: [NSLocalizedDescriptionKey: error])
+            }
+            if let renamed = response.profile?.newName {
+                DispatchQueue.main.async {
+                    self.replaceAccountOrder(oldName: oldName, newName: renamed)
+                }
+            }
+        }
+    }
+
+    func removeProfile(commandName: String, forceDependents: Bool = false) {
+        mutateProfiles {
+            var args = ["profile", "remove", commandName, "--json"]
+            if forceDependents {
+                args.append("--force-dependents")
+            }
+
+            let data = try Self.dataFromSweech(args)
+            let response = try JSONDecoder().decode(ManagedProfileResponse<ManagedProfileMutation>.self, from: data)
+            if let error = response.error {
+                throw NSError(domain: "SweechBar", code: 1, userInfo: [NSLocalizedDescriptionKey: error])
+            }
+
+            DispatchQueue.main.async {
+                self.removeFromAccountOrder(commandName)
+            }
+        }
+    }
+
     func moveAccount(from source: IndexSet, to destination: Int) {
         accountOrder.move(fromOffsets: source, toOffset: destination)
         saveOrder()
@@ -505,11 +635,62 @@ class SweechService: ObservableObject {
         accountOrder = defaults.stringArray(forKey: "sweechAccountOrder") ?? []
     }
 
+    private func appendAccountOrder(_ commandName: String) {
+        if !accountOrder.contains(commandName) {
+            accountOrder.append(commandName)
+            saveOrder()
+        }
+    }
+
+    private func replaceAccountOrder(oldName: String, newName: String) {
+        accountOrder = accountOrder.map { $0 == oldName ? newName : $0 }
+        if !accountOrder.contains(newName) {
+            accountOrder.append(newName)
+        }
+        saveOrder()
+    }
+
+    private func removeFromAccountOrder(_ commandName: String) {
+        accountOrder.removeAll { $0 == commandName }
+        saveOrder()
+    }
+
     private func saveOrder() {
         UserDefaults.standard.set(accountOrder, forKey: "sweechAccountOrder")
     }
 
-    private static func runSweech(_ args: [String]) -> Result<Data, Error> {
+    private func mutateProfiles(_ work: @escaping () throws -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            DispatchQueue.main.async {
+                self?.isMutatingProfiles = true
+                self?.profileMutationError = nil
+            }
+
+            do {
+                try work()
+                DispatchQueue.main.async {
+                    self?.isMutatingProfiles = false
+                    self?.fetch()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self?.isMutatingProfiles = false
+                    self?.profileMutationError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private static func dataFromSweech(_ args: [String]) throws -> Data {
+        switch runSweech(args, captureStderr: true) {
+        case .success(let data):
+            return data
+        case .failure(let error):
+            throw error
+        }
+    }
+
+    private static func runSweech(_ args: [String], captureStderr: Bool = false) -> Result<Data, Error> {
         var env = ProcessInfo.processInfo.environment
         let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", NSString("~/bin").expandingTildeInPath]
         let currentPath = env["PATH"] ?? "/usr/bin:/bin"
@@ -522,15 +703,20 @@ class SweechService: ObservableObject {
 
         let pipe = Pipe()
         proc.standardOutput = pipe
-        proc.standardError = FileHandle.nullDevice
+        let stderrPipe = captureStderr ? Pipe() : nil
+        proc.standardError = stderrPipe ?? FileHandle.nullDevice
 
         do {
             try proc.run()
             proc.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let stderrData = stderrPipe?.fileHandleForReading.readDataToEndOfFile() ?? Data()
             if proc.terminationStatus != 0 {
+                let stderrText = String(data: stderrData, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let description = (stderrText?.isEmpty == false ? stderrText! : "sweech exited with code \(proc.terminationStatus)")
                 return .failure(NSError(domain: "SweechBar", code: Int(proc.terminationStatus),
-                    userInfo: [NSLocalizedDescriptionKey: "sweech exited with code \(proc.terminationStatus)"]))
+                    userInfo: [NSLocalizedDescriptionKey: description]))
             }
             return .success(data)
         } catch {

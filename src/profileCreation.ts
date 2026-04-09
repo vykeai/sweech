@@ -17,7 +17,8 @@ export async function createProfile(
   answers: AddProviderAnswers,
   provider: ProviderConfig,
   cli: CLIConfig,
-  config: ConfigManager
+  config: ConfigManager,
+  options: { quiet?: boolean } = {}
 ): Promise<void> {
   // Determine if we should use native CLI authentication (OAuth flow)
   // Use native auth when:
@@ -76,21 +77,23 @@ export async function createProfile(
   try { runHook('onProfileCreate', profile); } catch { /* plugin errors must not crash CLI */ }
 
   // Display success message
-  console.log(chalk.green('\n✓ Provider added successfully!\n'));
-  console.log(chalk.cyan('Command:'), chalk.bold(answers.commandName));
-  console.log(chalk.cyan('Provider:'), provider.displayName);
-  if (answers.sharedWith) {
-    console.log(chalk.cyan('Data:'), `Shared with ${chalk.bold(answers.sharedWith)} (projects, plans, tasks, commands, plugins, hooks, agents, teams, todos, mcp.json, CLAUDE.md)`);
-  }
+  if (!options.quiet) {
+    console.log(chalk.green('\n✓ Provider added successfully!\n'));
+    console.log(chalk.cyan('Command:'), chalk.bold(answers.commandName));
+    console.log(chalk.cyan('Provider:'), provider.displayName);
+    if (answers.sharedWith) {
+      console.log(chalk.cyan('Data:'), `Shared with ${chalk.bold(answers.sharedWith)} (projects, plans, tasks, commands, plugins, hooks, agents, teams, todos, mcp.json, CLAUDE.md)`);
+    }
 
-  if (useNativeAuth) {
-    console.log(chalk.cyan('Auth:'), 'OAuth (via CLI)');
-    console.log();
-    console.log(chalk.blue('ℹ'), chalk.gray(`Run ${chalk.cyan(answers.commandName)} to log in with your account`));
-  } else {
-    console.log(chalk.cyan('Model:'), provider.defaultModel);
-    if (answers.authMethod === 'oauth') {
-      console.log(chalk.cyan('Auth:'), 'OAuth Token');
+    if (useNativeAuth) {
+      console.log(chalk.cyan('Auth:'), 'OAuth (via CLI)');
+      console.log();
+      console.log(chalk.blue('ℹ'), chalk.gray(`Run ${chalk.cyan(answers.commandName)} to log in with your account`));
+    } else {
+      console.log(chalk.cyan('Model:'), provider.defaultModel);
+      if (answers.authMethod === 'oauth') {
+        console.log(chalk.cyan('Auth:'), 'OAuth Token');
+      }
     }
   }
 }

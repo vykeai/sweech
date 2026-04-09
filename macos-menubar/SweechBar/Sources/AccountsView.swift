@@ -94,6 +94,10 @@ struct AccountsView: View {
     @AppStorage("sweechAppearance") private var appearance: String = "system"  // "system", "light", "dark"
     @State private var showGuide    = false
     @State private var showSettings = false
+    @State private var showProfileManager = false
+    @State private var quickManageAccount: SweechAccount?
+    @State private var quickManageMode: ProfileQuickManageMode = .manage
+    @State private var removalCandidate: SweechAccount?
     @State private var miniExpanded = false
 
     // Raw account groups — by display group (claude / codex / external providers)
@@ -210,10 +214,27 @@ struct AccountsView: View {
             .onAppear {
                 service.fetch()
                 miniExpanded = false  // Reset mini expansion on each popover open
+                if ProcessInfo.processInfo.environment["SWEECHBAR_OPEN_PROFILE_MANAGER"] == "1" {
+                    showProfileManager = true
+                }
+            }
+
+            if let removalCandidate {
+                ProfileDeleteConfirmationOverlay(
+                    commandName: removalCandidate.commandName,
+                    message: "This removes the Sweech-managed profile from your current setup.",
+                    onCancel: { self.removalCandidate = nil },
+                    onDelete: {
+                        let commandName = removalCandidate.commandName
+                        self.removalCandidate = nil
+                        service.removeProfile(commandName: commandName, forceDependents: true)
+                    }
+                )
+                .zIndex(10)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(width: activeMiniMode ? 360 : (!hasMultipleGroups || !grouped ? 360 : columnCount >= 3 ? 980 : 680))
+        .frame(width: activeMiniMode ? 360 : (!hasMultipleGroups || !grouped ? 360 : groupedColumnCount >= 3 ? 980 : 680))
         .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .background(KeyboardShortcuts(
             onRefresh: { service.fetch() },
@@ -226,6 +247,21 @@ struct AccountsView: View {
             onToggleGuide: { showGuide.toggle() },
             onToggleSettings: { showSettings.toggle() }
         ))
+        .sheet(isPresented: $showProfileManager) {
+            ProfileManagerView(service: service)
+                .onAppear { service.loadProfileManagementOptions() }
+        }
+        .sheet(item: $quickManageAccount) { account in
+            ProfileQuickManageView(
+                service: service,
+                account: account,
+                initialMode: quickManageMode,
+                onOpenFullManager: {
+                    quickManageAccount = nil
+                    showProfileManager = true
+                }
+            )
+        }
     }
 
     // MARK: Layouts
@@ -237,33 +273,21 @@ struct AccountsView: View {
         )
     }
 
-    /// All display groups as (title, sorted accounts) — masonry input
-    private var allGroups: [(title: String, accounts: [SweechAccount])] {
-        var groups: [(String, [SweechAccount])] = []
-        if !rawClaude.isEmpty  { groups.append(("claude", sortedClaude)) }
-        if !rawCodex.isEmpty   { groups.append(("codex", sortedCodex)) }
-        for name in externalGroupNames {
-            let items = sortedForGroup(name)
-            if !items.isEmpty { groups.append((name, items)) }
+    private var groupedColumns: [[(title: String, accounts: [SweechAccount])]] {
+        GroupedColumnLayout.buildColumns(
+            claude: sortedClaude,
+            codex: sortedCodex,
+            externalGroups: externalGroupNames.map { name in
+                GroupedColumnSection(title: name, items: sortedForGroup(name))
+            }
+        )
+        .map { column in
+            column.map { (title: $0.title, accounts: $0.items) }
         }
-        return groups
     }
 
-    /// Number of masonry columns: 2 when ≤2 groups, 3 when more
-    private var columnCount: Int { allGroups.count > 2 ? 3 : 2 }
-
-    /// Distribute groups across N columns, greedy by weight
-    private var masonryColumns: [[( String, [SweechAccount])]] {
-        let n = columnCount
-        var cols = Array(repeating: [(String, [SweechAccount])](), count: n)
-        var weights = Array(repeating: 0, count: n)
-        for group in allGroups {
-            let weight = group.accounts.count + 1
-            let minIdx = weights.enumerated().min(by: { $0.element < $1.element })!.offset
-            cols[minIdx].append(group)
-            weights[minIdx] += weight
-        }
-        return cols
+    private var groupedColumnCount: Int {
+        groupedColumns.count
     }
 
     private var groupedLayout: some View {
@@ -271,7 +295,7 @@ struct AccountsView: View {
             VStack(spacing: 10) {
                 summaryHeader
 
-                let cols = masonryColumns
+                let cols = groupedColumns
                 HStack(alignment: .top, spacing: 10) {
                     ForEach(Array(cols.enumerated()), id: \.offset) { _, column in
                         if !column.isEmpty {
@@ -281,7 +305,7 @@ struct AccountsView: View {
                                         columnHeader(title: group.0, count: group.1.count)
                                             .help("\(group.1.count) \(group.0) account(s) — sorted by \(sortMode) mode")
                                         ForEach(Array(group.1.enumerated()), id: \.element.id) { i, account in
-                                            AccountCard(account: account, tier: tier(for: account, rank: i))
+                                            accountCard(account, rank: i)
                                                 .transition(cardTransition)
                                         }
                                     }
@@ -304,10 +328,10 @@ struct AccountsView: View {
             VStack(spacing: 8) {
                 summaryHeader
                 ForEach(Array(sortedAll.enumerated()), id: \.element.id) { i, account in
-                    AccountCard(
-                        account: account,
-                        tier: tier(for: account, rank: i),
-                        onMoveUp:   sortMode == "manual" && i > 0
+                    accountCard(
+                        account,
+                        rank: i,
+                        onMoveUp: sortMode == "manual" && i > 0
                             ? { service.moveAccount(from: IndexSet(integer: i), to: i - 1) } : nil,
                         onMoveDown: sortMode == "manual" && i < sortedAll.count - 1
                             ? { service.moveAccount(from: IndexSet(integer: i), to: i + 2) } : nil
@@ -318,6 +342,31 @@ struct AccountsView: View {
             .padding(12)
             .animation(Sweech.Animation.medium, value: sortMode)
         }
+    }
+
+    private func accountCard(
+        _ account: SweechAccount,
+        rank: Int,
+        onMoveUp: (() -> Void)? = nil,
+        onMoveDown: (() -> Void)? = nil
+    ) -> some View {
+        AccountCard(
+            account: account,
+            tier: tier(for: account, rank: rank),
+            onManage: {
+                quickManageMode = .manage
+                quickManageAccount = account
+            },
+            onRenameProfile: account.isDefaultAccount ? nil : {
+                quickManageMode = .rename
+                quickManageAccount = account
+            },
+            onRemoveProfile: account.isDefaultAccount ? nil : {
+                removalCandidate = account
+            },
+            onMoveUp: onMoveUp,
+            onMoveDown: onMoveDown
+        )
     }
 
     // MARK: Mini Layout (T-024)
@@ -557,6 +606,12 @@ struct AccountsView: View {
                     Divider()
                 }
 
+                Button { showProfileManager = true } label: {
+                    Label("Manage Profiles", systemImage: "person.crop.circle.badge.plus")
+                }
+
+                Divider()
+
                 Menu {
                     Button { appearance = "system" } label: {
                         Label(appearance == "system" ? "✓ System" : "System", systemImage: "circle.lefthalf.filled")
@@ -595,7 +650,7 @@ struct AccountsView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Sort, group, and app settings")
+            .help("Sort, profile, and app settings")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -789,6 +844,9 @@ struct GuideView: View {
 struct AccountCard: View {
     let account: SweechAccount
     var tier: CardTier = .normal
+    var onManage: (() -> Void)? = nil
+    var onRenameProfile: (() -> Void)? = nil
+    var onRemoveProfile: (() -> Void)? = nil
     var onMoveUp:   (() -> Void)? = nil
     var onMoveDown: (() -> Void)? = nil
 
@@ -877,6 +935,43 @@ struct AccountCard: View {
 
                 Spacer()
                 StatusPill(account: account)
+
+                if onManage != nil || onRenameProfile != nil || onRemoveProfile != nil {
+                    Menu {
+                        if let onManage {
+                            Button(action: onManage) {
+                                Label("Manage Profile", systemImage: "ellipsis.circle")
+                            }
+                        }
+
+                        if let onRenameProfile {
+                            Button(action: onRenameProfile) {
+                                Label("Rename Profile", systemImage: "pencil")
+                            }
+                        }
+
+                        Button {
+                            SweechService.launchInTerminal(commandName: "sweech auth \(account.commandName)")
+                        } label: {
+                            Label("Re-authenticate", systemImage: "key")
+                        }
+
+                        if let onRemoveProfile {
+                            Divider()
+                            Button(role: .destructive, action: onRemoveProfile) {
+                                Label("Delete Profile", systemImage: "trash")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.65))
+                            .frame(width: 20, height: 20)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("Profile actions for \(account.commandName)")
+                }
             }
 
             // Reauth warning
@@ -1097,6 +1192,672 @@ struct AccountCard: View {
         let session = "\(Int(account.utilization5h * 100))% session used"
         let tierLabel = tier.badgeLabel.map { ", \($0)" } ?? ""
         return "\(account.name), \(status)\(tierLabel), \(weekly), \(session)"
+    }
+}
+
+enum ProfileQuickManageMode {
+    case manage
+    case rename
+}
+
+struct ProfileQuickManageView: View {
+    @ObservedObject var service: SweechService
+    let account: SweechAccount
+    let initialMode: ProfileQuickManageMode
+    let onOpenFullManager: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var renameDraft = ""
+    @State private var showDeleteConfirm = false
+
+    private var canRename: Bool {
+        !account.isDefaultAccount &&
+        !service.isMutatingProfiles &&
+        !renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        renameDraft.trimmingCharacters(in: .whitespacesAndNewlines) != account.commandName
+    }
+
+    var body: some View {
+        ZStack {
+            VStack(spacing: 0) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Manage \(account.commandName)")
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(Sweech.Color.textPrimary)
+                        Text("Profile actions are available directly from this card.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Sweech.Color.textMuted)
+                    }
+
+                    Spacer()
+
+                    Button("Cancel") { dismiss() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Sweech.Color.textMuted)
+                }
+                .padding(16)
+
+                Divider().overlay(Sweech.Color.core.opacity(0.1))
+
+                VStack(alignment: .leading, spacing: 16) {
+                    if let error = service.profileMutationError, !error.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Sweech.Color.warning)
+                            Text(error)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .background(Sweech.Color.warning.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    managerSection(title: "PROFILE") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            quickRow(label: "Name", value: account.commandName)
+                            quickRow(label: "CLI", value: account.cliType ?? "claude")
+                            quickRow(label: "Provider", value: account.providerLabel)
+                            if let sharedWith = account.sharedWith {
+                                quickRow(label: "Sharing", value: sharedWith)
+                            }
+                            if account.isDefaultAccount {
+                                Text("Default profiles are protected from rename and delete.")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Sweech.Color.textMuted)
+                            }
+                        }
+                    }
+
+                    managerSection(title: "ACTIONS") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if !account.isDefaultAccount {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("Rename")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(Sweech.Color.textPrimary)
+                                    HStack(spacing: 8) {
+                                        TextField("New profile name", text: Binding(
+                                            get: { renameDraft },
+                                            set: { renameDraft = $0.lowercased() }
+                                        ))
+                                        .textFieldStyle(.roundedBorder)
+
+                                        Button("Rename") {
+                                            service.renameProfile(
+                                                oldName: account.commandName,
+                                                newName: renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            )
+                                        }
+                                        .buttonStyle(.borderedProminent)
+                                        .controlSize(.small)
+                                        .disabled(!canRename)
+                                    }
+                                }
+                            }
+
+                            HStack(spacing: 8) {
+                                Button {
+                                    SweechService.launchInTerminal(commandName: "sweech auth \(account.commandName)")
+                                } label: {
+                                    Label("Re-authenticate", systemImage: "key")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+
+                                Button {
+                                    dismiss()
+                                    onOpenFullManager()
+                                } label: {
+                                    Label("Open Full Manager", systemImage: "slider.horizontal.3")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+
+                            if !account.isDefaultAccount {
+                                Button(role: .destructive) {
+                                    showDeleteConfirm = true
+                                } label: {
+                                    Label("Delete Profile", systemImage: "trash")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Done") { dismiss() }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                }
+                .padding(16)
+            }
+
+            if showDeleteConfirm {
+                ProfileDeleteConfirmationOverlay(
+                    commandName: account.commandName,
+                    message: "This removes the Sweech-managed profile from your current setup.",
+                    onCancel: { showDeleteConfirm = false },
+                    onDelete: {
+                        showDeleteConfirm = false
+                        service.removeProfile(commandName: account.commandName, forceDependents: true)
+                        dismiss()
+                    }
+                )
+                .zIndex(10)
+            }
+        }
+        .frame(width: 420)
+        .background(Sweech.Color.surface)
+        .onAppear {
+            renameDraft = account.commandName
+            if initialMode == .rename {
+                renameDraft = account.commandName
+            }
+        }
+    }
+
+    private func quickRow(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Sweech.Color.textMuted)
+                .frame(width: 60, alignment: .leading)
+            Text(value)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(Sweech.Color.textPrimary)
+        }
+    }
+
+    private func managerSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Sweech.Color.textMuted.opacity(0.7))
+                .kerning(0.8)
+            content()
+        }
+        .padding(12)
+        .background(Sweech.Color.surfaceHigh)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct ProfileDeleteConfirmationOverlay: View {
+    let commandName: String
+    let message: String
+    let onCancel: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.black.opacity(0.45))
+                .ignoresSafeArea()
+                .onTapGesture(perform: onCancel)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Delete \(commandName)?")
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(Sweech.Color.textPrimary)
+
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Sweech.Color.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Sweech.Color.textPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Sweech.Color.surfaceHigh)
+                        .clipShape(Capsule())
+
+                    Button("Delete", action: onDelete)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Sweech.Color.danger)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Sweech.Color.danger.opacity(0.18))
+                        .clipShape(Capsule())
+                }
+            }
+            .padding(18)
+            .frame(width: 340)
+            .background(Sweech.Color.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .strokeBorder(Sweech.Color.textMuted.opacity(0.18), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.25), radius: 24, x: 0, y: 16)
+        }
+    }
+}
+
+// MARK: - Profile Manager
+
+struct ProfileManagerView: View {
+    @ObservedObject var service: SweechService
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedCLI = "claude"
+    @State private var selectedProvider = ""
+    @State private var commandName = ""
+    @State private var authMethod = "oauth"
+    @State private var apiKey = ""
+    @State private var sharedEnabled = false
+    @State private var sharedWith = ""
+    @State private var renameDrafts: [String: String] = [:]
+    @State private var removalCandidate: SweechAccount?
+    @State private var lastSuggestedName = ""
+
+    private var filteredProviders: [ManageableProvider] {
+        service.manageableProviders.filter { $0.cliType == selectedCLI }
+    }
+
+    private var selectedProviderInfo: ManageableProvider? {
+        filteredProviders.first { $0.name == selectedProvider } ?? filteredProviders.first
+    }
+
+    private var shareTargets: [SweechAccount] {
+        service.accounts
+            .filter { ($0.cliType ?? "claude") == selectedCLI }
+            .sorted {
+                if $0.isDefaultAccount != $1.isDefaultAccount {
+                    return $0.isDefaultAccount && !$1.isDefaultAccount
+                }
+                return $0.commandName < $1.commandName
+            }
+    }
+
+    private var managedAccounts: [SweechAccount] {
+        service.sortedAccounts
+            .sorted {
+                if $0.isDefaultAccount != $1.isDefaultAccount {
+                    return $0.isDefaultAccount && !$1.isDefaultAccount
+                }
+                return $0.commandName < $1.commandName
+            }
+    }
+
+    private var canCreate: Bool {
+        guard let provider = selectedProviderInfo else { return false }
+        if service.isMutatingProfiles { return false }
+        if commandName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+        if !provider.supportsOAuth && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+        if authMethod == "api-key" && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return false
+        }
+        return true
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Profile Management")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(Sweech.Color.textPrimary)
+                    Text("Create, rename, and remove Sweech profiles without leaving the menu bar.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Sweech.Color.textMuted)
+                }
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Sweech.Color.textMuted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Sweech.Color.surfaceHigh)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+
+            Divider().overlay(Sweech.Color.core.opacity(0.1))
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let error = service.profileMutationError, !error.isEmpty {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Sweech.Color.warning)
+                            Text(error)
+                                .font(.system(size: 11))
+                                .foregroundStyle(Sweech.Color.textPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(12)
+                        .background(Sweech.Color.warning.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+
+                    managerSection(title: "ADD PROFILE") {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Picker("CLI", selection: $selectedCLI) {
+                                Text("Claude").tag("claude")
+                                Text("Codex").tag("codex")
+                            }
+                            .pickerStyle(.segmented)
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Provider")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Sweech.Color.textPrimary)
+
+                                Picker("Provider", selection: $selectedProvider) {
+                                    ForEach(filteredProviders) { provider in
+                                        Text(provider.displayName).tag(provider.name)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .labelsHidden()
+
+                                if let provider = selectedProviderInfo {
+                                    Text(provider.description)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Sweech.Color.textMuted)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Command Name")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(Sweech.Color.textPrimary)
+                                TextField("claude-work", text: Binding(
+                                    get: { commandName },
+                                    set: { commandName = $0.lowercased() }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                if let provider = selectedProviderInfo {
+                                    Button("Use suggested: \(provider.defaultCommandName)") {
+                                        commandName = provider.defaultCommandName
+                                        lastSuggestedName = provider.defaultCommandName
+                                    }
+                                    .buttonStyle(.plain)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(Sweech.Color.accent)
+                                }
+                            }
+
+                            if let provider = selectedProviderInfo, provider.supportsOAuth {
+                                Picker("Authentication", selection: $authMethod) {
+                                    Text("OAuth").tag("oauth")
+                                    Text("API Key").tag("api-key")
+                                }
+                                .pickerStyle(.segmented)
+                            }
+
+                            if authMethod == "api-key" || selectedProviderInfo?.supportsOAuth == false {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("API Key")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(Sweech.Color.textPrimary)
+                                    SecureField("Paste provider API key", text: $apiKey)
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                            }
+
+                            Toggle(isOn: $sharedEnabled) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Share memory and data")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundStyle(Sweech.Color.textPrimary)
+                                    Text("Symlink plans, tasks, commands, and transcripts to another profile. Auth stays separate.")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(Sweech.Color.textMuted)
+                                }
+                            }
+                            .toggleStyle(.switch)
+                            .tint(Sweech.Color.core)
+
+                            if sharedEnabled && !shareTargets.isEmpty {
+                                Picker("Share With", selection: $sharedWith) {
+                                    ForEach(shareTargets) { account in
+                                        Text(shareTargetLabel(account)).tag(account.commandName)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+
+                            if authMethod == "oauth", selectedProviderInfo?.supportsOAuth == true {
+                                Text("OAuth profiles are created now and finish sign-in the first time you launch them.")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Sweech.Color.textMuted)
+                            }
+
+                            HStack(spacing: 8) {
+                                Button {
+                                    dismiss()
+                                } label: {
+                                    Text("Cancel")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Sweech.Color.textPrimary)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 7)
+                                        .background(Sweech.Color.surfaceHigh)
+                                        .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+
+                                Spacer()
+
+                                Button {
+                                    service.createProfile(
+                                        cliType: selectedCLI,
+                                        provider: selectedProvider,
+                                        commandName: commandName.trimmingCharacters(in: .whitespacesAndNewlines),
+                                        authMethod: authMethod,
+                                        apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                                        sharedWith: sharedEnabled ? sharedWith : nil
+                                    )
+                                    apiKey = ""
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        if service.isMutatingProfiles {
+                                            ProgressView()
+                                                .progressViewStyle(.circular)
+                                                .scaleEffect(0.7)
+                                        } else {
+                                            Image(systemName: "plus.circle.fill")
+                                                .font(.system(size: 11))
+                                        }
+                                        Text("Create Profile")
+                                            .font(.system(size: 11, weight: .semibold))
+                                    }
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 7)
+                                    .background(canCreate ? Sweech.Color.core : Sweech.Color.textMuted.opacity(0.3))
+                                    .clipShape(Capsule())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(!canCreate)
+                            }
+                        }
+                    }
+
+                    managerSection(title: "EXISTING PROFILES") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(managedAccounts) { account in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        Text(account.commandName)
+                                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                            .foregroundStyle(Sweech.Color.textPrimary)
+
+                                        if account.isDefaultAccount {
+                                            managerBadge("default", color: Sweech.Color.textMuted)
+                                        } else if let cliType = account.cliType {
+                                            managerBadge(cliType, color: Sweech.Color.accent)
+                                        }
+
+                                        if account.provider != nil {
+                                            managerBadge(account.providerLabel, color: Sweech.Color.core)
+                                        }
+
+                                        Spacer()
+
+                                        if !account.isDefaultAccount {
+                                            Button(role: .destructive) {
+                                                removalCandidate = account
+                                            } label: {
+                                                Image(systemName: "trash")
+                                                    .font(.system(size: 11, weight: .semibold))
+                                                    .foregroundStyle(Sweech.Color.danger)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .disabled(service.isMutatingProfiles)
+                                        }
+                                    }
+
+                                    if let sharedWith = account.sharedWith {
+                                        Text("Shares data with \(sharedWith)")
+                                            .font(.system(size: 10))
+                                            .foregroundStyle(Sweech.Color.textMuted)
+                                    }
+
+                                    if !account.isDefaultAccount {
+                                        HStack(spacing: 8) {
+                                            TextField("New name", text: renameBinding(for: account))
+                                                .textFieldStyle(.roundedBorder)
+
+                                            Button("Rename") {
+                                                service.renameProfile(
+                                                    oldName: account.commandName,
+                                                    newName: renameDrafts[account.commandName, default: account.commandName]
+                                                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                                                )
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .controlSize(.small)
+                                            .disabled(service.isMutatingProfiles || renameDrafts[account.commandName, default: account.commandName]
+                                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                                                .isEmpty || renameDrafts[account.commandName, default: account.commandName]
+                                                .trimmingCharacters(in: .whitespacesAndNewlines) == account.commandName)
+                                        }
+                                    }
+                                }
+                                .padding(10)
+                                .background(Sweech.Color.background.opacity(0.45))
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .frame(width: 520, height: 680)
+        .background(Sweech.Color.surface)
+        .onAppear { syncFormState(resetName: true) }
+        .onChange(of: service.manageableProviders.count) { _ in
+            syncFormState(resetName: true)
+        }
+        .onChange(of: selectedCLI) { _ in
+            authMethod = "oauth"
+            apiKey = ""
+            syncFormState(resetName: true)
+        }
+        .onChange(of: selectedProvider) { _ in
+            syncFormState(resetName: commandName.isEmpty || commandName == lastSuggestedName)
+        }
+        .onChange(of: sharedEnabled) { enabled in
+            if enabled, sharedWith.isEmpty {
+                sharedWith = shareTargets.first?.commandName ?? ""
+            }
+        }
+        .alert(item: $removalCandidate) { account in
+            Alert(
+                title: Text("Remove \(account.commandName)?"),
+                message: Text("This deletes the Sweech-managed profile. Any profiles sharing this profile will need to be relinked manually."),
+                primaryButton: .destructive(Text("Remove")) {
+                    service.removeProfile(commandName: account.commandName, forceDependents: true)
+                },
+                secondaryButton: .cancel()
+            )
+        }
+    }
+
+    private func renameBinding(for account: SweechAccount) -> Binding<String> {
+        Binding(
+            get: { renameDrafts[account.commandName, default: account.commandName] },
+            set: { renameDrafts[account.commandName] = $0.lowercased() }
+        )
+    }
+
+    private func syncFormState(resetName: Bool) {
+        guard !filteredProviders.isEmpty else { return }
+
+        if !filteredProviders.contains(where: { $0.name == selectedProvider }) {
+            selectedProvider = filteredProviders[0].name
+        }
+
+        guard let provider = selectedProviderInfo else { return }
+
+        if !provider.supportsOAuth {
+            authMethod = "api-key"
+        } else if authMethod != "api-key" {
+            authMethod = "oauth"
+        }
+
+        if resetName || commandName.isEmpty {
+            commandName = provider.defaultCommandName
+        }
+        lastSuggestedName = provider.defaultCommandName
+
+        if sharedWith.isEmpty || !shareTargets.contains(where: { $0.commandName == sharedWith }) {
+            sharedWith = shareTargets.first?.commandName ?? ""
+        }
+    }
+
+    private func shareTargetLabel(_ account: SweechAccount) -> String {
+        if account.isDefaultAccount {
+            return "\(account.commandName) (default)"
+        }
+        return account.commandName
+    }
+
+    private func managerSection<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(Sweech.Color.textMuted.opacity(0.7))
+                .kerning(0.8)
+            content()
+        }
+        .padding(12)
+        .background(Sweech.Color.surfaceHigh)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func managerBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .clipShape(Capsule())
     }
 }
 

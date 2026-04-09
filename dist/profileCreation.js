@@ -13,7 +13,7 @@ const plugins_1 = require("./plugins");
 /**
  * Create a new profile with OAuth or API key authentication
  */
-async function createProfile(answers, provider, cli, config) {
+async function createProfile(answers, provider, cli, config, options = {}) {
     // Determine if we should use native CLI authentication (OAuth flow)
     // Use native auth when:
     // - User selected OAuth AND
@@ -60,21 +60,23 @@ async function createProfile(answers, provider, cli, config) {
     }
     catch { /* plugin errors must not crash CLI */ }
     // Display success message
-    console.log(chalk_1.default.green('\n✓ Provider added successfully!\n'));
-    console.log(chalk_1.default.cyan('Command:'), chalk_1.default.bold(answers.commandName));
-    console.log(chalk_1.default.cyan('Provider:'), provider.displayName);
-    if (answers.sharedWith) {
-        console.log(chalk_1.default.cyan('Data:'), `Shared with ${chalk_1.default.bold(answers.sharedWith)} (projects, plans, tasks, commands, plugins, hooks, agents, teams, todos, mcp.json, CLAUDE.md)`);
-    }
-    if (useNativeAuth) {
-        console.log(chalk_1.default.cyan('Auth:'), 'OAuth (via CLI)');
-        console.log();
-        console.log(chalk_1.default.blue('ℹ'), chalk_1.default.gray(`Run ${chalk_1.default.cyan(answers.commandName)} to log in with your account`));
-    }
-    else {
-        console.log(chalk_1.default.cyan('Model:'), provider.defaultModel);
-        if (answers.authMethod === 'oauth') {
-            console.log(chalk_1.default.cyan('Auth:'), 'OAuth Token');
+    if (!options.quiet) {
+        console.log(chalk_1.default.green('\n✓ Provider added successfully!\n'));
+        console.log(chalk_1.default.cyan('Command:'), chalk_1.default.bold(answers.commandName));
+        console.log(chalk_1.default.cyan('Provider:'), provider.displayName);
+        if (answers.sharedWith) {
+            console.log(chalk_1.default.cyan('Data:'), `Shared with ${chalk_1.default.bold(answers.sharedWith)} (projects, plans, tasks, commands, plugins, hooks, agents, teams, todos, mcp.json, CLAUDE.md)`);
+        }
+        if (useNativeAuth) {
+            console.log(chalk_1.default.cyan('Auth:'), 'OAuth (via CLI)');
+            console.log();
+            console.log(chalk_1.default.blue('ℹ'), chalk_1.default.gray(`Run ${chalk_1.default.cyan(answers.commandName)} to log in with your account`));
+        }
+        else {
+            console.log(chalk_1.default.cyan('Model:'), provider.defaultModel);
+            if (answers.authMethod === 'oauth') {
+                console.log(chalk_1.default.cyan('Auth:'), 'OAuth Token');
+            }
         }
     }
 }
