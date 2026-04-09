@@ -1,6 +1,7 @@
+<!-- version: 1ad16d6e1613 | generated: 2026-03-27 -->
 # sweech
 
-AI CLI switcher — isolated profile dirs per provider. 380+ tests, AES-256 backups. TypeScript + Commander.
+
 
 ---
 
@@ -14,6 +15,11 @@ mkdir -p "$PROJECT_SCREENSHOT_DIR"
 ```
 
 Do not keep proof or review screenshots in `/tmp`.
+**Prove deliverables with screenshots — never verbal claims.**
+For every change, gather fresh proof and explicitly analyse the result before
+calling the work done. "It looks correct" is not proof. A screenshot IS proof.
+When the change affects UI, capture a fresh screenshot from the actual
+simulator/device and review it visually before marking the task done.
 
 ---
 
@@ -38,57 +44,65 @@ ROADMAP.md, or similar tracking files.**
 
 ---
 
-## Execution — Cloudy
+## Autonomous Execution
 
-Use **cloudy** ([vykeai/cloudy](https://github.com/vykeai/cloudy)) for multi-task orchestration.
+This project uses **AUTONOMOUS_EXECUTION.md** for continuous execution rules.
+If the file exists, read it — it contains the full execution mandate, quality
+gates (13 gates), task loop, and conventions.
 
+If it doesn't exist yet, run:
 ```bash
-cloudy plan --spec ./docs/spec.md          # decompose spec → task graph
-cloudy run --execution-model sonnet        # execute all tasks
-cloudy check                               # re-validate completed tasks
-cloudy retry task-3                        # retry a failed task
-cloudy rollback task-2                     # revert git to pre-task checkpoint
+keel render:install-profiles   # install shared templates
+keel render:auto               # generate AUTONOMOUS_EXECUTION.md
 ```
 
-**From inside Claude Code sessions** — unset nesting vars:
-```bash
-env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT cloudy run --spec spec.md
-```
+**Key files for execution:**
+- `AUTONOMOUS_EXECUTION.md` — the execution playbook (generated, do not edit)
+- `ONE_OFF.md` — ad-hoc tasks (human adds, agent executes + cleans up)
+- `keel/execution.yaml` — build commands, variants, platforms
 
-**Keel integration**: `cloudy run --keel-slug {project} --keel-task T-001` auto-updates keel task status.
+## Required Reading Order
+
+When landing in this repo, read in order before starting work:
+
+1. `AGENTS.md` (this file) — project identity, conventions
+2. `AUTONOMOUS_EXECUTION.md` — how to execute without stopping
+3. `views/roadmap.md` — current wave state
+4. `views/tasks.md` — all tasks with dependencies
+
+Interpretation:
+- `AGENTS.md` = what the project is and how to work in it
+- `AUTONOMOUS_EXECUTION.md` = the execution loop, quality gates, all rules
+- `views/` = generated current state, never edit directly
 
 ---
 
 ## Skills — Runecode
 
-**runecode** ([vykeai/runecode](https://github.com/vykeai/runecode)) provides 15+ reusable Claude Code skills:
+**runecode** ([vykeai/runecode](https://github.com/vykeai/runecode)) provides reusable Claude Code skills:
 
 | Skill | Purpose |
 |-------|---------|
-| `/standup` | Generate daily standup from git history |
-| `/pr-description` | Write PR description from current diff |
 | `/test-write` | Write tests for changed code |
 | `/review-self` | Review your own code before committing |
 | `/security-audit` | Audit changes for vulnerabilities |
-| `/tech-debt` | Identify technical debt |
 | `/dead-code` | Find unused exports and unreachable code |
-| `/changelog` | Generate changelog from commits |
+| `/tech-debt` | Identify technical debt |
+| `/pr-description` | Write PR description from current diff |
 
-**Project health**: `runecode doctor` checks setup completeness. `runecode audit` scores and auto-fixes gaps.
+**Project health**: `runecode doctor` checks setup. `runecode audit` scores and auto-fixes gaps.
 
 ---
 
 ## CLI Rules — Non-Negotiable
 
-These apply to every CLI in the vykeai ecosystem:
-
-1. **Exit codes matter**: `0` = success, non-zero = any failure — always exit with the correct code
+1. **Exit codes matter**: `0` = success, non-zero = any failure
 2. **Stream separation**: errors and diagnostics to stderr, program output to stdout
 3. **`--help` and `--version`** must work without side effects (no network calls, no file writes)
 4. **Graceful failure**: missing files, bad flags, no TTY — all need clear, actionable error messages
 5. **No interactive prompts in non-TTY** — detect `process.stdout.isTTY` and degrade gracefully
 6. **Idempotent where possible** — running the same command twice should not produce side effects
-7. **Consistent flag style**: `--long-flag` with `-s` short aliases. Never positional-only for important args
+7. **Consistent flag style**: `--long-flag` with `-s` short aliases
 
 ---
 
@@ -97,7 +111,7 @@ These apply to every CLI in the vykeai ecosystem:
 - Keep command behavior stable — downstream tools and CI scripts depend on flag names and output format
 - Treat generated output (dist/, build/) as disposable artifacts — never hand-edit
 - Backwards compatibility matters more than local convenience
-- When launching subprocesses, strip environment variables that could cause nesting issues (e.g., `CLAUDECODE`)
+- When launching subprocesses, strip environment variables that could cause nesting issues (`CLAUDECODE`)
 
 ---
 
@@ -106,7 +120,6 @@ These apply to every CLI in the vykeai ecosystem:
 - CLI is infrastructure — avoid coupling it to one product or workflow
 - Command names, flags, and output formats are public contracts
 - Changes to public contracts require coordinated downstream updates
-- If this CLI is used inside other agent sessions, keep nesting/env-stripping behavior intact
 
 ---
 
@@ -118,27 +131,55 @@ npm test        # or: bun test, pytest, ./tests/test_*.sh
 
 - Test all commands with expected input/output
 - Test error paths exit non-zero
-- Test `--help` output is accurate and complete
-- Test across target platforms if path separators differ (macOS/Linux/Windows)
+- Test `--help` output is accurate
 
 ---
 
 ## Git Conventions
 
-- Commit after every meaningful chunk of work
-- Concise messages: `feat:`, `fix:`, `refactor:`
+- Commit after every meaningful chunk of work — do not accumulate changes
+- Concise messages in imperative mood: `feat:`, `fix:`, `refactor:`, `docs:`
 - Never commit `.env`, credentials, or secrets
+- Progressive commits: after each file in multi-file tasks, not all at the end
+
+---
+
+## Critical Agent Safety Rules
+
+### NEVER delete prototype UI to "make honest"
+When a task says "make honest", "make real", or "align to launch scope", the correct approach is:
+- Wire real APIs behind the existing UI
+- Keep stub/mock data as offline fallback
+- Replace hardcoded data with API calls that fall back to mocks on failure
+
+The WRONG approach (which has caused significant code loss) is:
+- Deleting rich UI and replacing with empty placeholders
+- Stripping navigation items because they use mock data
+- Removing features because they aren't "real" yet
+- Interpreting "launch scope" as "delete everything except the minimum"
+
+**If a screen has mock data, the mock data IS the design spec.** The agent's job is to make it real, not delete it.
+
+### NEVER strip navigation items during scope narrowing
+When narrowing scope:
+- Comment out or feature-flag — never delete
+- All routes, tabs, and menu items must remain in code (can be gated behind feature flags)
+- If a feature is "not in launch scope", hide it behind a flag, don't remove it
+
+### Evidence of past failures
+- FitKind: 25 "make honest" commits deleted 3,314 lines of prototype UI across 13 files
+- Univiirse: "launch scope" commits stripped Social tab, Worlds, Codex, Leaderboard, and Library smart sections
+- Both cases required restoration from worktrees or git history
 
 ---
 
 ## Do Not
 
+- Blame "pre-existing" issues — if the build is broken, fix it. If tests fail, fix them. Your end state must be building, tested software.
 - Break existing command-line interface without explicit instruction
 - Mix user-facing output and diagnostics on the same stream
 - Hardcode machine-specific paths, ports, or hostnames when config exists
-- Add dependencies without justification — CLIs should be lean
 - Use `console.log` for errors — use `console.error` or stderr
-- Skip testing error paths and edge cases
 
 ---
 
@@ -151,4 +192,3 @@ npm test        # or: bun test, pytest, ./tests/test_*.sh
 - [ ] `/review-self` passed — no obvious issues in diff
 - [ ] Changes committed (frequent, progressive — not batched at end)
 - [ ] Keel task updated: `keel_update_task { status: "done" }` + `keel_add_note`
-- [ ] If using cloudy: all three validation phases pass
