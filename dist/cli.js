@@ -788,6 +788,66 @@ program
         process.exit(1);
     }
 });
+// Launch command — non-interactive launch with flags
+program
+    .command('launch <command-name>')
+    .alias('run')
+    .description('Launch a profile directly (no TUI). Flags: --yolo, --resume, --no-tmux')
+    .option('-y, --yolo', 'Skip permission prompts (--dangerously-skip-permissions / equivalent)')
+    .option('-r, --resume', 'Resume last session (--continue / equivalent)')
+    .option('--no-tmux', 'Bypass tmux even if tmux is available')
+    .allowUnknownOption(true)
+    .action((commandName, opts, cmd) => {
+    const config = new config_1.ConfigManager();
+    const profiles = config.getProfiles();
+    const aliasManager = new aliases_1.AliasManager();
+    const resolvedName = aliasManager.resolveAlias(commandName);
+    const profile = profiles.find(p => p.commandName === resolvedName);
+    const cliConfig = profile ? (0, clis_1.getCLI)(profile.cliType) : (0, clis_1.getCLI)(resolvedName);
+    if (!profile && !cliConfig) {
+        console.error(chalk_1.default.red(`Profile '${commandName}' not found`));
+        process.exit(1);
+    }
+    const cli = cliConfig;
+    const profileDir = profile
+        ? config.getProfileDir(profile.commandName)
+        : path.join(require('os').homedir(), `.${cli.name}`);
+    // Build arg list: sweech flags expand to CLI-native flags, rest pass through
+    const knownFlags = new Set(['--yolo', '-y', '--resume', '-r', '--no-tmux', '--tmux']);
+    const passthroughExtras = cmd.args.slice(1).filter((a) => !knownFlags.has(a));
+    const launchArgs = [];
+    if (opts.yolo)
+        launchArgs.push(cli.yoloFlag || '--dangerously-skip-permissions');
+    if (opts.resume)
+        launchArgs.push(cli.resumeFlag || '--continue');
+    launchArgs.push(...passthroughExtras);
+    const env = { ...process.env, [cli.configDirEnvVar]: profileDir };
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    const useTmux = opts.tmux !== false; // --no-tmux sets tmux=false via Commander
+    if ((0, tmux_1.isTmuxAvailable)() && useTmux) {
+        const status = (0, tmux_1.launchInTmux)({
+            command: cli.command,
+            args: launchArgs,
+            configDirEnvVar: cli.configDirEnvVar,
+            configDir: profileDir,
+            profileName: profile?.commandName ?? cli.command,
+            resumeArgs: (cli.resumeFlag || '--continue').split(' ').filter(Boolean),
+            hasResume: !!opts.resume,
+        });
+        process.exit(status);
+    }
+    try {
+        const { execFileSync } = require('child_process');
+        execFileSync(cli.command, launchArgs, { env, stdio: 'inherit' });
+    }
+    catch (error) {
+        if (error && typeof error === 'object' && 'status' in error) {
+            process.exit(error.status ?? 1);
+        }
+        process.exit(1);
+    }
+});
 // Auth command — re-authenticate a profile
 program
     .command('auth <command-name>')

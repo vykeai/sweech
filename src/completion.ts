@@ -9,7 +9,7 @@ import { AliasManager } from './aliases';
 const ALL_COMMANDS = [
   'init', 'add', 'list', 'ls', 'remove', 'rm', 'info',
   'update-wrappers', 'backup', 'backup-claude', 'restore',
-  'stats', 'show', 'use', 'auth', 'alias', 'discover', 'completion',
+  'stats', 'show', 'use', 'launch', 'run', 'auth', 'alias', 'discover', 'completion',
   'doctor', 'path', 'test', 'edit', 'clone', 'rename',
   'backup-chats', 'serve', 'usage', 'reset', 'update',
   'sessions', 'sync', 'audit', 'team', 'plugins',
@@ -18,7 +18,7 @@ const ALL_COMMANDS = [
 
 /** Commands that accept a profile name as first argument */
 const PROFILE_COMMANDS = new Set([
-  'remove', 'rm', 'show', 'stats', 'test', 'edit', 'clone', 'rename', 'backup-chats', 'use', 'auth', 'share', 'unshare',
+  'remove', 'rm', 'show', 'stats', 'test', 'edit', 'clone', 'rename', 'backup-chats', 'use', 'launch', 'run', 'auth', 'share', 'unshare',
 ]);
 
 /** Sort modes for `usage --sort` */
