@@ -70,7 +70,7 @@ function loadLastState() {
         }
     }
     catch { }
-    return { selectedIndex: 0, yolo: false, resume: false, usage: false, sortMode: 'smart', grouped: true };
+    return { selectedIndex: 0, yolo: false, resume: false, usage: false, useTmux: true, sortMode: 'smart', grouped: true };
 }
 function saveState(state) {
     try {
@@ -339,6 +339,8 @@ function render(entries, state, usageLoad = 'idle') {
         body.push(`  ${k('Enter')}${d('Launch selected profile')}`);
         body.push(`  ${k('y')}${d('Toggle yolo mode (skip permissions)')}`);
         body.push(`  ${k('r')}${d('Toggle resume (continue last session)')}`);
+        if ((0, tmux_1.isTmuxAvailable)())
+            body.push(`  ${k('t')}${d('Toggle tmux (launch in named tmux session)')}`);
         body.push(`  ${k('u')}${d('Force-refresh usage data')}`);
         body.push(`  ${k('s')}${d('Cycle sort mode (smart → status → manual)')}`);
         body.push(`  ${k('g')}${d('Toggle grouping (by provider / flat)')}`);
@@ -499,19 +501,22 @@ function render(entries, state, usageLoad = 'idle') {
     footer.push(chalk_1.default.dim('  ─────────────────────────────────────────────────'));
     const yoloBox = state.yolo ? chalk_1.default.red('[✓]') : chalk_1.default.gray('[ ]');
     const resumeBox = state.resume ? chalk_1.default.green('[✓]') : chalk_1.default.gray('[ ]');
+    const tmuxBox = state.useTmux ? chalk_1.default.blue('[✓]') : chalk_1.default.gray('[ ]');
     const usageLabel = usageLoad === 'loading'
         ? chalk_1.default.yellow('refreshing...')
         : state.usage
             ? chalk_1.default.yellow('usage')
             : chalk_1.default.dim('usage');
-    footer.push(`  ${yoloBox} ${chalk_1.default.white('yolo')} ${chalk_1.default.dim('(y)')}    ${resumeBox} ${chalk_1.default.white('resume')} ${chalk_1.default.dim('(r)')}    ${usageLabel} ${chalk_1.default.dim('(u)')}`);
+    const tmuxPart = (0, tmux_1.isTmuxAvailable)() ? `    ${tmuxBox} ${chalk_1.default.white('tmux')} ${chalk_1.default.dim('(t)')}` : '';
+    footer.push(`  ${yoloBox} ${chalk_1.default.white('yolo')} ${chalk_1.default.dim('(y)')}    ${resumeBox} ${chalk_1.default.white('resume')} ${chalk_1.default.dim('(r)')}${tmuxPart}    ${usageLabel} ${chalk_1.default.dim('(u)')}`);
     const selEntry = entries[state.selectedIndex];
     const preview = buildCommandPreview(selEntry, state);
     footer.push(chalk_1.default.white('  → ') + chalk_1.default.bold.cyan(preview));
     const key = (k) => chalk_1.default.bold.white(k);
     const desc = (d) => chalk_1.default.dim(d);
+    const tmuxHint = (0, tmux_1.isTmuxAvailable)() ? `   ${key('t')} ${desc('tmux')}` : '';
     footer.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
-    footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}   ${key('h')} ${desc('history')}`);
+    footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}   ${key('h')} ${desc('history')}${tmuxHint}`);
     return { header, body, footer, entryStartLines };
 }
 /** Build a placeholder entry from static data only — no I/O, instant. */
@@ -729,6 +734,10 @@ async function runLauncher() {
                 state.resume = !state.resume;
                 draw();
             }
+            else if ((str === 't' || str === 'T') && (0, tmux_1.isTmuxAvailable)()) {
+                state.useTmux = !state.useTmux;
+                draw();
+            }
             else if (str === 'u' || str === 'U') {
                 // Force-refresh live usage data (bypass cache)
                 state.usage = true;
@@ -873,7 +882,7 @@ async function runLauncher() {
             delete env.CLAUDECODE;
             delete env.CLAUDE_CODE_ENTRYPOINT;
             const cli = (0, clis_1.getCLI)(entry.command === 'codex' ? 'codex' : 'claude');
-            if ((0, tmux_1.isTmuxAvailable)()) {
+            if ((0, tmux_1.isTmuxAvailable)() && state.useTmux) {
                 const status = (0, tmux_1.launchInTmux)({
                     command: entry.command,
                     args: launchArgs,

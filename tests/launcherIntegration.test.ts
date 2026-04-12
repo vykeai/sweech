@@ -98,6 +98,7 @@ function makeState(overrides: Partial<LaunchState> = {}): LaunchState {
     yolo: false,
     resume: false,
     usage: false,
+    useTmux: true,
     sortMode: 'smart',
     grouped: true,
     ...overrides,

@@ -57,6 +57,7 @@ export interface LaunchState {
   yolo: boolean;
   resume: boolean;
   usage: boolean;
+  useTmux: boolean;
   sortMode: 'smart' | 'status' | 'manual';
   grouped: boolean;
   extraBuckets?: boolean;
@@ -74,7 +75,7 @@ function loadLastState(): LaunchState {
       return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
     }
   } catch {}
-  return { selectedIndex: 0, yolo: false, resume: false, usage: false, sortMode: 'smart', grouped: true };
+  return { selectedIndex: 0, yolo: false, resume: false, usage: false, useTmux: true, sortMode: 'smart', grouped: true };
 }
 
 function saveState(state: LaunchState): void {
@@ -347,6 +348,7 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
     body.push(`  ${k('Enter')}${d('Launch selected profile')}`);
     body.push(`  ${k('y')}${d('Toggle yolo mode (skip permissions)')}`);
     body.push(`  ${k('r')}${d('Toggle resume (continue last session)')}`);
+    if (isTmuxAvailable()) body.push(`  ${k('t')}${d('Toggle tmux (launch in named tmux session)')}`);
     body.push(`  ${k('u')}${d('Force-refresh usage data')}`);
     body.push(`  ${k('s')}${d('Cycle sort mode (smart → status → manual)')}`);
     body.push(`  ${k('g')}${d('Toggle grouping (by provider / flat)')}`);
@@ -510,12 +512,14 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
 
   const yoloBox = state.yolo ? chalk.red('[✓]') : chalk.gray('[ ]');
   const resumeBox = state.resume ? chalk.green('[✓]') : chalk.gray('[ ]');
+  const tmuxBox = state.useTmux ? chalk.blue('[✓]') : chalk.gray('[ ]');
   const usageLabel = usageLoad === 'loading'
     ? chalk.yellow('refreshing...')
     : state.usage
       ? chalk.yellow('usage')
       : chalk.dim('usage');
-  footer.push(`  ${yoloBox} ${chalk.white('yolo')} ${chalk.dim('(y)')}    ${resumeBox} ${chalk.white('resume')} ${chalk.dim('(r)')}    ${usageLabel} ${chalk.dim('(u)')}`);
+  const tmuxPart = isTmuxAvailable() ? `    ${tmuxBox} ${chalk.white('tmux')} ${chalk.dim('(t)')}` : '';
+  footer.push(`  ${yoloBox} ${chalk.white('yolo')} ${chalk.dim('(y)')}    ${resumeBox} ${chalk.white('resume')} ${chalk.dim('(r)')}${tmuxPart}    ${usageLabel} ${chalk.dim('(u)')}`);
 
   const selEntry = entries[state.selectedIndex];
   const preview = buildCommandPreview(selEntry, state);
@@ -523,8 +527,9 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
 
   const key = (k: string) => chalk.bold.white(k);
   const desc = (d: string) => chalk.dim(d);
+  const tmuxHint = isTmuxAvailable() ? `   ${key('t')} ${desc('tmux')}` : '';
   footer.push(`  ${key('↑↓')} ${desc('select')}   ${key('y')} ${desc('yolo')}   ${key('r')} ${desc('resume')}   ${key('u')} ${desc('usage')}   ${key('s')} ${desc('sort')}   ${key('g')} ${desc('group')}   ${key('⏎')} ${desc('launch')}   ${key('q')} ${desc('quit')}`);
-  footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}   ${key('h')} ${desc('history')}`);
+  footer.push(`  ${key('a')}  ${desc('add')}      ${key('e')} ${desc('edit')}     ${key('m')} ${desc('models')}   ${key('h')} ${desc('history')}${tmuxHint}`);
 
   return { header, body, footer, entryStartLines };
 }
@@ -767,6 +772,8 @@ export async function runLauncher(): Promise<void> {
         state.yolo = !state.yolo; draw();
       } else if (str === 'r' || str === 'R') {
         state.resume = !state.resume; draw();
+      } else if ((str === 't' || str === 'T') && isTmuxAvailable()) {
+        state.useTmux = !state.useTmux; draw();
       } else if (str === 'u' || str === 'U') {
         // Force-refresh live usage data (bypass cache)
         state.usage = true;
@@ -902,7 +909,7 @@ export async function runLauncher(): Promise<void> {
 
       const cli = getCLI(entry.command === 'codex' ? 'codex' : 'claude');
 
-      if (isTmuxAvailable()) {
+      if (isTmuxAvailable() && state.useTmux) {
         const status = launchInTmux({
           command: entry.command,
           args: launchArgs,
