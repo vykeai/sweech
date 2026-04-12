@@ -25,6 +25,7 @@ import { createProfile } from './profileCreation';
 import { createManagedProfile, getManageableProviders, removeManagedProfile, renameManagedProfile } from './profileManagement';
 import { runLauncher } from './launcher';
 import { isTmuxAvailable, launchInTmux } from './tmux';
+import { buildLaunchArgs, shouldUseTmux, SWEECH_LAUNCH_FLAGS } from './launchCommand';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { startSweechFedServerWithShutdown } from './fedServer';
@@ -840,19 +841,14 @@ program
       : path.join(require('os').homedir(), `.${cli.name}`);
 
     // Build arg list: sweech flags expand to CLI-native flags, rest pass through
-    const knownFlags = new Set(['--yolo', '-y', '--resume', '-r', '--no-tmux', '--tmux']);
-    const passthroughExtras = cmd.args.slice(1).filter((a: string) => !knownFlags.has(a));
-    const launchArgs: string[] = [];
-    if (opts.yolo) launchArgs.push(cli.yoloFlag || '--dangerously-skip-permissions');
-    if (opts.resume) launchArgs.push(cli.resumeFlag || '--continue');
-    launchArgs.push(...passthroughExtras);
+    const passthroughExtras = cmd.args.slice(1).filter((a: string) => !SWEECH_LAUNCH_FLAGS.has(a));
+    const launchArgs = buildLaunchArgs(opts, cli, passthroughExtras);
 
     const env = { ...process.env, [cli.configDirEnvVar]: profileDir };
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
 
-    const useTmux = opts.tmux !== false; // --no-tmux sets tmux=false via Commander
-    if (isTmuxAvailable() && useTmux) {
+    if (shouldUseTmux(isTmuxAvailable(), opts)) {
       const status = launchInTmux({
         command: cli.command,
         args: launchArgs,

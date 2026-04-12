@@ -61,6 +61,7 @@ const profileCreation_1 = require("./profileCreation");
 const profileManagement_1 = require("./profileManagement");
 const launcher_1 = require("./launcher");
 const tmux_1 = require("./tmux");
+const launchCommand_1 = require("./launchCommand");
 const subscriptions_1 = require("./subscriptions");
 const usageHistory_1 = require("./usageHistory");
 const fedServer_1 = require("./fedServer");
@@ -813,19 +814,12 @@ program
         ? config.getProfileDir(profile.commandName)
         : path.join(require('os').homedir(), `.${cli.name}`);
     // Build arg list: sweech flags expand to CLI-native flags, rest pass through
-    const knownFlags = new Set(['--yolo', '-y', '--resume', '-r', '--no-tmux', '--tmux']);
-    const passthroughExtras = cmd.args.slice(1).filter((a) => !knownFlags.has(a));
-    const launchArgs = [];
-    if (opts.yolo)
-        launchArgs.push(cli.yoloFlag || '--dangerously-skip-permissions');
-    if (opts.resume)
-        launchArgs.push(cli.resumeFlag || '--continue');
-    launchArgs.push(...passthroughExtras);
+    const passthroughExtras = cmd.args.slice(1).filter((a) => !launchCommand_1.SWEECH_LAUNCH_FLAGS.has(a));
+    const launchArgs = (0, launchCommand_1.buildLaunchArgs)(opts, cli, passthroughExtras);
     const env = { ...process.env, [cli.configDirEnvVar]: profileDir };
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
-    const useTmux = opts.tmux !== false; // --no-tmux sets tmux=false via Commander
-    if ((0, tmux_1.isTmuxAvailable)() && useTmux) {
+    if ((0, launchCommand_1.shouldUseTmux)((0, tmux_1.isTmuxAvailable)(), opts)) {
         const status = (0, tmux_1.launchInTmux)({
             command: cli.command,
             args: launchArgs,
