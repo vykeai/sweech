@@ -60,6 +60,7 @@ const init_1 = require("./init");
 const profileCreation_1 = require("./profileCreation");
 const profileManagement_1 = require("./profileManagement");
 const launcher_1 = require("./launcher");
+const tmux_1 = require("./tmux");
 const subscriptions_1 = require("./subscriptions");
 const usageHistory_1 = require("./usageHistory");
 const fedServer_1 = require("./fedServer");
@@ -766,6 +767,16 @@ program
     // Strip nesting vars per AGENTS.md
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
+    if ((0, tmux_1.isTmuxAvailable)()) {
+        const status = (0, tmux_1.launchInTmux)({
+            command: cli.command,
+            args: passthroughArgs,
+            configDirEnvVar: cli.configDirEnvVar,
+            configDir: profileDir,
+            profileName: profile?.commandName ?? cli.command,
+        });
+        process.exit(status);
+    }
     try {
         const { execFileSync } = require('child_process');
         execFileSync(cli.command, passthroughArgs, { env, stdio: 'inherit' });

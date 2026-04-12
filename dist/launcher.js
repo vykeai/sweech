@@ -61,6 +61,7 @@ const subscriptions_1 = require("./subscriptions");
 const usageHistory_1 = require("./usageHistory");
 const events_1 = require("./events");
 const plugins_1 = require("./plugins");
+const tmux_1 = require("./tmux");
 const STATE_FILE = path.join(os.homedir(), '.sweech', 'last-launch.json');
 function loadLastState() {
     try {
@@ -871,6 +872,19 @@ async function runLauncher() {
             // Strip nesting vars per AGENTS.md
             delete env.CLAUDECODE;
             delete env.CLAUDE_CODE_ENTRYPOINT;
+            const cli = (0, clis_1.getCLI)(entry.command === 'codex' ? 'codex' : 'claude');
+            if ((0, tmux_1.isTmuxAvailable)()) {
+                const status = (0, tmux_1.launchInTmux)({
+                    command: entry.command,
+                    args: launchArgs,
+                    configDirEnvVar: cli?.configDirEnvVar,
+                    configDir: entry.configDir,
+                    profileName: entry.name,
+                    resumeArgs: entry.resumeFlag.split(' ').filter(Boolean),
+                    hasResume: state.resume,
+                });
+                process.exit(status);
+            }
             const { spawnSync } = require('child_process');
             const result = spawnSync(entry.command, launchArgs, { env, stdio: 'inherit' });
             // If resume failed (no conversation to continue), fall back to a fresh session

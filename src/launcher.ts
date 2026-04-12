@@ -15,6 +15,7 @@ import { getAccountInfo, type AccountInfo } from './subscriptions';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { sweechEvents } from './events';
 import { runHook } from './plugins';
+import { isTmuxAvailable, launchInTmux } from './tmux';
 
 interface UsageBar {
   label: string;
@@ -898,6 +899,21 @@ export async function runLauncher(): Promise<void> {
       // Strip nesting vars per AGENTS.md
       delete env.CLAUDECODE;
       delete env.CLAUDE_CODE_ENTRYPOINT;
+
+      const cli = getCLI(entry.command === 'codex' ? 'codex' : 'claude');
+
+      if (isTmuxAvailable()) {
+        const status = launchInTmux({
+          command: entry.command,
+          args: launchArgs,
+          configDirEnvVar: cli?.configDirEnvVar,
+          configDir: entry.configDir,
+          profileName: entry.name,
+          resumeArgs: entry.resumeFlag.split(' ').filter(Boolean),
+          hasResume: state.resume,
+        });
+        process.exit(status);
+      }
 
       const { spawnSync } = require('child_process');
       const result = spawnSync(entry.command, launchArgs, { env, stdio: 'inherit' });

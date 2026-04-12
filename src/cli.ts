@@ -24,6 +24,7 @@ import { runInit, isFirstRun } from './init';
 import { createProfile } from './profileCreation';
 import { createManagedProfile, getManageableProviders, removeManagedProfile, renameManagedProfile } from './profileManagement';
 import { runLauncher } from './launcher';
+import { isTmuxAvailable, launchInTmux } from './tmux';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { startSweechFedServerWithShutdown } from './fedServer';
@@ -788,6 +789,17 @@ program
     // Strip nesting vars per AGENTS.md
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
+
+    if (isTmuxAvailable()) {
+      const status = launchInTmux({
+        command: cli.command,
+        args: passthroughArgs,
+        configDirEnvVar: cli.configDirEnvVar,
+        configDir: profileDir,
+        profileName: profile?.commandName ?? cli.command,
+      });
+      process.exit(status);
+    }
 
     try {
       const { execFileSync } = require('child_process');
