@@ -252,3 +252,27 @@ If you see more than 2–3 open worktrees, stop and clean up stale ones first. A
 ### 6. Temporary/dirt branches
 
 `temp-dirt-*` branches created as safety snapshots must be deleted within the same session once the real branch is verified. Never push `temp-dirt-*` branches to the remote as a permanent artifact.
+
+---
+
+## Docker Container Naming
+
+When creating Docker containers (docker-compose, Dockerfile, scripts), **always prefix container names with the project name** so they are identifiable in Docker Desktop and `docker ps`.
+
+**Format:** `<project-name>-<variant>-local`
+
+Examples:
+- `univiirse-api-local`, `univiirse-db-local`, `univiirse-redis-local`
+- `fitkind-api-local`, `fitkind-worker-local`
+- `den-web-local`, `den-postgres-local`
+
+In `docker-compose.yml`, set `container_name:` explicitly on every service:
+```yaml
+services:
+  api:
+    container_name: myproject-api-local
+  db:
+    container_name: myproject-db-local
+```
+
+**Why:** Generic names like `api`, `infra`, `tmp`, `e2e` are unidentifiable when multiple projects run simultaneously. The `-local` suffix distinguishes dev containers from production.
