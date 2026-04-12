@@ -178,5 +178,65 @@ describe('liveUsage cache', () => {
       // No stale cache → returns null
       expect(result).toBeNull();
     });
+
+    test('getLiveUsage infers 2x limits for eligible codex plans when provider promo is absent', async () => {
+      const cached = makeCacheData({
+        planType: 'pro',
+        promotion: undefined,
+        capturedAt: Date.now() - 60_000,
+      });
+      const store = { '/mock/.codex-home': cached };
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(store));
+
+      const result = await getLiveUsage('/mock/.codex-home', 'codex');
+      expect(result).toBeDefined();
+      expect(result!.promotion).toEqual(expect.objectContaining({
+        label: '2x Limits',
+        multiplier: 2,
+        source: 'inferred',
+      }));
+    });
+
+    test('getLiveUsage preserves provider promo when codex already returns one', async () => {
+      const cached = makeCacheData({
+        planType: 'pro',
+        promotion: { label: '+250 Credits', source: 'provider' as const },
+        capturedAt: Date.now() - 60_000,
+      });
+      const store = { '/mock/.codex-home': cached };
+      mockFs.readFileSync.mockReturnValue(JSON.stringify(store));
+
+      const result = await getLiveUsage('/mock/.codex-home', 'codex');
+      expect(result).toBeDefined();
+      expect(result!.promotion).toEqual(expect.objectContaining({
+        label: '+250 Credits',
+        source: 'provider',
+      }));
+    });
+
+    test('getLiveUsage applies manual promo override ahead of inferred codex promo', async () => {
+      const cached = makeCacheData({
+        planType: 'pro',
+        promotion: undefined,
+        capturedAt: Date.now() - 60_000,
+      });
+      const store = { '/mock/.codex-home': cached };
+      mockFs.readFileSync.mockImplementation((value: fs.PathOrFileDescriptor) => {
+        const file = String(value);
+        if (file.includes('rate-limit-cache.json')) return JSON.stringify(store);
+        if (file.includes('promotions.json')) {
+          return JSON.stringify([{ cliType: 'codex', label: 'Spring Promo', multiplier: 3 }]);
+        }
+        return '{}';
+      });
+
+      const result = await getLiveUsage('/mock/.codex-home', 'codex');
+      expect(result).toBeDefined();
+      expect(result!.promotion).toEqual(expect.objectContaining({
+        label: 'Spring Promo',
+        multiplier: 3,
+        source: 'manual',
+      }));
+    });
   });
 });

@@ -295,10 +295,10 @@ async function fetchRateLimitHeaders(accessToken) {
         if (fallbackPct && fallbackPct > 0) {
             const multiplier = 1 + fallbackPct; // 0.5 fallback = 1.5x, 1.0 fallback = 2x
             const label = multiplier >= 2 ? `${multiplier}x Tokens` : `+${Math.round(fallbackPct * 100)}% Bonus`;
-            promotion = { label, multiplier };
+            promotion = { label, multiplier, source: 'provider' };
         }
         if (overageStatus === 'allowed') {
-            promotion = promotion || { label: 'Overage Active', multiplier: undefined };
+            promotion = promotion || { label: 'Overage Active', multiplier: undefined, source: 'provider' };
         }
         return {
             buckets,
@@ -379,10 +379,10 @@ async function fetchCodexRateLimits(configDir) {
                         let codexPromo;
                         for (const [, limit] of Object.entries(byId)) {
                             if (limit.credits?.unlimited) {
-                                codexPromo = { label: 'Unlimited', multiplier: undefined };
+                                codexPromo = { label: 'Unlimited', multiplier: undefined, source: 'provider' };
                             }
                             else if (limit.credits?.hasCredits && Number(limit.credits.balance) > 0) {
-                                codexPromo = { label: `+${limit.credits.balance} Credits`, multiplier: undefined };
+                                codexPromo = { label: `+${limit.credits.balance} Credits`, multiplier: undefined, source: 'provider' };
                             }
                         }
                         resolve({
@@ -427,16 +427,39 @@ function getActivePromotion(cliType) {
             label: p.label,
             multiplier: p.multiplier,
             expiresAt: p.expiresAt ? new Date(p.expiresAt).getTime() : undefined,
+            source: 'manual',
         };
     }
     return undefined;
 }
+function inferPromotion(data, cliType) {
+    if (cliType !== 'codex')
+        return undefined;
+    const planType = data.planType?.toLowerCase();
+    if (!planType)
+        return undefined;
+    // Verified April 10, 2026 from OpenAI Help:
+    // Plus, Pro, Business, Enterprise, and Edu currently receive 2x Codex rate limits.
+    const eligiblePlans = new Set(['plus', 'pro', 'business', 'enterprise', 'edu', 'education']);
+    if (!eligiblePlans.has(planType))
+        return undefined;
+    return {
+        label: '2x Limits',
+        multiplier: 2,
+        source: 'inferred',
+    };
+}
 function applyPromotion(data, cliType) {
     // Manual config overrides API-detected; API-detected is the fallback
     const manual = getActivePromotion(cliType);
-    if (manual)
+    if (manual) {
         data.promotion = manual;
-    // data.promotion may already be set from API headers (auto-detected)
+        return data;
+    }
+    // data.promotion may already be set from provider responses
+    if (!data.promotion) {
+        data.promotion = inferPromotion(data, cliType);
+    }
     return data;
 }
 // ── Public API ────────────────────────────────────────────────────────────────
