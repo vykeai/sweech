@@ -1,7 +1,7 @@
 {
   "id": "T-037",
   "title": "sweech models \u2014 list all available models per provider with effort levels and pricing",
-  "status": "todo",
+  "status": "done",
   "priority": "medium",
   "acceptanceCriteria": [
     "sweech models lists all known models grouped by provider",

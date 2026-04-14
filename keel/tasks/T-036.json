@@ -1,7 +1,7 @@
 {
   "id": "T-036",
   "title": "sweech query \u2014 CLI command to query profile details: model, effort levels, provider, capabilities",
-  "status": "todo",
+  "status": "done",
   "priority": "high",
   "acceptanceCriteria": [
     "sweech query <profile> shows: model, provider, effort levels, config dir",
