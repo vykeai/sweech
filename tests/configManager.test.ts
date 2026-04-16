@@ -245,7 +245,7 @@ describe('ConfigManager', () => {
   });
 
   describe('setupSharedDirs', () => {
-    const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos'];
+    const SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos', 'sessions'];
     const SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'];
     const TOTAL_SYMLINKS = SHAREABLE_DIRS.length + SHAREABLE_FILES.length;
 

@@ -140,11 +140,17 @@ program
                 templateProvider.defaultModel = tpl.model;
             if (tpl.baseUrl)
                 templateProvider.baseUrl = tpl.baseUrl;
+            // Determine auth method: no auth for local providers, OAuth for official, API key otherwise
+            const isOfficialOAuth = (tpl.cliType === 'claude' && tpl.provider === 'anthropic')
+                || (tpl.cliType === 'codex' && tpl.provider === 'openai');
+            const authMethod = templateProvider.authOptional ? 'none'
+                : isOfficialOAuth ? 'oauth'
+                    : 'api-key';
             const answers = {
                 cliType: tpl.cliType,
                 provider: tpl.provider,
                 commandName,
-                authMethod: 'oauth',
+                authMethod,
             };
             await (0, profileCreation_1.createProfile)(answers, templateProvider, cli, config);
             const binDir = config.getBinDir();

@@ -19,7 +19,7 @@ import { ConfigManager, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, C
 export const SKILLS_ITEMS = ['commands', 'mcp.json', 'hooks', 'agents', 'CLAUDE.md'] as const;
 
 /** Data items — default unchecked */
-export const DATA_ITEMS = ['projects', 'plans', 'tasks', 'todos', 'teams', 'plugins'] as const;
+export const DATA_ITEMS = ['projects', 'plans', 'tasks', 'todos', 'teams', 'plugins', 'sessions'] as const;
 
 type ShareableItem = string;
 

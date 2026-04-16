@@ -82,6 +82,7 @@ function defaultCommandName(cliType, providerName) {
         deepseek: 'claude-deep',
         glm: 'claude-glm',
         dashscope: 'claude-dash',
+        ollama: 'claude-ollama',
     };
     return defaults[providerName] || `claude-${providerName}`;
 }
@@ -135,7 +136,7 @@ function getManageableProviders(cliType) {
         description: provider.description,
         cliType,
         supportsOAuth: isOfficialOAuthProvider(cliType, provider.name),
-        requiresApiKey: !isOfficialOAuthProvider(cliType, provider.name),
+        requiresApiKey: !isOfficialOAuthProvider(cliType, provider.name) && !provider.authOptional,
         defaultCommandName: defaultCommandName(cliType, provider.name),
     }));
 }
@@ -147,11 +148,11 @@ async function createManagedProfile(input, config = new config_1.ConfigManager()
     const provider = requireProvider(input.provider, cliType);
     const authMethod = input.authMethod === 'api-key' ? 'api-key' : 'oauth';
     const sharedWith = validateShareTarget(input.sharedWith, cliType, profiles);
-    if (!isOfficialOAuthProvider(cliType, provider.name) && authMethod === 'oauth') {
+    if (!isOfficialOAuthProvider(cliType, provider.name) && !provider.authOptional && authMethod === 'oauth') {
         throw new Error(`Provider '${provider.name}' requires an API key`);
     }
     const apiKey = input.apiKey?.trim();
-    if (authMethod === 'api-key' && !apiKey) {
+    if (authMethod === 'api-key' && !apiKey && !provider.authOptional) {
         throw new Error('API key is required for this provider');
     }
     const effectiveProvider = {

@@ -49,7 +49,8 @@ const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 // Directories that are safe to share across profiles via symlinks (Claude).
 // NOT included: settings.json, cache, session-env, shell-snapshots, history.jsonl (auth/runtime)
-exports.SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos'];
+// sessions: included so --continue/--resume can find conversations started by other profiles
+exports.SHAREABLE_DIRS = ['projects', 'plans', 'tasks', 'commands', 'plugins', 'hooks', 'agents', 'teams', 'todos', 'sessions'];
 // Files that are safe to share across profiles via symlinks (Claude).
 exports.SHAREABLE_FILES = ['mcp.json', 'CLAUDE.md'];
 // Codex-specific shareable dirs.
@@ -140,7 +141,10 @@ class ConfigManager {
             // Set environment variables based on CLI type
             if (cliType === 'codex') {
                 // Codex CLI uses OpenAI environment variables
-                settings.env.OPENAI_API_KEY = authToken;
+                // Only set API key if we have one (local providers may have no auth)
+                if (authToken) {
+                    settings.env.OPENAI_API_KEY = authToken;
+                }
                 if (provider.baseUrl) {
                     settings.env.OPENAI_BASE_URL = provider.baseUrl;
                 }
@@ -153,7 +157,10 @@ class ConfigManager {
             }
             else {
                 // Claude Code CLI uses Anthropic environment variables
-                settings.env.ANTHROPIC_AUTH_TOKEN = authToken;
+                // Only set auth token if we have one (local providers may have no auth)
+                if (authToken) {
+                    settings.env.ANTHROPIC_AUTH_TOKEN = authToken;
+                }
                 if (provider.baseUrl) {
                     settings.env.ANTHROPIC_BASE_URL = provider.baseUrl;
                 }

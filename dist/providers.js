@@ -238,7 +238,21 @@ exports.PROVIDERS = {
         ]
     },
     // ═══════════════════════════════════════════════════════════
-    // CUSTOM/LOCAL PROVIDERS (for localhost, LAN, self-hosted)
+    // LOCAL/SELF-HOSTED PROVIDERS
+    // ═══════════════════════════════════════════════════════════
+    ollama: {
+        name: 'ollama',
+        displayName: 'Ollama (Local)',
+        baseUrl: 'http://localhost:11434',
+        defaultModel: '',
+        description: 'Local Ollama — no auth required',
+        pricing: 'Free (local)',
+        compatibility: ['claude', 'codex'],
+        apiFormat: 'anthropic',
+        authOptional: true,
+    },
+    // ═══════════════════════════════════════════════════════════
+    // CUSTOM PROVIDERS (for localhost, LAN, self-hosted)
     // ═══════════════════════════════════════════════════════════
     custom: {
         name: 'custom',

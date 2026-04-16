@@ -57,7 +57,7 @@ const config_1 = require("./config");
 /** Skills-related items — default checked in the interactive picker */
 exports.SKILLS_ITEMS = ['commands', 'mcp.json', 'hooks', 'agents', 'CLAUDE.md'];
 /** Data items — default unchecked */
-exports.DATA_ITEMS = ['projects', 'plans', 'tasks', 'todos', 'teams', 'plugins'];
+exports.DATA_ITEMS = ['projects', 'plans', 'tasks', 'todos', 'teams', 'plugins', 'sessions'];
 function getShareableItems(cliType) {
     const isCodex = cliType === 'codex';
     const dirs = isCodex ? [...config_1.CODEX_SHAREABLE_DIRS] : [...config_1.SHAREABLE_DIRS];

@@ -236,6 +236,7 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
       choices: (answers: any) => {
         const provider = answers.provider;
         const cliType = answers.cliType || 'claude';
+        const providerConfig = getProvider(provider);
 
         // OAuth only available for official providers (anthropic for claude, openai for codex)
         if ((cliType === 'claude' && provider === 'anthropic') ||
@@ -252,6 +253,20 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
           ];
         }
 
+        // Local providers — auth is optional
+        if (providerConfig?.authOptional) {
+          return [
+            {
+              name: 'None (local provider, no auth needed)',
+              value: 'none'
+            },
+            {
+              name: 'API Key (if your local setup requires one)',
+              value: 'api-key'
+            }
+          ];
+        }
+
         // For third-party providers, only API key is available
         return [
           {
@@ -263,10 +278,15 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
       default: (answers: any) => {
         const cliType = answers.cliType || 'claude';
         const provider = answers.provider;
+        const providerConfig = getProvider(provider);
         // Default to OAuth for official subscription providers
         if ((cliType === 'claude' && provider === 'anthropic') ||
             (cliType === 'codex' && provider === 'openai')) {
           return 'oauth';
+        }
+        // Default to no auth for local providers
+        if (providerConfig?.authOptional) {
+          return 'none';
         }
         return 'api-key';
       }

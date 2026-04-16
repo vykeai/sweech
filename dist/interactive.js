@@ -213,6 +213,7 @@ async function interactiveAddProvider(existingProfiles = []) {
             choices: (answers) => {
                 const provider = answers.provider;
                 const cliType = answers.cliType || 'claude';
+                const providerConfig = (0, providers_1.getProvider)(provider);
                 // OAuth only available for official providers (anthropic for claude, openai for codex)
                 if ((cliType === 'claude' && provider === 'anthropic') ||
                     (cliType === 'codex' && provider === 'openai')) {
@@ -223,6 +224,19 @@ async function interactiveAddProvider(existingProfiles = []) {
                         },
                         {
                             name: 'API Key (static token from platform.anthropic.com)',
+                            value: 'api-key'
+                        }
+                    ];
+                }
+                // Local providers — auth is optional
+                if (providerConfig?.authOptional) {
+                    return [
+                        {
+                            name: 'None (local provider, no auth needed)',
+                            value: 'none'
+                        },
+                        {
+                            name: 'API Key (if your local setup requires one)',
                             value: 'api-key'
                         }
                     ];
@@ -238,10 +252,15 @@ async function interactiveAddProvider(existingProfiles = []) {
             default: (answers) => {
                 const cliType = answers.cliType || 'claude';
                 const provider = answers.provider;
+                const providerConfig = (0, providers_1.getProvider)(provider);
                 // Default to OAuth for official subscription providers
                 if ((cliType === 'claude' && provider === 'anthropic') ||
                     (cliType === 'codex' && provider === 'openai')) {
                     return 'oauth';
+                }
+                // Default to no auth for local providers
+                if (providerConfig?.authOptional) {
+                    return 'none';
                 }
                 return 'api-key';
             }

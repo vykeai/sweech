@@ -89,6 +89,7 @@ function defaultCommandName(cliType: CLIType, providerName: string): string {
     deepseek: 'claude-deep',
     glm: 'claude-glm',
     dashscope: 'claude-dash',
+    ollama: 'claude-ollama',
   };
 
   return defaults[providerName] || `claude-${providerName}`;
@@ -159,7 +160,7 @@ export function getManageableProviders(cliType: CLIType): ManageableProvider[] {
       description: provider.description,
       cliType,
       supportsOAuth: isOfficialOAuthProvider(cliType, provider.name),
-      requiresApiKey: !isOfficialOAuthProvider(cliType, provider.name),
+      requiresApiKey: !isOfficialOAuthProvider(cliType, provider.name) && !provider.authOptional,
       defaultCommandName: defaultCommandName(cliType, provider.name),
     }));
 }
@@ -176,12 +177,12 @@ export async function createManagedProfile(
   const authMethod = input.authMethod === 'api-key' ? 'api-key' : 'oauth';
   const sharedWith = validateShareTarget(input.sharedWith, cliType, profiles);
 
-  if (!isOfficialOAuthProvider(cliType, provider.name) && authMethod === 'oauth') {
+  if (!isOfficialOAuthProvider(cliType, provider.name) && !provider.authOptional && authMethod === 'oauth') {
     throw new Error(`Provider '${provider.name}' requires an API key`);
   }
 
   const apiKey = input.apiKey?.trim();
-  if (authMethod === 'api-key' && !apiKey) {
+  if (authMethod === 'api-key' && !apiKey && !provider.authOptional) {
     throw new Error('API key is required for this provider');
   }
 

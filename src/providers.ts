@@ -24,6 +24,7 @@ export interface ProviderConfig {
   compatibility: CLIType[]; // Which CLIs support this provider
   apiFormat: APIFormat; // API format (for validation and custom providers)
   isCustom?: boolean; // True for user-defined custom providers
+  authOptional?: boolean; // True for local/self-hosted providers that don't require auth
   availableModels?: ModelInfo[]; // Catalog of models this provider supports
 }
 
@@ -260,7 +261,23 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
   },
 
   // ═══════════════════════════════════════════════════════════
-  // CUSTOM/LOCAL PROVIDERS (for localhost, LAN, self-hosted)
+  // LOCAL/SELF-HOSTED PROVIDERS
+  // ═══════════════════════════════════════════════════════════
+
+  ollama: {
+    name: 'ollama',
+    displayName: 'Ollama (Local)',
+    baseUrl: 'http://localhost:11434',
+    defaultModel: '',
+    description: 'Local Ollama — no auth required',
+    pricing: 'Free (local)',
+    compatibility: ['claude', 'codex'],
+    apiFormat: 'anthropic',
+    authOptional: true,
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // CUSTOM PROVIDERS (for localhost, LAN, self-hosted)
   // ═══════════════════════════════════════════════════════════
 
   custom: {
