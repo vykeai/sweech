@@ -866,6 +866,15 @@ struct AccountCard: View {
     @State private var isHovered = false
     @AppStorage("sweechShowExtraBuckets") private var showExtraBuckets: Bool = false
 
+    /// Compact integer formatter — "9,844" → "9.8K", "1,879" → "1.9K", "382" → "382".
+    /// Keeps the footer single-line on narrow cards.
+    private func formatCount(_ n: Int) -> String {
+        if n < 1000 { return "\(n)" }
+        if n < 10_000 { return String(format: "%.1fK", Double(n) / 1000) }
+        if n < 1_000_000 { return "\(n / 1000)K" }
+        return String(format: "%.1fM", Double(n) / 1_000_000)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Header row 1: name + status + menu (never shares width with badges)
@@ -1050,16 +1059,18 @@ struct AccountCard: View {
                 .help("OAuth token was just refreshed successfully")
             } else if account.tokenStatus == "valid", let expiry = account.tokenExpiryRelative,
                       let expiresAt = account.tokenExpiresAt,
-                      (expiresAt / 1000 - Date().timeIntervalSince1970) < 86400 {
+                      (expiresAt / 1000 - Date().timeIntervalSince1970) < 3600 {
+                // Only surface token expiry when it's actually imminent (<1h).
                 HStack(spacing: 6) {
                     Image(systemName: "key.fill")
                         .font(.system(size: 9))
-                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.5))
+                        .foregroundStyle(Sweech.Color.warning.opacity(0.7))
                     Text("Token expires in \(expiry)")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Sweech.Color.textMuted.opacity(0.7))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Sweech.Color.warning)
+                        .lineLimit(1)
                 }
-                .help("OAuth token is valid but expires soon")
+                .help("OAuth token expires very soon — refresh imminent")
             }
 
             // Usage rows — hide for external providers (no real usage data)
@@ -1071,24 +1082,6 @@ struct AccountCard: View {
                         BucketCard(bucket: bucket)
                     }
                 } else {
-                    Text("All models")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Sweech.Color.textPrimary.opacity(0.7))
-
-                    // Column labels — USED / LEFT — aligned above the % columns
-                    HStack(spacing: 6) {
-                        Color.clear.frame(width: 34, height: 1)
-                        Text("USED")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
-                            .frame(width: 46, alignment: .trailing)
-                        Color.clear.frame(height: 1) // flexible bar spacer
-                        Text("LEFT")
-                            .font(.system(size: 8, weight: .semibold))
-                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
-                            .frame(width: 46, alignment: .leading)
-                        Color.clear.frame(width: 76, height: 1)
-                    }
                     UsageRow(
                         label: "week",
                         messages: account.messages7dDisplay,
@@ -1097,7 +1090,6 @@ struct AccountCard: View {
                         resetsAt: account.live?.reset7dAt,
                         capacityNote: nil
                     )
-                    .fontWeight(.medium)
                     UsageRow(
                         label: "5h",
                         messages: account.messages5hDisplay,
@@ -1106,14 +1098,14 @@ struct AccountCard: View {
                         resetsAt: account.live?.reset5hAt,
                         capacityNote: account.minutesUntilFirstCapacity.map { $0 > 0 ? "capacity in \($0)m" : nil } ?? nil
                     )
-                    .opacity(0.85)
 
                     if account.live?.isStale == true {
                         HStack(spacing: 3) {
                             Image(systemName: "clock.badge.exclamationmark")
                                 .font(.system(size: 9))
-                            Text("stale data · tap ↻ to retry")
+                            Text("stale · tap ↻ to retry")
                                 .font(.system(size: 9))
+                                .lineLimit(1)
                         }
                         .foregroundStyle(Sweech.Color.warning.opacity(0.7))
                         .padding(.top, 2)
@@ -1121,8 +1113,8 @@ struct AccountCard: View {
                 }
             }
 
-            // Footer
-            HStack(spacing: 12) {
+            // Footer — single tight row, never wraps
+            HStack(spacing: 10) {
                 if onMoveUp != nil || onMoveDown != nil {
                     HStack(spacing: 0) {
                         Button { onMoveUp?() } label: {
@@ -1144,19 +1136,26 @@ struct AccountCard: View {
 
                 if !account.isExternal {
                     HStack(spacing: 4) {
-                        Image(systemName: "clock").font(.system(size: 11))
-                        Text(account.lastActiveRelative).font(.system(size: 12))
+                        Image(systemName: "clock").font(.system(size: 10))
+                        Text(account.lastActiveRelative)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                     .help("Last time a request was made through this account")
 
                     HStack(spacing: 4) {
-                        Image(systemName: "text.bubble").font(.system(size: 11))
-                        Text("\(account.totalMessagesDisplay) total").font(.system(size: 12))
+                        Image(systemName: "text.bubble").font(.system(size: 10))
+                        Text(formatCount(account.totalMessagesDisplay))
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .fixedSize()
+                            .monospacedDigit()
                     }
-                    .help("Total messages ever sent through this account")
+                    .help("Total messages ever sent through this account (\(account.totalMessagesDisplay))")
                 }
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 Menu {
                     Button {
@@ -1204,7 +1203,7 @@ struct AccountCard: View {
             }
             .foregroundStyle(Sweech.Color.textMuted.opacity(0.65))
         }
-        .padding(12)
+        .padding(10)
         .background(Sweech.Color.surface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
@@ -2078,98 +2077,89 @@ struct UsageRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                // Window label (5h / week) — small, dim, fixed-width
                 Text(label)
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Sweech.Color.textMuted)
-                    .frame(width: 34, alignment: .leading)
+                    .frame(width: 30, alignment: .leading)
                     .help(windowHelp)
 
-                HStack(spacing: 2) {
-                    if utilization >= 0.9 {
-                        Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Sweech.Color.danger)
-                    } else if utilization >= 0.7 {
-                        Image(systemName: "flame.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Sweech.Color.warning)
-                    }
-                    Text("\(used)%")
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(barColor)
-                        .monospacedDigit()
-                }
-                .frame(width: 46, alignment: .trailing)
-                .help("\(used)% of this window's quota used — \(messages) message(s). Bar color: green ≤40%, pink 40–70%, amber 70–90%, red ≥90%.")
-
+                // Wide usage bar — flex
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3)
+                        RoundedRectangle(cornerRadius: 4)
                             .fill(Sweech.Color.surfaceHigh)
-                            .frame(height: 5)
-                        RoundedRectangle(cornerRadius: 3)
+                            .frame(height: 8)
+                        RoundedRectangle(cornerRadius: 4)
                             .fill(LinearGradient(
-                                colors: [barColor, barColor.opacity(0.6)],
+                                colors: [barColor, barColor.opacity(0.7)],
                                 startPoint: .leading, endPoint: .trailing
                             ))
-                            .frame(width: max(0, geo.size.width * min(utilization, 1.0)), height: 5)
-                            .shadow(color: barColor.opacity(0.4), radius: 3, x: 0, y: 0)
+                            .frame(width: max(2, geo.size.width * min(utilization, 1.0)), height: 8)
+                            .shadow(color: barColor.opacity(0.35), radius: 2, x: 0, y: 0)
                     }
                 }
-                .frame(height: 5)
-                .help("Usage bar — fills left to right as quota is consumed")
+                .frame(height: 8)
+                .help("\(used)% used · \(remaining)% left · \(messages) message(s) in this window")
 
-                Text("\(remaining)%")
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(remainingColor)
+                // Compact used% — color-coded, on bar's right edge
+                Text("\(used)%")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(barColor)
                     .monospacedDigit()
-                    .frame(width: 46, alignment: .leading)
-                    .help("\(remaining)% of quota still available in this \(label) window")
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(minWidth: 32, alignment: .trailing)
+                    .help("\(used)% of quota used")
 
-                HStack(spacing: 3) {
-                    if let resetIn {
+                // Reset chip — color-coded by urgency
+                if let resetIn {
+                    HStack(spacing: 2) {
                         Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 10, weight: .bold))
+                            .font(.system(size: 9, weight: .bold))
                         Text(resetIn)
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .monospacedDigit()
+                            .lineLimit(1)
                     }
+                    .fixedSize()
+                    .foregroundStyle(resetUrgencyColor)
+                    .help("Resets in \(resetIn)")
                 }
-                .foregroundStyle(resetUrgencyColor)
-                .frame(width: 76, alignment: .leading)
-                .help(resetIn.map {
-                    "\(label) window resets in \($0). Red = <30 min, amber = <2h, blue = more time."
-                } ?? "Reset time unknown")
             }
-            .frame(height: 18)
 
+            // Sub-row: msgs + capacity / expiring (only when notable)
             if !compact && (messages > 0 || capacityNote != nil || weeklyExpiryNote != nil) {
                 HStack(spacing: 8) {
                     if messages > 0 {
                         Text("\(messages) msgs")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.65))
+                            .font(.system(size: 10))
+                            .foregroundStyle(Sweech.Color.textMuted.opacity(0.6))
+                            .lineLimit(1)
                             .help("Messages sent in this \(label) window")
                     }
                     if let note = capacityNote {
                         Text(note)
-                            .font(.system(size: 11))
+                            .font(.system(size: 10))
                             .foregroundStyle(Sweech.Color.accent.opacity(0.65))
-                            .help("Estimated time until the next capacity slot opens in this 5h window")
+                            .lineLimit(1)
+                            .help("Estimated time until the next capacity slot opens")
                     }
                     if let expiry = weeklyExpiryNote {
                         Text(expiry)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Sweech.Color.expiry)
+                            .lineLimit(1)
                             .opacity(expiryPulse ? 0.45 : 1.0)
                             .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true), value: expiryPulse)
                             .onAppear { expiryPulse = true }
-                            .help("Quota will expire unused before the weekly reset — switch to this account to use it")
+                            .help("Quota will expire unused before the weekly reset")
                     }
+                    Spacer(minLength: 0)
                 }
-                .padding(.leading, 26)
+                .padding(.leading, 38)
             }
         }
     }
@@ -2190,21 +2180,21 @@ struct BucketCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(bucket.label)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Sweech.Color.textPrimary.opacity(0.7))
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .help("Usage bucket: \(bucket.label) — separate rate limit pool for this model tier")
 
             if let weekly = bucket.weekly {
                 UsageRow(label: "week", messages: 0, utilization: weekly.utilization,
                          resetIn: resetRelative(weekly.resetsAt), resetsAt: weekly.resetsAt, capacityNote: nil)
-                    .fontWeight(.medium)
             }
             if let session = bucket.session {
                 UsageRow(label: "5h", messages: 0, utilization: session.utilization,
                          resetIn: resetRelative(session.resetsAt), resetsAt: session.resetsAt, capacityNote: nil)
-                    .opacity(0.85)
             }
         }
         .padding(8)
