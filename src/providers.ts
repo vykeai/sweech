@@ -140,18 +140,19 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     name: 'glm',
     displayName: 'GLM (Zhipu/ZAI)',
     baseUrl: 'https://api.z.ai/api/anthropic',
-    defaultModel: 'glm-5.1',
+    defaultModel: 'glm-5',
     description: 'Zhipu GLM models via z.ai direct API',
     pricing: '$3/month coding plan',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
-      // ── Verified on docs.z.ai (2026-04-21) ──
-      { id: 'glm-5.1',      name: 'GLM-5.1',      type: 'reasoning', context: '200k', note: 'Latest — SOTA SWE-Bench Pro / Terminal-Bench 2.0' },
-      { id: 'glm-5',        name: 'GLM-5',        type: 'reasoning', context: '200k', note: 'SWE-bench Verified 77.8, 128K max output' },
-      { id: 'glm-5-air',    name: 'GLM-5 Air',    type: 'reasoning', context: '200k', note: 'Lighter/faster tier' },
+      // ── Verified on docs.z.ai + live tool-use test (2026-04-21) ──
+      // glm-5 is the reliable default; glm-5.1 silently hangs on tool calls
+      // via the /api/anthropic endpoint and glm-5-air returns "Unknown Model".
+      { id: 'glm-5',        name: 'GLM-5',        type: 'reasoning', context: '200k', note: 'Recommended — tool use works, SWE-bench Verified 77.8' },
+      { id: 'glm-4.6',      name: 'GLM-4.6',      type: 'reasoning', context: '200k', note: 'Stable fallback — prior flagship' },
+      { id: 'glm-5.1',      name: 'GLM-5.1',      type: 'reasoning', context: '200k', note: 'Latest on paper, but broken tool use via Anthropic endpoint' },
       { id: 'glm-5v-turbo', name: 'GLM-5V Turbo', type: 'vision',    context: '200k', note: 'Vision-capable' },
-      { id: 'glm-4.6',      name: 'GLM-4.6',      type: 'reasoning', context: '200k', note: 'Prior flagship' },
     ]
   },
   dashscope: {

@@ -122,7 +122,7 @@ exports.BUILT_IN_TEMPLATES = [
         description: 'Zhipu GLM models via z.ai direct',
         cliType: 'claude',
         provider: 'glm',
-        model: 'glm-5.1',
+        model: 'glm-5',
         tags: ['zai', 'z', 'zhipu', 'glm', 'coding-plan'],
     },
     {
