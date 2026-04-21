@@ -290,14 +290,16 @@ struct AccountsView: View {
         groupedColumns.count
     }
 
-    /// Popover width scales with column count so columns never get clipped.
-    /// Each card column needs ~280pt + 10pt spacing; plus 32pt for outer padding and scroll gutter.
+    /// Popover width scales with column count but stays within what a typical
+    /// laptop display can show given that the menu-bar anchor is near the
+    /// right edge. Caps at 1000pt so the popover never extends past the left
+    /// edge of the screen on 13"/14" Macs.
     private var popoverWidth: CGFloat {
         if activeMiniMode { return 360 }
         if !hasMultipleGroups || !grouped { return 360 }
         let n = max(1, groupedColumnCount)
-        let computed = CGFloat(n) * 290 + CGFloat(max(0, n - 1)) * 10 + 32
-        return min(max(computed, 680), 1280)
+        let computed = CGFloat(n) * 260 + CGFloat(max(0, n - 1)) * 10 + 32
+        return min(max(computed, 680), 1000)
     }
 
     private var groupedLayout: some View {
@@ -866,9 +868,8 @@ struct AccountCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header
+            // Header row 1: name + status + menu (never shares width with badges)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                // Account name — tap to copy launch command
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString("sweech use \(account.commandName)", forType: .string)
@@ -883,7 +884,6 @@ struct AccountCard: View {
                             .foregroundStyle(Sweech.Color.textPrimary)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .layoutPriority(1)
                         Image(systemName: copied ? "checkmark" : "doc.on.doc")
                             .font(.system(size: 9))
                             .foregroundStyle(copied ? Sweech.Color.ok : Sweech.Color.textMuted.opacity(0.3))
@@ -892,73 +892,7 @@ struct AccountCard: View {
                 .buttonStyle(.plain)
                 .help("Tap to copy: sweech use \(account.commandName)")
 
-                if account.isExternal {
-                    Text(account.providerLabel)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Sweech.Color.warm)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Sweech.Color.warm.opacity(0.1))
-                        .clipShape(Capsule())
-                        .help("\(account.providerLabel) — via Claude Code CLI")
-                } else if let cliType = account.cliType {
-                    Text(cliType)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Sweech.Color.accent)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Sweech.Color.accent.opacity(0.1))
-                        .clipShape(Capsule())
-                        .help(cliType == "claude" ? "Claude Code CLI profile" : "OpenAI Codex CLI profile")
-                }
-
-                if let plan = account.planType {
-                    Text(plan)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Sweech.Color.core)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Sweech.Color.core.opacity(0.1))
-                        .clipShape(Capsule())
-                        .help("Subscription plan: \(plan)")
-                }
-
-                if let promo = account.live?.promotion {
-                    HStack(spacing: 3) {
-                        Image(systemName: "sparkles").font(.system(size: 8))
-                        Text(promo.label)
-                            .font(.system(size: 9, weight: .bold))
-                            .lineLimit(1)
-                    }
-                    .fixedSize()
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(
-                        LinearGradient(colors: [Sweech.Color.accent, Sweech.Color.core], startPoint: .leading, endPoint: .trailing)
-                    )
-                    .clipShape(Capsule())
-                    .help(promo.expiresAt.map { "Promotion active — expires \(Date(timeIntervalSince1970: $0 / 1000).formatted())" } ?? "Promotion active")
-                }
-
-                if let label = tier.badgeLabel {
-                    HStack(spacing: 3) {
-                        Image(systemName: tier.badgeIcon).font(.system(size: 8))
-                        Text(label)
-                            .font(.system(size: 9, weight: .bold))
-                            .lineLimit(1)
-                    }
-                    .fixedSize()
-                    .foregroundStyle(tier.badgeColor)
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(tier.badgeColor.opacity(0.12))
-                    .clipShape(Capsule())
-                    .help(tier.badgeHelp)
-                }
-
-                Spacer()
+                Spacer(minLength: 4)
                 StatusPill(account: account)
 
                 if onManage != nil || onRenameProfile != nil || onRemoveProfile != nil {
@@ -996,6 +930,85 @@ struct AccountCard: View {
                     .menuStyle(.borderlessButton)
                     .fixedSize()
                     .help("Profile actions for \(account.commandName)")
+                }
+            }
+
+            // Header row 2: provider / plan / promo / tier badges — wraps
+            // independently of the name so nothing gets squeezed off-screen.
+            let hasAnyBadge = account.isExternal
+                || account.cliType != nil
+                || account.planType != nil
+                || account.live?.promotion != nil
+                || tier.badgeLabel != nil
+            if hasAnyBadge {
+                HStack(spacing: 6) {
+                    if account.isExternal {
+                        Text(account.providerLabel)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Sweech.Color.warm)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Sweech.Color.warm.opacity(0.1))
+                            .clipShape(Capsule())
+                            .help("\(account.providerLabel) — via Claude Code CLI")
+                    } else if let cliType = account.cliType {
+                        Text(cliType)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Sweech.Color.accent)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Sweech.Color.accent.opacity(0.1))
+                            .clipShape(Capsule())
+                            .help(cliType == "claude" ? "Claude Code CLI profile" : "OpenAI Codex CLI profile")
+                    }
+
+                    if let plan = account.planType {
+                        Text(plan)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Sweech.Color.core)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Sweech.Color.core.opacity(0.1))
+                            .clipShape(Capsule())
+                            .help("Subscription plan: \(plan)")
+                    }
+
+                    if let promo = account.live?.promotion {
+                        HStack(spacing: 3) {
+                            Image(systemName: "sparkles").font(.system(size: 8))
+                            Text(promo.label)
+                                .font(.system(size: 9, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .fixedSize()
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(
+                            LinearGradient(colors: [Sweech.Color.accent, Sweech.Color.core], startPoint: .leading, endPoint: .trailing)
+                        )
+                        .clipShape(Capsule())
+                        .help(promo.expiresAt.map { "Promotion active — expires \(Date(timeIntervalSince1970: $0 / 1000).formatted())" } ?? "Promotion active")
+                    }
+
+                    if let label = tier.badgeLabel {
+                        HStack(spacing: 3) {
+                            Image(systemName: tier.badgeIcon).font(.system(size: 8))
+                            Text(label)
+                                .font(.system(size: 9, weight: .bold))
+                                .lineLimit(1)
+                        }
+                        .fixedSize()
+                        .foregroundStyle(tier.badgeColor)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(tier.badgeColor.opacity(0.12))
+                        .clipShape(Capsule())
+                        .help(tier.badgeHelp)
+                    }
+
+                    Spacer(minLength: 0)
                 }
             }
 
