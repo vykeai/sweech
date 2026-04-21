@@ -2535,6 +2535,127 @@ if (!skipUpdateCheck && process.argv.length > 2) {
         }
     }).catch(() => { });
 }
+// ── repair-sessions: fix stuck assistant turns that block `--continue` ───────
+// External providers (notably GLM-5.1 via z.ai) occasionally emit a
+// `thinking`-only block without a `stop_reason`, leaving the transcript in a
+// state that deadlocks Claude Code when the session is resumed. This command
+// patches those turns with `stop_reason: end_turn` + a stub text block so
+// resume works again. Creates a .bak on first rewrite.
+program
+    .command('repair-sessions [profile]')
+    .description('Patch stuck assistant turns (thinking-only / missing stop_reason) in session transcripts')
+    .option('--dry-run', 'Report broken turns without rewriting files', false)
+    .option('--all', 'Scan every Sweech-managed profile + default claude/codex', false)
+    .action((profileName, opts) => {
+    const cfgMgr = new config_1.ConfigManager();
+    const roots = [];
+    const home = require('os').homedir();
+    if (opts.all) {
+        roots.push(path.join(home, '.claude', 'projects'));
+        for (const p of cfgMgr.getProfiles()) {
+            roots.push(path.join(cfgMgr.getProfileDir(p.commandName), 'projects'));
+        }
+    }
+    else if (profileName) {
+        roots.push(path.join(cfgMgr.getProfileDir(profileName), 'projects'));
+    }
+    else {
+        // Default: active profile based on cwd — fall back to all claude profiles
+        for (const p of cfgMgr.getProfiles().filter(p => p.cliType === 'claude')) {
+            roots.push(path.join(cfgMgr.getProfileDir(p.commandName), 'projects'));
+        }
+        roots.push(path.join(home, '.claude', 'projects'));
+    }
+    let filesScanned = 0;
+    let brokenFound = 0;
+    let filesPatched = 0;
+    const walk = (dir) => {
+        const out = [];
+        let entries;
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        }
+        catch {
+            return out;
+        }
+        for (const e of entries) {
+            const p = path.join(dir, e.name);
+            if (e.isDirectory())
+                out.push(...walk(p));
+            else if (e.isFile() && p.endsWith('.jsonl'))
+                out.push(p);
+        }
+        return out;
+    };
+    const isBrokenAssistant = (d) => {
+        if (d?.type !== 'assistant')
+            return false;
+        const msg = d.message;
+        if (!msg || msg.role !== 'assistant')
+            return false;
+        const content = Array.isArray(msg.content) ? msg.content : [];
+        const missingStop = msg.stop_reason === undefined || msg.stop_reason === null;
+        const thinkingOnly = content.length > 0
+            && content.every((c) => c && c.type === 'thinking');
+        return missingStop || thinkingOnly;
+    };
+    for (const root of roots) {
+        for (const file of walk(root)) {
+            filesScanned++;
+            let raw;
+            try {
+                raw = fs.readFileSync(file, 'utf-8');
+            }
+            catch {
+                continue;
+            }
+            const lines = raw.split('\n');
+            let changed = false;
+            const patched = lines.map(ln => {
+                if (!ln.trim())
+                    return ln;
+                let d;
+                try {
+                    d = JSON.parse(ln);
+                }
+                catch {
+                    return ln;
+                }
+                if (!isBrokenAssistant(d))
+                    return ln;
+                brokenFound++;
+                const msg = d.message || {};
+                const content = Array.isArray(msg.content) ? msg.content : [];
+                const hasVisible = content.some((c) => c?.type === 'text' || c?.type === 'tool_use');
+                if (!hasVisible) {
+                    content.push({ type: 'text', text: '[session recovered — prior turn stalled]' });
+                }
+                msg.content = content;
+                msg.stop_reason = 'end_turn';
+                if (!('stop_sequence' in msg))
+                    msg.stop_sequence = null;
+                d.message = msg;
+                changed = true;
+                return JSON.stringify(d);
+            });
+            if (changed && !opts.dryRun) {
+                const bak = file + '.bak';
+                if (!fs.existsSync(bak))
+                    fs.copyFileSync(file, bak);
+                fs.writeFileSync(file, patched.join('\n'));
+                filesPatched++;
+            }
+        }
+    }
+    const mode = opts.dryRun ? chalk_1.default.yellow('DRY-RUN') : chalk_1.default.green('APPLIED');
+    console.log(`\n${mode}  scanned ${chalk_1.default.bold(filesScanned)} transcript(s), found ${chalk_1.default.bold(brokenFound)} broken assistant turn(s)`);
+    if (!opts.dryRun && filesPatched > 0) {
+        console.log(chalk_1.default.dim(`        rewrote ${filesPatched} file(s); originals preserved as .bak`));
+    }
+    else if (opts.dryRun && brokenFound > 0) {
+        console.log(chalk_1.default.dim('        re-run without --dry-run to patch them'));
+    }
+});
 // Default action: interactive launcher when no command given
 if (process.argv.length <= 2) {
     // First run: no profiles configured → run onboarding instead of empty launcher
