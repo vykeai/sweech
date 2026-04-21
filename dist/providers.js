@@ -60,31 +60,46 @@ exports.PROVIDERS = {
         compatibility: ['claude'],
         apiFormat: 'anthropic',
         availableModels: [
-            { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', type: 'reasoning', context: '200k', note: 'Latest, best quality' },
-            { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k' },
+            { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', type: 'reasoning', context: '205k', note: 'Latest, SWE-Pro 56.22' },
+            { id: 'MiniMax-M2.7-highspeed', name: 'MiniMax M2.7 Highspeed', type: 'reasoning', context: '205k', note: 'Faster variant' },
+            { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '205k' },
+            { id: 'MiniMax-M2.5-highspeed', name: 'MiniMax M2.5 Highspeed', type: 'reasoning', context: '205k' },
+            { id: 'MiniMax-M2.1', name: 'MiniMax M2.1', type: 'reasoning', context: '205k' },
         ]
     },
     kimi: {
         name: 'kimi',
-        displayName: 'Kimi K2 (Moonshot AI)',
+        displayName: 'Kimi (Moonshot AI)',
         baseUrl: 'https://api.moonshot.ai/anthropic',
-        defaultModel: 'kimi-k2-turbo-preview',
-        description: 'Moonshot AI Kimi K2 with 256K context',
+        defaultModel: 'kimi-k2.6',
+        description: 'Moonshot Kimi K2.6 — long-horizon coding, 256K context',
         pricing: '$0.14-$2.49 per million tokens',
         compatibility: ['claude'],
-        apiFormat: 'anthropic'
+        apiFormat: 'anthropic',
+        availableModels: [
+            { id: 'kimi-k2.6', name: 'Kimi K2.6', type: 'reasoning', context: '256k', note: 'Latest flagship — long-horizon coding' },
+            { id: 'kimi-k2.6-thinking', name: 'Kimi K2.6 Thinking', type: 'reasoning', context: '256k', note: 'Deep reasoning variant' },
+            { id: 'kimi-k2-turbo-preview', name: 'Kimi K2 Turbo', type: 'reasoning', context: '256k', note: 'Fast tier' },
+            { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking', type: 'reasoning', context: '256k' },
+            { id: 'kimi-k2-thinking-turbo', name: 'Kimi K2 Thinking Turbo', type: 'reasoning', context: '256k' },
+            { id: 'kimi-k2-0905-preview', name: 'Kimi K2 (0905)', type: 'reasoning', context: '256k' },
+        ]
     },
     'kimi-coding': {
         name: 'kimi-coding',
         displayName: 'Kimi for Coding (Moonshot AI)',
         baseUrl: 'https://api.kimi.com/coding',
-        defaultModel: 'k2p5',
-        description: 'Kimi for Coding plan — 262K context, 32K output',
+        defaultModel: 'kimi-k2.6',
+        description: 'Kimi for Coding subscription — K2.6, 256K context',
         pricing: 'Subscription plan',
         compatibility: ['claude'],
         apiFormat: 'anthropic',
         availableModels: [
-            { id: 'k2p5', name: 'Kimi K2.5', type: 'reasoning', context: '262k', note: '32K output, vision support' },
+            { id: 'kimi-k2.6', name: 'Kimi K2.6', type: 'reasoning', context: '256k', note: 'Latest flagship — best for coding' },
+            { id: 'kimi-k2.6-thinking', name: 'Kimi K2.6 Thinking', type: 'reasoning', context: '256k', note: 'Deep reasoning variant' },
+            { id: 'kimi-k2-turbo-preview', name: 'Kimi K2 Turbo', type: 'reasoning', context: '256k', note: 'Fast tier' },
+            { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking', type: 'reasoning', context: '256k' },
+            { id: 'kimi-k2-thinking-turbo', name: 'Kimi K2 Thinking Turbo', type: 'reasoning', context: '256k' },
         ]
     },
     deepseek: {
@@ -92,10 +107,15 @@ exports.PROVIDERS = {
         displayName: 'DeepSeek',
         baseUrl: 'https://api.deepseek.com/anthropic',
         defaultModel: 'deepseek-chat',
-        description: 'DeepSeek via Anthropic-compatible API',
+        smallFastModel: 'deepseek-chat',
+        description: 'DeepSeek V3.2 via Anthropic-compatible API',
         pricing: '$0.28-$0.42 per million tokens (lowest cost)',
         compatibility: ['claude'],
-        apiFormat: 'anthropic'
+        apiFormat: 'anthropic',
+        availableModels: [
+            { id: 'deepseek-chat', name: 'DeepSeek V3.2 (chat)', type: 'text', context: '128k', note: 'V3.2 non-thinking — best for coding' },
+            { id: 'deepseek-reasoner', name: 'DeepSeek V3.2 (reasoner)', type: 'reasoning', context: '128k', note: 'V3.2 thinking, 64K max output' },
+        ]
     },
     glm: {
         name: 'glm',
@@ -107,39 +127,39 @@ exports.PROVIDERS = {
         compatibility: ['claude'],
         apiFormat: 'anthropic',
         availableModels: [
-            // ── Verified working (2026-03-31) ──
-            { id: 'glm-5.1', name: 'GLM-5.1', type: 'reasoning', context: '128k', note: 'Latest, best quality' },
-            { id: 'glm-5', name: 'GLM-5', type: 'reasoning', context: '128k', note: 'Deep thinking' },
-            { id: 'glm-4.7', name: 'GLM-4.7', type: 'reasoning', context: '128k', note: 'Strong general' },
-            { id: 'glm-4.7-flash', name: 'GLM-4.7 Flash', type: 'reasoning', context: '128k', note: 'Free tier' },
-            { id: 'glm-4.5', name: 'GLM-4.5', type: 'text', context: '128k' },
-            { id: 'glm-4.5-air', name: 'GLM-4.5 Air', type: 'text', context: '128k' },
-            { id: 'glm-4.5-flash', name: 'GLM-4.5 Flash', type: 'text', context: '128k' },
+            // ── Verified on docs.z.ai (2026-04-21) ──
+            { id: 'glm-5.1', name: 'GLM-5.1', type: 'reasoning', context: '200k', note: 'Latest — SOTA SWE-Bench Pro / Terminal-Bench 2.0' },
+            { id: 'glm-5', name: 'GLM-5', type: 'reasoning', context: '200k', note: 'SWE-bench Verified 77.8, 128K max output' },
+            { id: 'glm-5-air', name: 'GLM-5 Air', type: 'reasoning', context: '200k', note: 'Lighter/faster tier' },
+            { id: 'glm-5v-turbo', name: 'GLM-5V Turbo', type: 'vision', context: '200k', note: 'Vision-capable' },
+            { id: 'glm-4.6', name: 'GLM-4.6', type: 'reasoning', context: '200k', note: 'Prior flagship' },
         ]
     },
     dashscope: {
         name: 'dashscope',
         displayName: 'Alibaba Cloud Coding Plan (Anthropic)',
         baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic',
-        defaultModel: 'qwen3-coder-next',
-        smallFastModel: 'qwen3-coder-plus',
+        defaultModel: 'qwen3-coder-plus',
+        smallFastModel: 'qwen3-coder-flash',
         description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via Anthropic-compat API (sk-sp-... key)',
         pricing: 'Subscription plan',
         compatibility: ['claude'],
         apiFormat: 'anthropic',
         availableModels: [
-            // ── Qwen (native) — verified 2026-03-31 ──
-            { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', type: 'text', context: '131k', note: 'Latest Qwen coder' },
-            { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus', type: 'text', context: '131k' },
+            // ── Qwen native — verified on alibabacloud.com/help/en/model-studio/qwen-coder (2026-04-21) ──
+            { id: 'qwen3-coder-plus', name: 'Qwen3 Coder Plus', type: 'text', context: '1M', note: 'Max quality — best for complex coding' },
+            { id: 'qwen3-coder-next', name: 'Qwen3 Coder Next', type: 'text', context: '131k', note: 'Recommended default (quality/speed/cost)' },
+            { id: 'qwen3-coder-flash', name: 'Qwen3 Coder Flash', type: 'text', context: '131k', note: 'Cheapest tier' },
             { id: 'qwen3-max-2026-01-23', name: 'Qwen3 Max', type: 'reasoning', context: '131k' },
-            { id: 'qwen3.5-plus', name: 'Qwen3.5 Plus', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
             // ── Zhipu GLM (bundled) ──
-            { id: 'glm-5', name: 'GLM-5 (Zhipu)', type: 'reasoning', context: '131k', note: 'Best GLM on this plan' },
-            { id: 'glm-4.7', name: 'GLM-4.7 (Zhipu)', type: 'reasoning', context: '131k' },
+            { id: 'glm-5.1', name: 'GLM-5.1 (Zhipu)', type: 'reasoning', context: '200k', note: 'Best GLM on this plan' },
+            { id: 'glm-5', name: 'GLM-5 (Zhipu)', type: 'reasoning', context: '200k' },
+            { id: 'glm-4.6', name: 'GLM-4.6 (Zhipu)', type: 'reasoning', context: '200k' },
             // ── Kimi (bundled) ──
-            { id: 'kimi-k2.5', name: 'Kimi K2.5 (Moonshot)', type: 'reasoning+vision', context: '131k', note: 'Vision support' },
+            { id: 'kimi-k2.6', name: 'Kimi K2.6 (Moonshot)', type: 'reasoning', context: '256k', note: 'Long-horizon coding' },
+            { id: 'kimi-k2-turbo-preview', name: 'Kimi K2 Turbo (Moonshot)', type: 'reasoning', context: '256k' },
             // ── MiniMax (bundled) ──
-            { id: 'MiniMax-M2.5', name: 'MiniMax M2.5', type: 'reasoning', context: '200k', note: 'Long context' },
+            { id: 'MiniMax-M2.7', name: 'MiniMax M2.7', type: 'reasoning', context: '205k', note: 'Latest MiniMax' },
         ]
     },
     // ═══════════════════════════════════════════════════════════
@@ -184,10 +204,38 @@ exports.PROVIDERS = {
         baseUrl: 'https://openrouter.ai/api/v1',
         defaultModel: 'anthropic/claude-sonnet-4.5',
         smallFastModel: 'anthropic/claude-3.5-haiku',
-        description: '300+ models: Claude, Gemini, GPT, Llama, etc.',
+        description: '300+ models: Claude, Gemini, GPT, Grok, Llama, etc.',
         pricing: 'Varies by model',
         compatibility: ['codex'],
-        apiFormat: 'openai'
+        apiFormat: 'openai',
+        availableModels: [
+            { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', type: 'reasoning', context: '200k' },
+            { id: 'anthropic/claude-opus-4.7', name: 'Claude Opus 4.7', type: 'reasoning', context: '1M' },
+            { id: 'x-ai/grok-4.20', name: 'Grok 4.20', type: 'reasoning', context: '2M', note: 'xAI flagship' },
+            { id: 'x-ai/grok-4-1-fast', name: 'Grok 4.1 Fast', type: 'reasoning', context: '2M', note: 'Fast tier' },
+            { id: 'x-ai/grok-code-fast-1', name: 'Grok Code Fast 1', type: 'text', context: '256k', note: 'Coding-tuned' },
+            { id: 'openai/gpt-5.4', name: 'GPT-5.4', type: 'reasoning', context: '400k' },
+            { id: 'google/gemini-3.0-pro', name: 'Gemini 3.0 Pro', type: 'reasoning', context: '2M' },
+        ]
+    },
+    grok: {
+        name: 'grok',
+        displayName: 'xAI Grok',
+        baseUrl: 'https://api.x.ai/v1',
+        defaultModel: 'grok-4.20-0309-reasoning',
+        smallFastModel: 'grok-4-1-fast-reasoning',
+        description: 'xAI Grok — native OpenAI-compatible API (NOT Anthropic-compat; pair with Codex CLI)',
+        pricing: 'Pay-per-token; subscription does NOT include API',
+        compatibility: ['codex'],
+        apiFormat: 'openai',
+        availableModels: [
+            { id: 'grok-4.20-0309-reasoning', name: 'Grok 4.20 (reasoning)', type: 'reasoning', context: '2M', note: 'Flagship' },
+            { id: 'grok-4.20-0309-non-reasoning', name: 'Grok 4.20 (non-reasoning)', type: 'text', context: '2M' },
+            { id: 'grok-4.20-multi-agent-0309', name: 'Grok 4.20 Multi-Agent', type: 'reasoning', context: '2M' },
+            { id: 'grok-4-1-fast-reasoning', name: 'Grok 4.1 Fast (reasoning)', type: 'reasoning', context: '2M', note: 'Fast tier' },
+            { id: 'grok-4-1-fast-non-reasoning', name: 'Grok 4.1 Fast (non-reasoning)', type: 'text', context: '2M' },
+            { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', type: 'text', context: '256k', note: 'Coding-tuned (legacy)' },
+        ]
     },
     // ═══════════════════════════════════════════════════════════
     // CUSTOM/LOCAL PROVIDERS (for localhost, LAN, self-hosted)

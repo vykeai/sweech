@@ -113,10 +113,10 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
   },
   {
     name: 'claude-kimi',
-    description: 'Kimi for Coding (Moonshot AI) — 262K context',
+    description: 'Kimi for Coding (Moonshot AI) — K2.6, 256K context',
     cliType: 'claude',
     provider: 'kimi-coding',
-    model: 'k2p5',
+    model: 'kimi-k2.6',
     tags: ['kimi', 'moonshot', 'coding-plan'],
   },
   {
@@ -132,6 +132,14 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
     cliType: 'gemini',
     provider: 'google',
     tags: ['gemini', 'google', 'pro'],
+  },
+  {
+    name: 'codex-grok',
+    description: 'xAI Grok — Codex CLI (OpenAI-compatible API, requires xAI API key)',
+    cliType: 'codex',
+    provider: 'grok',
+    model: 'grok-4.20-0309-reasoning',
+    tags: ['grok', 'xai', 'codex'],
   },
   {
     name: 'local-ollama',

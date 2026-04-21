@@ -2423,6 +2423,107 @@ program
         process.exit(1);
     }
 });
+// ── query: show profile details ────────────────────────────────────────────────
+program
+    .command('query <profile-name>')
+    .description('Show details for a profile: model, provider, CLI type, capabilities')
+    .option('--json', 'Output as JSON')
+    .action((profileName, opts) => {
+    const config = new config_1.ConfigManager();
+    const profiles = config.getProfiles();
+    const profile = profiles.find(p => p.commandName === profileName || p.name === profileName);
+    if (!profile) {
+        console.error(chalk_1.default.red(`Profile '${profileName}' not found.`));
+        console.error(chalk_1.default.dim(`  Run \`sweech list\` to see available profiles.`));
+        process.exit(1);
+    }
+    const provider = (0, providers_1.getProvider)(profile.provider);
+    const model = profile.model ?? provider?.defaultModel ?? 'unknown';
+    const smallModel = profile.smallFastModel ?? provider?.smallFastModel ?? null;
+    const result = {
+        name: profile.name,
+        commandName: profile.commandName,
+        cliType: profile.cliType,
+        provider: profile.provider,
+        providerDisplayName: provider?.displayName ?? profile.provider,
+        model,
+        smallFastModel: smallModel,
+        baseUrl: profile.baseUrl ?? provider?.baseUrl ?? null,
+        pricing: provider?.pricing ?? null,
+        apiFormat: provider?.apiFormat ?? null,
+        capabilities: {
+            vision: model.includes('claude') || model.includes('gpt'),
+            streaming: true,
+        },
+        sharedWith: profile.sharedWith ?? null,
+    };
+    if (opts.json) {
+        process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+        return;
+    }
+    console.log(chalk_1.default.bold(`\n  ${result.commandName}  `) + chalk_1.default.dim(`(${result.name})\n`));
+    console.log(chalk_1.default.cyan('  Provider:'), result.providerDisplayName);
+    console.log(chalk_1.default.cyan('  CLI:     '), result.cliType);
+    console.log(chalk_1.default.cyan('  Model:   '), result.model);
+    if (result.smallFastModel)
+        console.log(chalk_1.default.cyan('  Fast:    '), result.smallFastModel);
+    if (result.baseUrl)
+        console.log(chalk_1.default.cyan('  Base URL:'), result.baseUrl);
+    if (result.pricing)
+        console.log(chalk_1.default.cyan('  Pricing: '), result.pricing);
+    if (result.sharedWith)
+        console.log(chalk_1.default.cyan('  Shared:  '), chalk_1.default.dim(`shares dirs with ${result.sharedWith}`));
+    console.log();
+});
+// ── models: list available models per provider ──────────────────────────────────
+program
+    .command('models')
+    .description('List available models per provider with context sizes and notes')
+    .option('--provider <name>', 'Filter to a specific provider')
+    .option('--json', 'Output as JSON')
+    .action((opts) => {
+    const providerList = Object.values(providers_1.PROVIDERS).filter(p => !p.isCustom);
+    const filtered = opts.provider
+        ? providerList.filter(p => p.name === opts.provider || p.displayName.toLowerCase() === opts.provider.toLowerCase())
+        : providerList;
+    if (opts.provider && filtered.length === 0) {
+        console.error(chalk_1.default.red(`Provider '${opts.provider}' not found.`));
+        process.exit(1);
+    }
+    if (opts.json) {
+        const out = filtered.map(p => ({
+            provider: p.name,
+            displayName: p.displayName,
+            defaultModel: p.defaultModel,
+            smallFastModel: p.smallFastModel ?? null,
+            pricing: p.pricing ?? null,
+            cliTypes: p.compatibility,
+            models: (p.availableModels ?? []).map(m => ({ id: m.id, name: m.name, type: m.type ?? null, context: m.context ?? null, note: m.note ?? null })),
+        }));
+        process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+        return;
+    }
+    for (const p of filtered) {
+        console.log(chalk_1.default.bold(`\n  ${p.displayName}`) + chalk_1.default.dim(` [${p.name}]  `) + chalk_1.default.dim(p.compatibility.join('/')));
+        if (p.pricing)
+            console.log(chalk_1.default.dim(`  ${p.pricing}`));
+        const models = p.availableModels ?? [];
+        if (models.length === 0) {
+            console.log(chalk_1.default.dim(`    default: ${p.defaultModel}`));
+            if (p.smallFastModel)
+                console.log(chalk_1.default.dim(`    fast:    ${p.smallFastModel}`));
+        }
+        else {
+            for (const m of models) {
+                const tag = m.id === p.defaultModel ? chalk_1.default.green(' ← default') : m.id === p.smallFastModel ? chalk_1.default.dim(' ← fast') : '';
+                const ctx = m.context ? chalk_1.default.dim(` [${m.context}]`) : '';
+                const note = m.note ? chalk_1.default.dim(`  ${m.note}`) : '';
+                console.log(`    ${chalk_1.default.cyan(m.id)}${ctx}${tag}${note}`);
+            }
+        }
+    }
+    console.log();
+});
 // ── Startup update check (non-blocking) ────────────────────────────────────────
 // Fire-and-forget: if the check completes before parse finishes, print a notice.
 // Skip for --help, --version, --complete, and the update command itself.
