@@ -164,9 +164,24 @@ class ConfigManager {
                     settings.env.ANTHROPIC_SMALL_FAST_MODEL = provider.smallFastModel;
                 }
             }
-            // Add timeout for providers that need it
-            if (provider.name === 'minimax') {
-                settings.env.API_TIMEOUT_MS = '3000000';
+            // Add timeout + retries for providers with flaky upstream streams.
+            // z.ai (glm) drops SSE connections under load with code 1234; MiniMax
+            // has slow cold-starts; Alibaba dashscope occasionally times out.
+            // Claude Code's default 60s timeout and 2 retries aren't enough for
+            // long tool-use chains through these proxies.
+            if (cliType !== 'codex') {
+                const providerName = provider.name;
+                if (providerName === 'minimax') {
+                    settings.env.API_TIMEOUT_MS = '3000000';
+                }
+                else if (providerName === 'glm' || providerName === 'dashscope' ||
+                    providerName === 'kimi' || providerName === 'kimi-coding') {
+                    settings.env.API_TIMEOUT_MS = '600000';
+                }
+                // All external Anthropic-compat providers benefit from extra retries.
+                if (providerName !== 'anthropic') {
+                    settings.env.ANTHROPIC_MAX_RETRIES = '5';
+                }
             }
             // Store OAuth token info if using OAuth (for refresh purposes)
             if (oauthToken) {
@@ -280,6 +295,9 @@ exec ${cli.command} "\${ARGS[@]}"
      */
     setupSharedDirs(commandName, masterCommandName, cliType) {
         const profileDir = this.getProfileDir(commandName);
+        if (!fs.existsSync(profileDir)) {
+            fs.mkdirSync(profileDir, { recursive: true });
+        }
         const isCodex = cliType === 'codex'
             || masterCommandName === 'codex'
             || commandName.startsWith('codex');
