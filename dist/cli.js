@@ -2535,125 +2535,173 @@ if (!skipUpdateCheck && process.argv.length > 2) {
         }
     }).catch(() => { });
 }
-// ── repair-sessions: fix stuck assistant turns that block `--continue` ───────
-// External providers (notably GLM-5.1 via z.ai) occasionally emit a
-// `thinking`-only block without a `stop_reason`, leaving the transcript in a
-// state that deadlocks Claude Code when the session is resumed. This command
-// patches those turns with `stop_reason: end_turn` + a stub text block so
-// resume works again. Creates a .bak on first rewrite.
+// ── repair: one-shot recovery for sweech-managed profiles ────────────────────
+// Bundles every "unstick the chat" flow we've needed:
+//   1. settings.json regeneration from ~/.sweech/config.json (fixes missing env
+//      when Claude Code falls through to OAuth)
+//   2. setupSharedDirs rewires the symlinks into ~/.claude/ for shared profiles
+//   3. createWrapperScript repopulates ~/.sweech/bin/<profile> shims
+//   4. (opt-in) scan session transcripts and patch assistant turns that are
+//      `thinking`-only / missing `stop_reason` — these deadlock --continue on
+//      GLM-5.1 and other thinking-capable third-party providers.
+// Every step is idempotent; rerun whenever anything feels off.
 program
-    .command('repair-sessions [profile]')
-    .description('Patch stuck assistant turns (thinking-only / missing stop_reason) in session transcripts')
-    .option('--dry-run', 'Report broken turns without rewriting files', false)
-    .option('--all', 'Scan every Sweech-managed profile + default claude/codex', false)
-    .action((profileName, opts) => {
+    .command('repair [profile]')
+    .description('Fix a profile: regenerate settings.json, wrappers, shared symlinks, and (optionally) stuck session transcripts')
+    .option('--sessions', 'Also scan session transcripts and patch stuck assistant turns', false)
+    .option('--dry-run', 'Report what would be done without writing anything', false)
+    .option('--all', 'Repair every Sweech-managed profile', false)
+    .action(async (profileName, opts) => {
     const cfgMgr = new config_1.ConfigManager();
-    const roots = [];
-    const home = require('os').homedir();
-    if (opts.all) {
-        roots.push(path.join(home, '.claude', 'projects'));
-        for (const p of cfgMgr.getProfiles()) {
-            roots.push(path.join(cfgMgr.getProfileDir(p.commandName), 'projects'));
+    const profiles = cfgMgr.getProfiles();
+    const targets = opts.all
+        ? profiles
+        : profileName
+            ? profiles.filter(p => p.commandName === profileName)
+            : profiles;
+    if (targets.length === 0) {
+        console.error(chalk_1.default.red(`No profiles to repair. Try: sweech repair --all`));
+        process.exit(1);
+    }
+    const mode = opts.dryRun ? chalk_1.default.yellow('DRY-RUN') : chalk_1.default.green('REPAIR');
+    console.log(chalk_1.default.bold(`\n${mode}  ${targets.length} profile(s)\n`));
+    let settingsRegenerated = 0;
+    let wrappersRegenerated = 0;
+    let symlinksRewired = 0;
+    for (const profile of targets) {
+        const line = `  ${chalk_1.default.bold(profile.commandName)} ${chalk_1.default.dim(`[${profile.provider}]`)}`;
+        console.log(line);
+        // 1. settings.json — only for profiles that have an explicit apiKey
+        //    (native OAuth profiles manage their own auth)
+        const provider = (0, providers_1.getProvider)(profile.provider);
+        if (provider && profile.apiKey) {
+            if (!opts.dryRun) {
+                cfgMgr.createProfileConfig(profile.commandName, provider, profile.apiKey, profile.cliType, undefined, false, profile.model);
+            }
+            console.log(chalk_1.default.dim(`    settings.json ✓`));
+            settingsRegenerated++;
+        }
+        // 2. shared symlinks (only when sharedWith is set)
+        if (profile.sharedWith) {
+            if (!opts.dryRun) {
+                cfgMgr.setupSharedDirs(profile.commandName, profile.sharedWith, profile.cliType);
+            }
+            console.log(chalk_1.default.dim(`    symlinks → ${profile.sharedWith} ✓`));
+            symlinksRewired++;
+        }
+        // 3. wrapper script in ~/.sweech/bin
+        const cli = (0, clis_1.getCLI)(profile.cliType);
+        if (cli) {
+            if (!opts.dryRun)
+                cfgMgr.createWrapperScript(profile.commandName, cli);
+            console.log(chalk_1.default.dim(`    wrapper ~/.sweech/bin/${profile.commandName} ✓`));
+            wrappersRegenerated++;
         }
     }
-    else if (profileName) {
-        roots.push(path.join(cfgMgr.getProfileDir(profileName), 'projects'));
-    }
-    else {
-        // Default: active profile based on cwd — fall back to all claude profiles
-        for (const p of cfgMgr.getProfiles().filter(p => p.cliType === 'claude')) {
-            roots.push(path.join(cfgMgr.getProfileDir(p.commandName), 'projects'));
-        }
-        roots.push(path.join(home, '.claude', 'projects'));
-    }
-    let filesScanned = 0;
-    let brokenFound = 0;
-    let filesPatched = 0;
-    const walk = (dir) => {
-        const out = [];
-        let entries;
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        }
-        catch {
-            return out;
-        }
-        for (const e of entries) {
-            const p = path.join(dir, e.name);
-            if (e.isDirectory())
-                out.push(...walk(p));
-            else if (e.isFile() && p.endsWith('.jsonl'))
-                out.push(p);
-        }
-        return out;
-    };
-    const isBrokenAssistant = (d) => {
-        if (d?.type !== 'assistant')
-            return false;
-        const msg = d.message;
-        if (!msg || msg.role !== 'assistant')
-            return false;
-        const content = Array.isArray(msg.content) ? msg.content : [];
-        const missingStop = msg.stop_reason === undefined || msg.stop_reason === null;
-        const thinkingOnly = content.length > 0
-            && content.every((c) => c && c.type === 'thinking');
-        return missingStop || thinkingOnly;
-    };
-    for (const root of roots) {
-        for (const file of walk(root)) {
-            filesScanned++;
-            let raw;
+    console.log();
+    console.log(chalk_1.default.green(`  ✓ ${settingsRegenerated} settings.json, ${symlinksRewired} symlink set(s), ${wrappersRegenerated} wrapper(s)`));
+    // 4. Optional: session transcript repair
+    if (opts.sessions) {
+        console.log(chalk_1.default.bold(`\n  Scanning session transcripts...`));
+        const roots = [];
+        const seen = new Set();
+        for (const p of targets) {
+            const dir = path.join(cfgMgr.getProfileDir(p.commandName), 'projects');
             try {
-                raw = fs.readFileSync(file, 'utf-8');
+                const real = fs.realpathSync(dir);
+                if (!seen.has(real)) {
+                    seen.add(real);
+                    roots.push(dir);
+                }
+            }
+            catch { }
+        }
+        const walk = (dir) => {
+            const out = [];
+            let entries;
+            try {
+                entries = fs.readdirSync(dir, { withFileTypes: true });
             }
             catch {
-                continue;
+                return out;
             }
-            const lines = raw.split('\n');
-            let changed = false;
-            const patched = lines.map(ln => {
-                if (!ln.trim())
-                    return ln;
-                let d;
+            for (const e of entries) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory())
+                    out.push(...walk(p));
+                else if (e.isFile() && p.endsWith('.jsonl'))
+                    out.push(p);
+            }
+            return out;
+        };
+        const isBrokenAssistant = (d) => {
+            if (d?.type !== 'assistant')
+                return false;
+            const msg = d.message;
+            if (!msg || msg.role !== 'assistant')
+                return false;
+            const content = Array.isArray(msg.content) ? msg.content : [];
+            const missingStop = msg.stop_reason === undefined || msg.stop_reason === null;
+            const thinkingOnly = content.length > 0
+                && content.every((c) => c && c.type === 'thinking');
+            return missingStop || thinkingOnly;
+        };
+        let filesScanned = 0, brokenFound = 0, filesPatched = 0;
+        for (const root of roots) {
+            for (const file of walk(root)) {
+                filesScanned++;
+                let raw;
                 try {
-                    d = JSON.parse(ln);
+                    raw = fs.readFileSync(file, 'utf-8');
                 }
                 catch {
-                    return ln;
+                    continue;
                 }
-                if (!isBrokenAssistant(d))
-                    return ln;
-                brokenFound++;
-                const msg = d.message || {};
-                const content = Array.isArray(msg.content) ? msg.content : [];
-                const hasVisible = content.some((c) => c?.type === 'text' || c?.type === 'tool_use');
-                if (!hasVisible) {
-                    content.push({ type: 'text', text: '[session recovered — prior turn stalled]' });
+                const lines = raw.split('\n');
+                let changed = false;
+                const patched = lines.map(ln => {
+                    if (!ln.trim())
+                        return ln;
+                    let d;
+                    try {
+                        d = JSON.parse(ln);
+                    }
+                    catch {
+                        return ln;
+                    }
+                    if (!isBrokenAssistant(d))
+                        return ln;
+                    brokenFound++;
+                    const msg = d.message || {};
+                    const content = Array.isArray(msg.content) ? msg.content : [];
+                    const hasVisible = content.some((c) => c?.type === 'text' || c?.type === 'tool_use');
+                    if (!hasVisible)
+                        content.push({ type: 'text', text: '[session recovered — prior turn stalled]' });
+                    msg.content = content;
+                    msg.stop_reason = 'end_turn';
+                    if (!('stop_sequence' in msg))
+                        msg.stop_sequence = null;
+                    d.message = msg;
+                    changed = true;
+                    return JSON.stringify(d);
+                });
+                if (changed && !opts.dryRun) {
+                    const bak = file + '.bak';
+                    if (!fs.existsSync(bak))
+                        fs.copyFileSync(file, bak);
+                    fs.writeFileSync(file, patched.join('\n'));
+                    filesPatched++;
                 }
-                msg.content = content;
-                msg.stop_reason = 'end_turn';
-                if (!('stop_sequence' in msg))
-                    msg.stop_sequence = null;
-                d.message = msg;
-                changed = true;
-                return JSON.stringify(d);
-            });
-            if (changed && !opts.dryRun) {
-                const bak = file + '.bak';
-                if (!fs.existsSync(bak))
-                    fs.copyFileSync(file, bak);
-                fs.writeFileSync(file, patched.join('\n'));
-                filesPatched++;
             }
         }
+        console.log(chalk_1.default.green(`  ✓ scanned ${filesScanned} transcript(s), ${brokenFound} broken turn(s)` +
+            (opts.dryRun ? '' : `, patched ${filesPatched} file(s) (originals → .bak)`)));
     }
-    const mode = opts.dryRun ? chalk_1.default.yellow('DRY-RUN') : chalk_1.default.green('APPLIED');
-    console.log(`\n${mode}  scanned ${chalk_1.default.bold(filesScanned)} transcript(s), found ${chalk_1.default.bold(brokenFound)} broken assistant turn(s)`);
-    if (!opts.dryRun && filesPatched > 0) {
-        console.log(chalk_1.default.dim(`        rewrote ${filesPatched} file(s); originals preserved as .bak`));
+    if (opts.dryRun) {
+        console.log(chalk_1.default.dim(`\n  Re-run without --dry-run to apply.\n`));
     }
-    else if (opts.dryRun && brokenFound > 0) {
-        console.log(chalk_1.default.dim('        re-run without --dry-run to patch them'));
+    else {
+        console.log();
     }
 });
 // Default action: interactive launcher when no command given
