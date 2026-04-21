@@ -100,7 +100,7 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
     description: 'Zhipu GLM models via z.ai direct',
     cliType: 'claude',
     provider: 'glm',
-    model: 'glm-5',
+    model: 'glm-5.1',
     tags: ['zai', 'z', 'zhipu', 'glm', 'coding-plan'],
   },
   {
