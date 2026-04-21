@@ -234,7 +234,7 @@ struct AccountsView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .frame(width: activeMiniMode ? 360 : (!hasMultipleGroups || !grouped ? 360 : groupedColumnCount >= 3 ? 980 : 680))
+        .frame(width: popoverWidth)
         .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .background(KeyboardShortcuts(
             onRefresh: { service.fetch() },
@@ -290,6 +290,16 @@ struct AccountsView: View {
         groupedColumns.count
     }
 
+    /// Popover width scales with column count so columns never get clipped.
+    /// Each card column needs ~280pt + 10pt spacing; plus 32pt for outer padding and scroll gutter.
+    private var popoverWidth: CGFloat {
+        if activeMiniMode { return 360 }
+        if !hasMultipleGroups || !grouped { return 360 }
+        let n = max(1, groupedColumnCount)
+        let computed = CGFloat(n) * 290 + CGFloat(max(0, n - 1)) * 10 + 32
+        return min(max(computed, 680), 1280)
+    }
+
     private var groupedLayout: some View {
         ScrollView {
             VStack(spacing: 10) {
@@ -311,7 +321,7 @@ struct AccountsView: View {
                                     }
                                 }
                             }
-                            .frame(minWidth: 240, maxWidth: .infinity)
+                            .frame(minWidth: 260, maxWidth: .infinity)
                             .animation(Sweech.Animation.medium, value: sortMode)
                         }
                     }
@@ -871,6 +881,9 @@ struct AccountCard: View {
                         Text(account.name)
                             .font(.system(size: 13, weight: .semibold, design: .monospaced))
                             .foregroundStyle(Sweech.Color.textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(1)
                         Image(systemName: copied ? "checkmark" : "doc.on.doc")
                             .font(.system(size: 9))
                             .foregroundStyle(copied ? Sweech.Color.ok : Sweech.Color.textMuted.opacity(0.3))
@@ -883,6 +896,8 @@ struct AccountCard: View {
                     Text(account.providerLabel)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Sweech.Color.warm)
+                        .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Sweech.Color.warm.opacity(0.1))
                         .clipShape(Capsule())
@@ -891,6 +906,8 @@ struct AccountCard: View {
                     Text(cliType)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Sweech.Color.accent)
+                        .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Sweech.Color.accent.opacity(0.1))
                         .clipShape(Capsule())
@@ -901,6 +918,8 @@ struct AccountCard: View {
                     Text(plan)
                         .font(.system(size: 9, weight: .bold))
                         .foregroundStyle(Sweech.Color.core)
+                        .lineLimit(1)
+                        .fixedSize()
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .background(Sweech.Color.core.opacity(0.1))
                         .clipShape(Capsule())
@@ -910,8 +929,11 @@ struct AccountCard: View {
                 if let promo = account.live?.promotion {
                     HStack(spacing: 3) {
                         Image(systemName: "sparkles").font(.system(size: 8))
-                        Text(promo.label).font(.system(size: 9, weight: .bold))
+                        Text(promo.label)
+                            .font(.system(size: 9, weight: .bold))
+                            .lineLimit(1)
                     }
+                    .fixedSize()
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(
@@ -924,8 +946,11 @@ struct AccountCard: View {
                 if let label = tier.badgeLabel {
                     HStack(spacing: 3) {
                         Image(systemName: tier.badgeIcon).font(.system(size: 8))
-                        Text(label).font(.system(size: 9, weight: .bold))
+                        Text(label)
+                            .font(.system(size: 9, weight: .bold))
+                            .lineLimit(1)
                     }
+                    .fixedSize()
                     .foregroundStyle(tier.badgeColor)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(tier.badgeColor.opacity(0.12))

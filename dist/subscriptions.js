@@ -104,29 +104,40 @@ function readClaudeJson(configDir) {
         }
         catch { }
     }
-    // Enrich with Keychain data (has rateLimitTier even when files don't)
-    if (process.platform === 'darwin' && result.oauthAccount && !result.oauthAccount.rateLimitTier) {
-        try {
-            const crypto = require('crypto');
-            const defaultDir = path.join(os.homedir(), '.claude');
-            const service = configDir === defaultDir
-                ? 'Claude Code-credentials'
-                : `Claude Code-credentials-${crypto.createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`;
-            const { execSync } = require('child_process');
-            const username = process.env.USER || os.userInfo().username;
-            const raw = execSync(`security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-            if (raw) {
-                const parsed = JSON.parse(raw);
-                const token = parsed.claudeAiOauth;
-                if (token?.rateLimitTier) {
-                    result.oauthAccount.rateLimitTier = token.rateLimitTier;
-                }
-                if (token?.subscriptionType && !result.oauthAccount.billingType) {
-                    result.oauthAccount.billingType = token.subscriptionType;
+    // Enrich with Keychain data — primary source for default claude (creds live
+    // in Keychain, not in .credentials.json). Also fills gaps when file-based
+    // auth is missing rateLimitTier.
+    if (process.platform === 'darwin') {
+        const needsEnrichment = !result.oauthAccount
+            || !result.oauthAccount.rateLimitTier
+            || !result.oauthAccount.billingType;
+        if (needsEnrichment) {
+            try {
+                const crypto = require('crypto');
+                const defaultDir = path.join(os.homedir(), '.claude');
+                const service = configDir === defaultDir
+                    ? 'Claude Code-credentials'
+                    : `Claude Code-credentials-${crypto.createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`;
+                const { execFileSync } = require('child_process');
+                const username = process.env.USER || os.userInfo().username;
+                const raw = execFileSync('security', ['find-generic-password', '-a', username, '-s', service, '-w'], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    const token = parsed.claudeAiOauth;
+                    if (token) {
+                        if (!result.oauthAccount)
+                            result.oauthAccount = {};
+                        if (token.rateLimitTier && !result.oauthAccount.rateLimitTier) {
+                            result.oauthAccount.rateLimitTier = token.rateLimitTier;
+                        }
+                        if (token.subscriptionType && !result.oauthAccount.billingType) {
+                            result.oauthAccount.billingType = token.subscriptionType;
+                        }
+                    }
                 }
             }
+            catch { }
         }
-        catch { }
     }
     return result;
 }
@@ -304,6 +315,11 @@ async function getAccountInfo(profiles, options = {}) {
             else
                 tokenStatus = 'no_token';
         }
+        // Derive human-readable plan label from rateLimitTier / billingType when not
+        // explicitly set in subscriptions.json. Keeps the UI consistent for the
+        // default claude profile (which has no user-set meta.plan).
+        const derivedPlan = derivePlanLabel(sub?.rateLimitTier, sub?.billingType, cliType);
+        const enrichedMeta = meta.plan ? meta : (derivedPlan ? { ...meta, plan: derivedPlan } : meta);
         return {
             name: p.name,
             commandName: p.commandName,
@@ -318,7 +334,7 @@ async function getAccountInfo(profiles, options = {}) {
             rateLimitTier: sub?.rateLimitTier,
             subscriptionCreatedAt: sub?.subscriptionCreatedAt,
             needsReauth,
-            meta,
+            meta: enrichedMeta,
             ...windows,
             ...(weeklyReset ?? {}),
             live,
@@ -327,4 +343,35 @@ async function getAccountInfo(profiles, options = {}) {
             tokenExpiresAt: live?.tokenExpiresAt,
         };
     }));
+}
+/**
+ * Map Anthropic rateLimitTier strings (e.g. 'default_claude_max_20x') and
+ * billingType strings ('max' / 'pro') to the short plan label shown in the UI.
+ */
+function derivePlanLabel(rateLimitTier, billingType, cliType) {
+    if (cliType === 'codex')
+        return undefined; // codex plan comes from live.planType
+    if (rateLimitTier) {
+        const t = rateLimitTier.toLowerCase();
+        if (t.includes('max_20x'))
+            return 'Max 20x';
+        if (t.includes('max_5x'))
+            return 'Max 5x';
+        if (t.includes('max'))
+            return 'Max';
+        if (t.includes('team'))
+            return 'Team';
+        if (t.includes('pro'))
+            return 'Pro';
+    }
+    if (billingType) {
+        const b = billingType.toLowerCase();
+        if (b === 'max')
+            return 'Max';
+        if (b === 'pro')
+            return 'Pro';
+        if (b === 'team')
+            return 'Team';
+    }
+    return undefined;
 }
