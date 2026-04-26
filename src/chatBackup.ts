@@ -7,14 +7,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import archiver from 'archiver';
-import { createCipheriv, randomBytes, pbkdf2Sync } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { ProfileConfig } from './config';
 
-const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const SALT_LENGTH = 32;
 const IV_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
 
 /**
  * Get size of directory in bytes
@@ -124,8 +125,8 @@ export async function backupChatHistory(
       message: 'Enter backup password:',
       mask: '*',
       validate: (input: string) => {
-        if (input.length < 8) {
-          return 'Password must be at least 8 characters';
+        if (input.length < 12) {
+          return 'Password must be at least 12 characters';
         }
         return true;
       }
@@ -189,12 +190,14 @@ export async function backupChatHistory(
   const key = pbkdf2Sync(password, salt, 100000, 32, 'sha256');
 
   // Encrypt
-  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
+  const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
   const encryptedData = Buffer.concat([cipher.update(zipData), cipher.final()]);
+  const authTag = cipher.getAuthTag();
 
-  // Write encrypted file with salt and IV prepended
-  const finalData = Buffer.concat([salt, iv, encryptedData]);
+  // Write encrypted file with salt, IV, and auth tag prepended
+  const finalData = Buffer.concat([salt, iv, authTag, encryptedData]);
   fs.writeFileSync(outputFile, finalData);
+  fs.chmodSync(outputFile, 0o600);
 
   // Clean up temp file
   fs.unlinkSync(tempZip);

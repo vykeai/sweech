@@ -12,37 +12,51 @@ import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { ConfigManager } from './config';
 
-const ENCRYPTION_ALGORITHM = 'aes-256-cbc';
+const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const SALT_LENGTH = 32;
 const IV_LENGTH = 16;
+const AUTH_TAG_LENGTH = 16;
 
 /**
- * Encrypt data with password
+ * Encrypt data with password using AES-256-GCM (authenticated encryption)
  */
 function encrypt(data: Buffer, password: string): Buffer {
   const salt = crypto.randomBytes(SALT_LENGTH);
   const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
   const iv = crypto.randomBytes(IV_LENGTH);
 
-  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
   const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
+  const authTag = cipher.getAuthTag();
 
-  // Combine salt + iv + encrypted data
-  return Buffer.concat([salt, iv, encrypted]);
+  // Combine salt + iv + authTag + encrypted data
+  return Buffer.concat([salt, iv, authTag, encrypted]);
 }
 
 /**
- * Decrypt data with password
+ * Decrypt data with password using AES-256-GCM (authenticated encryption)
+ * Throws if auth tag verification fails (detects tampering)
  */
 function decrypt(data: Buffer, password: string): Buffer {
   const salt = data.slice(0, SALT_LENGTH);
   const iv = data.slice(SALT_LENGTH, SALT_LENGTH + IV_LENGTH);
-  const encrypted = data.slice(SALT_LENGTH + IV_LENGTH);
+  const authTag = data.slice(SALT_LENGTH + IV_LENGTH, SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
+  const encrypted = data.slice(SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH);
+
+  if (authTag.length < AUTH_TAG_LENGTH) {
+    throw new Error('Invalid encrypted data: missing auth tag');
+  }
 
   const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
 
-  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv);
-  return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
+  decipher.setAuthTag(authTag);
+
+  try {
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  } catch {
+    throw new Error('Decryption failed: incorrect password or tampered data');
+  }
 }
 
 /**
@@ -65,8 +79,8 @@ export async function backupSweetch(outputFile?: string): Promise<void> {
       message: 'Enter password to encrypt backup:',
       mask: '*',
       validate: (input: string) => {
-        if (!input || input.length < 6) {
-          return 'Password must be at least 6 characters';
+        if (!input || input.length < 12) {
+          return 'Password must be at least 12 characters';
         }
         return true;
       }
@@ -109,6 +123,7 @@ export async function backupSweetch(outputFile?: string): Promise<void> {
       const zipData = fs.readFileSync(tempZip);
       const encrypted = encrypt(zipData, password);
       fs.writeFileSync(finalOutput, encrypted);
+      fs.chmodSync(finalOutput, 0o600);
 
       // Clean up temp file
       fs.unlinkSync(tempZip);
@@ -316,7 +331,7 @@ export async function restoreSweetch(backupFile: string): Promise<void> {
 
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
-    if (msg.includes('Bad decrypt')) {
+    if (msg.includes('Bad decrypt') || msg.includes('unsupported state') || msg.includes('Decryption failed')) {
       throw new Error('Incorrect password or corrupted backup file');
     }
     throw error;

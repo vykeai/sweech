@@ -71,7 +71,7 @@ export class ConfigManager {
   private ensureDirectories(): void {
     [this.configDir, this.profilesDir, this.binDir].forEach(dir => {
       if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       }
     });
   }
@@ -141,7 +141,7 @@ export class ConfigManager {
     const profileDir = this.getProfileDir(commandName);
 
     if (!fs.existsSync(profileDir)) {
-      fs.mkdirSync(profileDir, { recursive: true });
+      fs.mkdirSync(profileDir, { recursive: true, mode: 0o700 });
     }
 
     const settings: any = { env: {} };
@@ -334,7 +334,7 @@ exec ${cli.command} "\${ARGS[@]}"
   public setupSharedDirs(commandName: string, masterCommandName: string, cliType?: string): void {
     const profileDir = this.getProfileDir(commandName);
     if (!fs.existsSync(profileDir)) {
-      fs.mkdirSync(profileDir, { recursive: true });
+      fs.mkdirSync(profileDir, { recursive: true, mode: 0o700 });
     }
     const isCodex = cliType === 'codex'
       || masterCommandName === 'codex'
@@ -425,7 +425,7 @@ exec ${cli.command} "\${ARGS[@]}"
       // Create required isolated dirs (auth/runtime — never shared)
       for (const dir of ['log', 'tmp', 'shell_snapshots', 'sqlite']) {
         const d = path.join(profileDir, dir);
-        if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+        if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
       }
     }
   }
@@ -433,7 +433,7 @@ exec ${cli.command} "\${ARGS[@]}"
   private backupFile(filePath: string, commandName: string): void {
     const backupDir = path.join(this.configDir, 'backups', commandName);
     if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
+      fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     }
     const basename = path.basename(filePath);
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');

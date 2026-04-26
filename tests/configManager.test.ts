@@ -42,15 +42,15 @@ describe('ConfigManager', () => {
     test('creates necessary directories', () => {
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
         mockConfigDir,
-        { recursive: true }
+        { recursive: true, mode: 0o700 }
       );
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
         path.join(mockConfigDir, 'profiles'),
-        { recursive: true }
+        { recursive: true, mode: 0o700 }
       );
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
         path.join(mockConfigDir, 'bin'),
-        { recursive: true }
+        { recursive: true, mode: 0o700 }
       );
     });
 

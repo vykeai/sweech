@@ -20,20 +20,22 @@ describe('Backup and Restore', () => {
       const salt = crypto.randomBytes(32);
       const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
       const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
       const encrypted = Buffer.concat([
         salt,
         iv,
         cipher.update(originalData),
         cipher.final()
       ]);
+      const authTag = cipher.getAuthTag();
 
       // Decrypt
       const extractedSalt = encrypted.slice(0, 32);
       const extractedIv = encrypted.slice(32, 48);
       const encryptedData = encrypted.slice(48);
       const decryptKey = crypto.pbkdf2Sync(password, extractedSalt, 100000, 32, 'sha256');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', decryptKey, extractedIv);
+      const decipher = crypto.createDecipheriv('aes-256-gcm', decryptKey, extractedIv, { authTagLength: 16 });
+      decipher.setAuthTag(authTag);
       const decrypted = Buffer.concat([
         decipher.update(encryptedData),
         decipher.final()
@@ -51,24 +53,21 @@ describe('Backup and Restore', () => {
       const salt = crypto.randomBytes(32);
       const key = crypto.pbkdf2Sync(correctPassword, salt, 100000, 32, 'sha256');
       const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
       const encrypted = Buffer.concat([
-        salt,
-        iv,
         cipher.update(originalData),
         cipher.final()
       ]);
+      const authTag = cipher.getAuthTag();
 
       // Try to decrypt with wrong password
-      const extractedSalt = encrypted.slice(0, 32);
-      const extractedIv = encrypted.slice(32, 48);
-      const encryptedData = encrypted.slice(48);
-      const wrongKey = crypto.pbkdf2Sync(wrongPassword, extractedSalt, 100000, 32, 'sha256');
-      const decipher = crypto.createDecipheriv('aes-256-cbc', wrongKey, extractedIv);
+      const wrongKey = crypto.pbkdf2Sync(wrongPassword, salt, 100000, 32, 'sha256');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', wrongKey, iv, { authTagLength: 16 });
+      decipher.setAuthTag(authTag);
 
       expect(() => {
         Buffer.concat([
-          decipher.update(encryptedData),
+          decipher.update(encrypted),
           decipher.final()
         ]);
       }).toThrow();
@@ -77,11 +76,11 @@ describe('Backup and Restore', () => {
 
   describe('Password Validation', () => {
     test('validates minimum password length', () => {
-      const shortPassword = '12345'; // Only 5 characters
-      const validPassword = '123456'; // 6 characters
+      const shortPassword = '12345678901'; // Only 11 characters
+      const validPassword = '123456789012'; // 12 characters
 
-      expect(shortPassword.length).toBeLessThan(6);
-      expect(validPassword.length).toBeGreaterThanOrEqual(6);
+      expect(shortPassword.length).toBeLessThan(12);
+      expect(validPassword.length).toBeGreaterThanOrEqual(12);
     });
 
     test('password confirmation matching', () => {
@@ -133,7 +132,7 @@ describe('Backup and Restore', () => {
     });
   });
 
-  describe('AES-256-CBC Encryption', () => {
+  describe('AES-256-GCM Encryption', () => {
     test('uses correct cipher algorithm', () => {
       const password = 'test-password';
       const salt = crypto.randomBytes(32);
@@ -141,7 +140,7 @@ describe('Backup and Restore', () => {
       const iv = crypto.randomBytes(16);
 
       // This should not throw
-      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
       expect(cipher).toBeDefined();
     });
 
@@ -220,14 +219,16 @@ describe('Backup and Restore', () => {
       expect(() => {
         const salt = corruptedData.slice(0, 32);
         const iv = corruptedData.slice(32, 48);
-        const encrypted = corruptedData.slice(48);
+        const authTag = corruptedData.slice(48, 64);
+        const encrypted = corruptedData.slice(64);
 
         if (encrypted.length === 0) {
           throw new Error('No encrypted data');
         }
 
         const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
-        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+        decipher.setAuthTag(authTag);
 
         Buffer.concat([
           decipher.update(encrypted),
@@ -238,10 +239,10 @@ describe('Backup and Restore', () => {
 
     test('validates password length on backup', () => {
       const tooShort = 'short';
-      const validLength = 'valid-password';
+      const validLength = 'valid-password-12';
 
-      expect(tooShort.length < 6).toBe(true);
-      expect(validLength.length >= 6).toBe(true);
+      expect(tooShort.length < 12).toBe(true);
+      expect(validLength.length >= 12).toBe(true);
     });
   });
 
@@ -269,7 +270,7 @@ describe('Backup and Restore', () => {
         const salt = crypto.randomBytes(32);
         const key = crypto.pbkdf2Sync(pass, salt, 100000, 32, 'sha256');
         const iv = crypto.randomBytes(16);
-        const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+        const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
         return Buffer.concat([
           salt,
           iv,
