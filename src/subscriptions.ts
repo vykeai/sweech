@@ -381,12 +381,12 @@ export async function getAccountInfo(
         const service = configDir === defaultDir
           ? 'Claude Code-credentials'
           : `Claude Code-credentials-${crypto.createHash('sha256').update(configDir).digest('hex').slice(0, 8)}`
-        const { execSync } = require('child_process')
+        const { execFileSync: _execFileSync } = require('child_process')
         const username = process.env.USER || os.userInfo().username
-        const raw = execSync(
-          `security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`,
-          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-        ).trim()
+        const raw = _execFileSync('security', [
+          'find-generic-password', '-a', username, '-s', service, '-w',
+        ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+          .trim()
         if (raw) {
           const token = JSON.parse(raw).claudeAiOauth
           // Expired access token is fine when a refresh token exists — Claude Code renews it automatically.

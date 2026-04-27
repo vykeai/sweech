@@ -17,10 +17,10 @@ jest.mock('os', () => ({
 }));
 
 import * as fs from 'fs';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const mockFs = fs as jest.Mocked<typeof fs>;
-const mockExecSync = execSync as jest.MockedFunction<typeof execSync>;
+const mockExecFileSync = execFileSync as jest.MockedFunction<typeof execFileSync>;
 
 import {
   loadPluginManifest,
@@ -181,7 +181,7 @@ describe('installPlugin', () => {
     });
     mockFs.mkdirSync.mockImplementation(() => undefined as any);
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await installPlugin('test-pkg');
 
@@ -195,23 +195,19 @@ describe('installPlugin', () => {
     mockFs.existsSync.mockReturnValue(false);
     mockFs.mkdirSync.mockImplementation(() => undefined as any);
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await installPlugin('sweech-plugin-test');
 
-    expect(mockExecSync).toHaveBeenCalledWith(
-      expect.stringContaining('npm install --prefix'),
-      expect.any(Object)
-    );
-    expect(mockExecSync).toHaveBeenCalledWith(
-      expect.stringContaining('sweech-plugin-test'),
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'npm', ['install', '--prefix', expect.any(String), 'sweech-plugin-test'],
       expect.any(Object)
     );
   });
 
   test('throws on npm install failure', async () => {
     mockFs.existsSync.mockReturnValue(true);
-    mockExecSync.mockImplementation(() => {
+    mockExecFileSync.mockImplementation(() => {
       const err = new Error('npm failed') as any;
       err.stderr = Buffer.from('404 Not Found');
       throw err;
@@ -230,7 +226,7 @@ describe('installPlugin', () => {
       return true;
     });
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await installPlugin('my-plugin');
 
@@ -255,7 +251,7 @@ describe('installPlugin', () => {
       return '';
     });
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await installPlugin('my-plugin');
 
@@ -282,7 +278,7 @@ describe('uninstallPlugin', () => {
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue(JSON.stringify(manifest));
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await uninstallPlugin('remove-me');
 
@@ -300,7 +296,7 @@ describe('uninstallPlugin', () => {
     mockFs.existsSync.mockReturnValue(true);
     mockFs.readFileSync.mockReturnValue(JSON.stringify(manifest));
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => {
+    mockExecFileSync.mockImplementation(() => {
       throw new Error('npm uninstall failed');
     });
 
@@ -534,12 +530,12 @@ describe('scoped package handling', () => {
       return true;
     });
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await installPlugin('@scope/my-plugin');
 
-    expect(mockExecSync).toHaveBeenCalledWith(
-      expect.stringContaining('@scope/my-plugin'),
+    expect(mockExecFileSync).toHaveBeenCalledWith(
+      'npm', ['install', '--prefix', expect.any(String), '@scope/my-plugin'],
       expect.any(Object)
     );
   });
@@ -551,7 +547,7 @@ describe('scoped package handling', () => {
       return true;
     });
     mockFs.writeFileSync.mockImplementation(() => {});
-    mockExecSync.mockImplementation(() => Buffer.from(''));
+    mockExecFileSync.mockImplementation(() => Buffer.from(''));
 
     await installPlugin('my-plugin@^2.0.0');
 

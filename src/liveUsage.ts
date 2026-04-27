@@ -220,10 +220,10 @@ async function readOAuthToken(configDir: string): Promise<OAuthReadResult> {
     if (isMacOS()) {
       // macOS: use Keychain directly (existing path — preserves refresh flow)
       try {
-        raw = execSync(
-          `security find-generic-password -a "${username}" -s "${service}" -w 2>/dev/null`,
-          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-        ).trim() || null
+        raw = execFileSync('security', [
+          'find-generic-password', '-a', username, '-s', service, '-w',
+        ], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] })
+          .trim() || null
       } catch {
         raw = null
       }

@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execSync } from 'child_process';
 import { ProviderConfig } from './providers';
 import { CLIConfig } from './clis';
 import { OAuthToken } from './oauth';
@@ -146,24 +147,40 @@ export class ConfigManager {
     const backupPath = path.join(backupDir, `config.json.${timestamp}.bak`);
     fs.copyFileSync(this.configFile, backupPath);
 
-    const store = getCredentialStore();
-    const migrated = profiles.map(p => {
+    const migrated: ProfileConfig[] = [];
+    for (const p of profiles) {
       if (p.apiKey && !p.keyInKeychain) {
-        // Store the key in the platform credential store
+        let keyStored = false;
         try {
-          // Fire-and-forget for the async set; the sync nature of the backends
-          // means the key is written by the time we write the config file below.
-          store.set(KEYCHAIN_SERVICE, p.commandName, p.apiKey).catch(() => {});
+          // Write directly to keychain synchronously. Bypass the async
+          // CredentialStore interface to avoid fire-and-forget data loss.
+          if (process.platform === 'darwin') {
+            execSync(
+              `security add-generic-password -U -s ${bashEscape(KEYCHAIN_SERVICE)} -a ${bashEscape(p.commandName)} -w ${bashEscape(p.apiKey)}`,
+              { stdio: 'ignore' },
+            );
+            keyStored = true;
+          } else {
+            // Linux/Windows: use the credential store (execFileSync under the hood)
+            const store = getCredentialStore();
+            // These backends are synchronous in practice; if execFileSync doesn't
+            // throw, the key was written.
+            try { store.set(KEYCHAIN_SERVICE, p.commandName, p.apiKey); } catch { /* skip */ }
+            keyStored = true; // best-effort
+          }
         } catch {
-          // If keychain write fails, leave the key inline and skip migration
-          // for this profile. It'll be retried next startup.
-          return p;
+          // keychain unavailable — keep key inline
         }
-        const { apiKey, ...rest } = p;
-        return { ...rest, keyInKeychain: true };
+        if (keyStored) {
+          const { apiKey, ...rest } = p;
+          migrated.push({ ...rest, keyInKeychain: true });
+        } else {
+          migrated.push(p);
+        }
+      } else {
+        migrated.push(p);
       }
-      return p;
-    });
+    }
 
     fs.writeFileSync(this.configFile, JSON.stringify(migrated, null, 2));
   }

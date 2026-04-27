@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { ProfileConfig } from './config';
 
 // ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ export async function installPlugin(npmPackage: string): Promise<void> {
   }
 
   try {
-    execSync(`npm install --prefix "${PLUGINS_DIR}" ${npmPackage}`, {
+    execFileSync('npm', ['install', '--prefix', PLUGINS_DIR, npmPackage], {
       stdio: 'pipe',
     });
   } catch (err: unknown) {
@@ -142,7 +142,7 @@ export async function installPlugin(npmPackage: string): Promise<void> {
  */
 export async function uninstallPlugin(name: string): Promise<void> {
   try {
-    execSync(`npm uninstall --prefix "${PLUGINS_DIR}" ${name}`, {
+    execFileSync('npm', ['uninstall', '--prefix', PLUGINS_DIR, name], {
       stdio: 'pipe',
     });
   } catch {
