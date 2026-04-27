@@ -414,7 +414,7 @@ describe('ConfigManager', () => {
       const scriptContent = callArgs[1] as string;
       expect(scriptContent).toContain('#!/bin/bash');
       expect(scriptContent).toContain('CLAUDE_CONFIG_DIR');
-      expect(scriptContent).toContain('exec claude "${ARGS[@]}"');
+      expect(scriptContent).toContain('exec "claude" "${ARGS[@]}"');
       expect(scriptContent).toContain('--yolo');
       expect(scriptContent).toContain('--dangerously-skip-permissions');
 
@@ -430,7 +430,7 @@ describe('ConfigManager', () => {
 
       const scriptContent = mockFs.writeFileSync.mock.calls[0][1] as string;
       expect(scriptContent).toContain(cli.configDirEnvVar);
-      expect(scriptContent).toContain(`exec ${cli.command}`);
+      expect(scriptContent).toContain(`exec "${cli.command}"`);
     });
   });
 

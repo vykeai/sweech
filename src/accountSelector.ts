@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { ConfigManager, ProfileConfig } from './config';
 import { CLIType } from './providers';
 import { SUPPORTED_CLIS, getCLI } from './clis';
@@ -35,7 +35,7 @@ export interface AccountRecommendation {
 /** Check whether a CLI binary is reachable on the PATH. */
 function isInstalled(command: string): boolean {
   try {
-    execSync(`which ${command}`, { stdio: 'ignore' });
+    execFileSync('which', [command], { stdio: 'ignore' });
     return true;
   } catch {
     return false;

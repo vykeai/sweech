@@ -53,6 +53,19 @@ export const CODEX_SHAREABLE_FILES = ['models_cache.json'] as const;
 // profiles to report the same account's usage.
 export const CODEX_SHAREABLE_DBS = ['logs_1.sqlite'] as const;
 
+/**
+ * Escape a string for safe inclusion inside double-quoted bash.
+ * Handles: backslash, double-quote, dollar, backtick, newline.
+ */
+function bashEscape(str: string): string {
+  return str
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\$/g, '\\$')
+    .replace(/`/g, '\\`')
+    .replace(/\n/g, '\\n');
+}
+
 export class ConfigManager {
   private configDir: string;
   private configFile: string;
@@ -251,13 +264,21 @@ export class ConfigManager {
     const wrapperPath = path.join(this.binDir, commandName);
     const usageFile = path.join(this.configDir, 'usage.json');
 
+    // Escape all interpolated values for safe bash inclusion
+    const eCommandName = bashEscape(commandName);
+    const eDisplayName = bashEscape(cli.displayName);
+    const eUsageFile = bashEscape(usageFile);
+    const eCliCommand = bashEscape(cli.command);
+    const eProfileDir = bashEscape(profileDir);
+    const eConfigDirEnvVar = bashEscape(cli.configDirEnvVar);
+
     // Create bash wrapper script with usage tracking
     const wrapperContent = `#!/bin/bash
-# 🍭 Sweetch wrapper for ${commandName} (${cli.displayName})
+# Sweetch wrapper for ${eCommandName} (${eDisplayName})
 
 # Log usage (background process to not slow down startup)
 (
-  USAGE_FILE="${usageFile}"
+  USAGE_FILE="${eUsageFile}"
   TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
   # Create or update usage.json
@@ -268,14 +289,14 @@ export class ConfigManager {
   fi
 
   # Append new record (simple JSON append)
-  RECORD="{\\"commandName\\":\\"${commandName}\\",\\"timestamp\\":\\"$TIMESTAMP\\"}"
+  RECORD="{\\"commandName\\":\\"${eCommandName}\\",\\"timestamp\\":\\"$TIMESTAMP\\"}"
   UPDATED=$(echo "$CONTENT" | sed "s/\\]$/,$RECORD]/")
   echo "$UPDATED" > "$USAGE_FILE"
 ) &
 
 # Skip usage tracking for help/version queries
 case "\${1:-}" in
-  --help|-h|--version|-V) exec ${cli.command} "$@" ;;
+  --help|-h|--version|-V) exec "${eCliCommand}" "$@" ;;
 esac
 
 # Transform arguments and intercept --model <id>
@@ -284,9 +305,9 @@ while [ $# -gt 0 ]; do
   case "\$1" in
     --model)
       # Update settings.json so Claude Code picks up the model (env vars get overridden by settings.json)
-      SETTINGS="${profileDir}/settings.json"
+      SETTINGS="${eProfileDir}/settings.json"
       if [ -f "\$SETTINGS" ] && command -v python3 &>/dev/null; then
-        if [ "${cli.command}" = "claude" ]; then
+        if [ "${eCliCommand}" = "claude" ]; then
           python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['ANTHROPIC_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
         else
           python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['OPENAI_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
@@ -295,7 +316,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --yolo)
-      if [ "${cli.command}" = "claude" ]; then
+      if [ "${eCliCommand}" = "claude" ]; then
         ARGS+=("--dangerously-skip-permissions")
       else
         ARGS+=("--yolo")
@@ -309,8 +330,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-export ${cli.configDirEnvVar}="${profileDir}"
-exec ${cli.command} "\${ARGS[@]}"
+export ${eConfigDirEnvVar}="${eProfileDir}"
+exec "${eCliCommand}" "\${ARGS[@]}"
 `;
 
     fs.writeFileSync(wrapperPath, wrapperContent, { mode: 0o755 });

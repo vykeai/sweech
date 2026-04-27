@@ -90,11 +90,10 @@ export class LinuxSecretToolStore implements CredentialStore {
 
   async set(service: string, account: string, password: string): Promise<void> {
     try {
-      // secret-tool reads the secret from stdin
-      execSync(
-        `echo ${escapeShellArg(password)} | secret-tool store --label ${escapeShellArg('sweech:' + service)} service ${escapeShellArg(service)} account ${escapeShellArg(account)}`,
-        { stdio: 'ignore' },
-      )
+      // secret-tool reads the secret from stdin — use execFileSync to avoid shell injection
+      execFileSync('secret-tool', [
+        'store', '--label', `sweech:${service}`, 'service', service, 'account', account,
+      ], { input: password, stdio: ['pipe', 'ignore', 'ignore'] })
     } catch {
       throw new Error(`Failed to write credential for service="${service}" account="${account}" via secret-tool`)
     }
