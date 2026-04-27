@@ -62,7 +62,7 @@ export function readCache(now?: number): UpdateCheckCache | null {
 export function writeCache(latest: string, now?: number): void {
   try {
     if (!fs.existsSync(CACHE_DIR)) {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      fs.mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
     }
     const cache: UpdateCheckCache = { timestamp: now ?? Date.now(), latest };
     fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');

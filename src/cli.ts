@@ -911,7 +911,7 @@ program
 
       // Update profile settings.json with new auth token (create if missing)
       const profileDir = config.getProfileDir(resolvedName);
-      fs.mkdirSync(profileDir, { recursive: true });
+      fs.mkdirSync(profileDir, { recursive: true, mode: 0o700 });
       const settingsPath = path.join(profileDir, 'settings.json');
       const settings = fs.existsSync(settingsPath)
         ? JSON.parse(fs.readFileSync(settingsPath, 'utf-8'))
@@ -942,7 +942,7 @@ program
   .action((action: string | undefined, opts: { cli: string; label?: string; multiplier?: number; expires?: string }) => {
     const promoFile = path.join(require('os').homedir(), '.sweech', 'promotions.json');
     const load = (): any[] => { try { return JSON.parse(fs.readFileSync(promoFile, 'utf-8')); } catch { return []; } };
-    const save = (p: any[]) => { fs.mkdirSync(path.dirname(promoFile), { recursive: true }); fs.writeFileSync(promoFile, JSON.stringify(p, null, 2)); };
+    const save = (p: any[]) => { fs.mkdirSync(path.dirname(promoFile), { recursive: true, mode: 0o700 }); fs.writeFileSync(promoFile, JSON.stringify(p, null, 2)); };
 
     if (!action || action === 'list') {
       const promos = load();

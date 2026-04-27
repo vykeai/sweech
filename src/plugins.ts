@@ -73,7 +73,7 @@ export function loadPluginManifest(): PluginManifest {
  */
 export function savePluginManifest(manifest: PluginManifest): void {
   if (!fs.existsSync(SWEECH_DIR)) {
-    fs.mkdirSync(SWEECH_DIR, { recursive: true });
+    fs.mkdirSync(SWEECH_DIR, { recursive: true, mode: 0o700 });
   }
 
   fs.writeFileSync(MANIFEST_PATH, JSON.stringify(manifest, null, 2));
@@ -92,7 +92,7 @@ export function savePluginManifest(manifest: PluginManifest): void {
  */
 export async function installPlugin(npmPackage: string): Promise<void> {
   if (!fs.existsSync(PLUGINS_DIR)) {
-    fs.mkdirSync(PLUGINS_DIR, { recursive: true });
+    fs.mkdirSync(PLUGINS_DIR, { recursive: true, mode: 0o700 });
   }
 
   try {

@@ -178,7 +178,7 @@ describe('updateChecker', () => {
       writeCache('0.3.0');
       expect(mockFs.mkdirSync).toHaveBeenCalledWith(
         path.join(os.homedir(), '.sweech'),
-        { recursive: true },
+        { recursive: true, mode: 0o700 },
       );
     });
 

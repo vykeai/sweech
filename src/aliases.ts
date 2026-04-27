@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { atomicWriteFileSync } from './atomicWrite';
 
 export type AliasMap = Record<string, string>;
 
@@ -37,7 +38,7 @@ export class AliasManager {
     }
 
     aliases[alias] = command;
-    fs.writeFileSync(this.aliasFile, JSON.stringify(aliases, null, 2));
+    atomicWriteFileSync(this.aliasFile, JSON.stringify(aliases, null, 2));
   }
 
   public removeAlias(alias: string): void {
@@ -48,7 +49,7 @@ export class AliasManager {
     }
 
     delete aliases[alias];
-    fs.writeFileSync(this.aliasFile, JSON.stringify(aliases, null, 2));
+    atomicWriteFileSync(this.aliasFile, JSON.stringify(aliases, null, 2));
   }
 
   public resolveAlias(commandOrAlias: string): string {

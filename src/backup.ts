@@ -16,13 +16,14 @@ const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const SALT_LENGTH = 32;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
+const PBKDF2_ITERATIONS = 600000; // OWASP 2024 recommendation for SHA-256
 
 /**
  * Encrypt data with password using AES-256-GCM (authenticated encryption)
  */
 function encrypt(data: Buffer, password: string): Buffer {
   const salt = crypto.randomBytes(SALT_LENGTH);
-  const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+  const key = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256');
   const iv = crypto.randomBytes(IV_LENGTH);
 
   const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
@@ -36,6 +37,9 @@ function encrypt(data: Buffer, password: string): Buffer {
 /**
  * Decrypt data with password using AES-256-GCM (authenticated encryption)
  * Throws if auth tag verification fails (detects tampering)
+ *
+ * Backward compatible: tries the current iteration count (600k) first,
+ * then falls back to the legacy count (100k) for older backups.
  */
 function decrypt(data: Buffer, password: string): Buffer {
   const salt = data.slice(0, SALT_LENGTH);
@@ -47,16 +51,24 @@ function decrypt(data: Buffer, password: string): Buffer {
     throw new Error('Invalid encrypted data: missing auth tag');
   }
 
-  const key = crypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+  // Try current iteration count first, then legacy for backward compatibility
+  const iterationsToTry = [PBKDF2_ITERATIONS, 100000];
 
-  const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
-  decipher.setAuthTag(authTag);
+  for (const iterations of iterationsToTry) {
+    const key = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
 
-  try {
-    return Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  } catch {
-    throw new Error('Decryption failed: incorrect password or tampered data');
+    const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });
+    decipher.setAuthTag(authTag);
+
+    try {
+      return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    } catch {
+      // Auth tag mismatch — try next iteration count
+      continue;
+    }
   }
+
+  throw new Error('Decryption failed: incorrect password or tampered data');
 }
 
 /**

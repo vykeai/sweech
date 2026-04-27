@@ -64,7 +64,7 @@ export function installLaunchd(port: number): void {
   try {
     const plistContent = generatePlist(port);
 
-    fs.mkdirSync(PLIST_DIR, { recursive: true });
+    fs.mkdirSync(PLIST_DIR, { recursive: true, mode: 0o700 });
     fs.writeFileSync(PLIST_PATH, plistContent, 'utf-8');
     console.log(chalk.green(`Wrote plist to ${PLIST_PATH}`));
 

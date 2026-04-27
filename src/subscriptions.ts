@@ -98,7 +98,7 @@ function readMeta(): Record<string, SubscriptionMeta> {
 }
 
 function writeMeta(data: Record<string, SubscriptionMeta>): void {
-  fs.mkdirSync(path.join(os.homedir(), '.sweech'), { recursive: true })
+  fs.mkdirSync(path.join(os.homedir(), '.sweech'), { recursive: true, mode: 0o700 })
   fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(data, null, 2))
 }
 

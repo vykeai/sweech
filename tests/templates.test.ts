@@ -171,7 +171,7 @@ describe('saveCustomTemplate', () => {
 
     expect(mockFs.mkdirSync).toHaveBeenCalledWith(
       expect.stringContaining('.sweech'),
-      { recursive: true }
+      { recursive: true, mode: 0o700 }
     );
   });
 

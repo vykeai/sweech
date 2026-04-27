@@ -186,7 +186,7 @@ export function loadCustomTemplates(): ProfileTemplate[] {
  */
 export function saveCustomTemplate(template: ProfileTemplate): void {
   if (!fs.existsSync(SWEECH_DIR)) {
-    fs.mkdirSync(SWEECH_DIR, { recursive: true });
+    fs.mkdirSync(SWEECH_DIR, { recursive: true, mode: 0o700 });
   }
 
   const templates = loadCustomTemplates();
@@ -216,7 +216,7 @@ export function deleteCustomTemplate(name: string): boolean {
   }
 
   if (!fs.existsSync(SWEECH_DIR)) {
-    fs.mkdirSync(SWEECH_DIR, { recursive: true });
+    fs.mkdirSync(SWEECH_DIR, { recursive: true, mode: 0o700 });
   }
 
   fs.writeFileSync(CUSTOM_TEMPLATES_PATH, JSON.stringify(filtered, null, 2));

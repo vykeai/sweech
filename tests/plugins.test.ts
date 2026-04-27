@@ -118,7 +118,7 @@ describe('savePluginManifest', () => {
 
     expect(mockFs.mkdirSync).toHaveBeenCalledWith(
       expect.stringContaining('.sweech'),
-      { recursive: true }
+      { recursive: true, mode: 0o700 }
     );
   });
 
@@ -187,7 +187,7 @@ describe('installPlugin', () => {
 
     expect(mockFs.mkdirSync).toHaveBeenCalledWith(
       expect.stringContaining('plugins'),
-      { recursive: true }
+      { recursive: true, mode: 0o700 }
     );
   });
 

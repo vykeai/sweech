@@ -17,6 +17,7 @@ import { ProviderConfig } from './providers';
 import { CLIConfig } from './clis';
 import { OAuthToken } from './oauth';
 import { getCredentialStore } from './credentialStore';
+import { atomicWriteFileSync } from './atomicWrite';
 
 export interface ProfileConfig {
   name: string;
@@ -182,7 +183,7 @@ export class ConfigManager {
       }
     }
 
-    fs.writeFileSync(this.configFile, JSON.stringify(migrated, null, 2));
+    atomicWriteFileSync(this.configFile, JSON.stringify(migrated, null, 2));
   }
 
   public getProfiles(): ProfileConfig[] {
@@ -235,12 +236,12 @@ export class ConfigManager {
     }
 
     profiles.push(storableProfile);
-    fs.writeFileSync(this.configFile, JSON.stringify(profiles, null, 2));
+    atomicWriteFileSync(this.configFile, JSON.stringify(profiles, null, 2));
   }
 
   public removeProfile(commandName: string): void {
     const profiles = this.getProfiles().filter(p => p.commandName !== commandName);
-    fs.writeFileSync(this.configFile, JSON.stringify(profiles, null, 2));
+    atomicWriteFileSync(this.configFile, JSON.stringify(profiles, null, 2));
 
     // Remove wrapper script
     const wrapperPath = path.join(this.binDir, commandName);

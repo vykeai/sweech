@@ -269,7 +269,7 @@ function readSessionTags(): Record<string, string> {
 function writeSessionTags(tags: Record<string, string>): void {
   const dir = path.dirname(SESSION_TAGS_FILE);
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
   fs.writeFileSync(SESSION_TAGS_FILE, JSON.stringify(tags, null, 2));
 }

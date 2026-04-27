@@ -16,6 +16,7 @@ const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const SALT_LENGTH = 32;
 const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
+const PBKDF2_ITERATIONS = 600000; // OWASP 2024 recommendation for SHA-256
 
 /**
  * Get size of directory in bytes
@@ -187,7 +188,7 @@ export async function backupChatHistory(
   const iv = randomBytes(IV_LENGTH);
 
   // Derive key from password
-  const key = pbkdf2Sync(password, salt, 100000, 32, 'sha256');
+  const key = pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, 32, 'sha256');
 
   // Encrypt
   const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, iv, { authTagLength: AUTH_TAG_LENGTH });

@@ -20,6 +20,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 import { execSync, execFileSync } from 'node:child_process'
 import { isMacOS, isLinux, isWindows } from './platform'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // ── Interface ────────────────────────────────────────────────────────────────
 
@@ -206,8 +207,8 @@ function readTokenFile(): Record<string, string> {
 }
 
 function writeTokenFile(store: Record<string, string>): void {
-  fs.mkdirSync(TOKENS_DIR, { recursive: true })
-  fs.writeFileSync(TOKENS_FILE, JSON.stringify(store, null, 2), { mode: 0o600 })
+  fs.mkdirSync(TOKENS_DIR, { recursive: true, mode: 0o700 })
+  atomicWriteFileSync(TOKENS_FILE, JSON.stringify(store, null, 2))
   // Ensure permissions are correct even if the file already existed.
   try {
     fs.chmodSync(TOKENS_FILE, 0o600)

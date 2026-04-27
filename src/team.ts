@@ -80,7 +80,7 @@ export function loadTeamConfig(): TeamConfig | null {
  * Write team config to ~/.sweech/team.json.
  */
 export function saveTeamConfig(config: TeamConfig): void {
-  fs.mkdirSync(path.dirname(TEAM_CONFIG_PATH), { recursive: true });
+  fs.mkdirSync(path.dirname(TEAM_CONFIG_PATH), { recursive: true, mode: 0o700 });
   fs.writeFileSync(TEAM_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 

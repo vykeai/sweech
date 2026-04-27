@@ -44,7 +44,7 @@ function git(args: string, cwd: string = SYNC_DIR): string {
 
 function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
 }
 

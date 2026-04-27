@@ -54,7 +54,7 @@ const AUDIT_FILE = path.join(SWEECH_DIR, 'audit.jsonl');
  */
 export function logAudit(entry: AuditEntry): void {
   if (!fs.existsSync(SWEECH_DIR)) {
-    fs.mkdirSync(SWEECH_DIR, { recursive: true });
+    fs.mkdirSync(SWEECH_DIR, { recursive: true, mode: 0o700 });
   }
 
   const record: AuditEntry = {

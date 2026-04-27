@@ -112,9 +112,11 @@ describe('AliasManager', () => {
 
       manager.addAlias('work', 'claude-mini');
 
+      // atomicWriteFileSync writes to a temp file first, then renames
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        mockAliasFile,
-        expect.stringContaining('\n') // Pretty-printed JSON
+        expect.stringContaining('.tmp.'),
+        expect.stringContaining('\n'), // Pretty-printed JSON
+        'utf-8'
       );
     });
   });

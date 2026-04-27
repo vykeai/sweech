@@ -10,6 +10,7 @@ import * as path from 'path'
 import * as os from 'os'
 import type { AccountInfo } from './subscriptions'
 import { sparkline } from './charts'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -53,8 +54,8 @@ function readHistoryFile(): HistoryEntry[] {
 
 function writeHistoryFile(entries: HistoryEntry[]): void {
   const dir = path.dirname(_historyFilePath)
-  fs.mkdirSync(dir, { recursive: true })
-  fs.writeFileSync(_historyFilePath, JSON.stringify(entries, null, 2))
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  atomicWriteFileSync(_historyFilePath, JSON.stringify(entries, null, 2))
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────

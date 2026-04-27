@@ -18,6 +18,7 @@ import * as http from 'http'
 import * as https from 'https'
 import { ConfigManager } from './config'
 import { getAccountInfo, getKnownAccounts } from './subscriptions'
+import { atomicWriteFileSync } from './atomicWrite'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -83,8 +84,8 @@ export function loadFedPeers(): FedPeer[] {
 }
 
 export function saveFedPeers(peers: FedPeer[]): void {
-  fs.mkdirSync(path.dirname(FED_PEERS_FILE), { recursive: true })
-  fs.writeFileSync(FED_PEERS_FILE, JSON.stringify(peers, null, 2))
+  fs.mkdirSync(path.dirname(FED_PEERS_FILE), { recursive: true, mode: 0o700 })
+  atomicWriteFileSync(FED_PEERS_FILE, JSON.stringify(peers, null, 2))
 }
 
 export function addPeer(peer: FedPeer): void {

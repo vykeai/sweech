@@ -81,7 +81,7 @@ function loadLastState(): LaunchState {
 function saveState(state: LaunchState): void {
   try {
     const dir = path.dirname(STATE_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.writeFileSync(STATE_FILE, JSON.stringify(state));
   } catch {}
 }

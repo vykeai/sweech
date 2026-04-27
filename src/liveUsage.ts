@@ -146,7 +146,7 @@ function readCache(): CacheStore {
 }
 
 function writeCache(store: CacheStore): void {
-  fs.mkdirSync(path.join(os.homedir(), '.sweech'), { recursive: true })
+  fs.mkdirSync(path.join(os.homedir(), '.sweech'), { recursive: true, mode: 0o700 })
   fs.writeFileSync(CACHE_FILE, JSON.stringify(store, null, 2))
 }
 
