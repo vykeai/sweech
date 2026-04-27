@@ -10,7 +10,8 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, CODEX_SHAREABLE_FILES, CODEX_SHAREABLE_DBS } from './config';
+import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, CODEX_SHAREABLE_FILES, CODEX_SHAREABLE_DBS, resolveApiKey, KEYCHAIN_SERVICE } from './config';
+import { getCredentialStore } from './credentialStore';
 import { getCLI } from './clis';
 import { getProvider, ModelInfo } from './providers';
 import { detectInstalledCLIs } from './cliDetection';
@@ -543,8 +544,9 @@ export async function runEdit(commandName: string): Promise<void> {
   console.log(chalk.gray(`  Provider: ${provider?.displayName}`));
   console.log(chalk.gray(`  Model: ${profile.model}`));
   const authMethod = profile.oauth ? 'OAuth' : 'API Key';
-  const authDisplay = profile.apiKey
-    ? `API Key: ${profile.apiKey.substring(0, 10)}***`
+  const resolvedKey = await resolveApiKey(profile);
+  const authDisplay = resolvedKey
+    ? `API Key: ${resolvedKey.substring(0, 10)}***`
     : `OAuth (${profile.oauth?.provider})`;
   console.log(chalk.gray(`  Auth: ${authDisplay}`));
   console.log();
@@ -646,8 +648,22 @@ export async function runEdit(commandName: string): Promise<void> {
     return;
   }
 
-  // Update profile
-  profile[field as keyof ProfileConfig] = newValue as any;
+  // Update profile — handle apiKey specially (store in keychain, not config.json)
+  let effectiveApiKey = await resolveApiKey(profile);
+  if (field === 'apiKey') {
+    effectiveApiKey = newValue;
+    // Store the new key in keychain
+    try {
+      const store = getCredentialStore();
+      await store.set(KEYCHAIN_SERVICE, commandName, newValue);
+    } catch { /* keychain write best-effort */ }
+    // Mark key in keychain, remove inline apiKey
+    delete profile.apiKey;
+    profile.keyInKeychain = true;
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (profile as any)[field] = newValue;
+  }
 
   // Save to config.json
   const allProfiles = profiles.map(p =>
@@ -658,7 +674,7 @@ export async function runEdit(commandName: string): Promise<void> {
   // Update settings.json (pass model override if model was changed)
   if (provider) {
     const modelOverride = field === 'model' ? newValue : profile.model;
-    config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType, undefined, false, modelOverride);
+    config.createProfileConfig(commandName, provider, effectiveApiKey, profile.cliType, undefined, false, modelOverride);
   }
 
   console.log(chalk.green(`\n✓ Updated ${field} for ${commandName}\n`));
@@ -693,7 +709,7 @@ export async function runClone(sourceName: string, targetName: string): Promise<
     }
   ]);
 
-  let apiKey = source.apiKey;
+  let apiKey = await resolveApiKey(source);
 
   if (!useSameKey) {
     const answer = await inquirer.prompt([

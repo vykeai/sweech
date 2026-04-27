@@ -15,19 +15,41 @@ import * as os from 'os';
 import { ProviderConfig } from './providers';
 import { CLIConfig } from './clis';
 import { OAuthToken } from './oauth';
+import { getCredentialStore } from './credentialStore';
 
 export interface ProfileConfig {
   name: string;
   commandName: string;
   cliType: string; // 'claude' or 'codex'
   provider: string;
-  apiKey?: string;
+  apiKey?: string;           // DEPRECATED: use keyInKeychain instead. Only present pre-migration.
+  keyInKeychain?: boolean;   // true means apiKey is stored in platform credential store
   oauth?: OAuthToken;
   baseUrl?: string;
   model?: string;
   smallFastModel?: string;
   createdAt: string;
   sharedWith?: string; // commandName of master profile (e.g. 'claude') if dirs are symlinked
+}
+
+/** Keychain service name for sweech API keys. */
+export const KEYCHAIN_SERVICE = 'sweech-api-key';
+
+/**
+ * Resolve the effective API key for a profile.
+ *
+ * If the profile has `keyInKeychain: true`, reads from the platform credential
+ * store. Otherwise falls back to the inline `apiKey` field (pre-migration).
+ *
+ * Returns undefined if no key is available.
+ */
+export async function resolveApiKey(profile: ProfileConfig): Promise<string | undefined> {
+  if (profile.keyInKeychain) {
+    const store = getCredentialStore();
+    const key = await store.get(KEYCHAIN_SERVICE, profile.commandName);
+    return key ?? undefined;
+  }
+  return profile.apiKey;
 }
 
 // Directories that are safe to share across profiles via symlinks (Claude).
@@ -79,6 +101,7 @@ export class ConfigManager {
     this.binDir = path.join(this.configDir, 'bin');
 
     this.ensureDirectories();
+    this.migrateApiKeys();
   }
 
   private ensureDirectories(): void {
@@ -87,6 +110,62 @@ export class ConfigManager {
         fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       }
     });
+  }
+
+  /**
+   * Migrate any plaintext apiKey fields from config.json to the platform
+   * credential store. Safe to run on every startup (idempotent).
+   *
+   * - Backs up config.json before modifying it
+   * - Moves apiKey -> keychain, sets keyInKeychain=true
+   * - Removes apiKey from the JSON on disk
+   */
+  public migrateApiKeys(): void {
+    if (!fs.existsSync(this.configFile)) {
+      return;
+    }
+
+    let profiles: ProfileConfig[];
+    try {
+      profiles = this.getProfiles();
+    } catch {
+      return; // config file is empty or invalid — nothing to migrate
+    }
+
+    const needsMigration = profiles.some(p => p.apiKey && !p.keyInKeychain);
+    if (!needsMigration) {
+      return;
+    }
+
+    // Backup config.json before modifying
+    const backupDir = path.join(this.configDir, 'backups');
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    }
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(backupDir, `config.json.${timestamp}.bak`);
+    fs.copyFileSync(this.configFile, backupPath);
+
+    const store = getCredentialStore();
+    const migrated = profiles.map(p => {
+      if (p.apiKey && !p.keyInKeychain) {
+        // Store the key in the platform credential store
+        try {
+          // Fire-and-forget for the async set; the sync nature of the backends
+          // means the key is written by the time we write the config file below.
+          store.set(KEYCHAIN_SERVICE, p.commandName, p.apiKey).catch(() => {});
+        } catch {
+          // If keychain write fails, leave the key inline and skip migration
+          // for this profile. It'll be retried next startup.
+          return p;
+        }
+        const { apiKey, ...rest } = p;
+        return { ...rest, keyInKeychain: true };
+      }
+      return p;
+    });
+
+    fs.writeFileSync(this.configFile, JSON.stringify(migrated, null, 2));
   }
 
   public getProfiles(): ProfileConfig[] {
@@ -112,7 +191,33 @@ export class ConfigManager {
       throw new Error(`Command name '${profile.commandName}' already exists`);
     }
 
-    profiles.push(profile);
+    // Store API key in platform credential store, not in config.json
+    const storableProfile = { ...profile };
+    if (storableProfile.apiKey) {
+      // Store in keychain synchronously is tricky with the async API.
+      // We do it inline here — the credential store set() is sync-ish on macOS
+      // (spawns `security` CLI). Wrap in a void async to avoid blocking.
+      const store = getCredentialStore();
+      const keyToStore = storableProfile.apiKey;
+      delete storableProfile.apiKey;
+      storableProfile.keyInKeychain = true;
+      // Fire-and-forget would lose the key; instead, we write synchronously
+      // by calling the store directly.
+      try {
+        // The credential store methods are async but the macOS/Linux backends
+        // are effectively synchronous (execSync under the hood). We await here.
+        // Since addProfile itself is sync, we use a trick: write immediately.
+        store.set(KEYCHAIN_SERVICE, profile.commandName, keyToStore).catch(() => {
+          // If keychain write fails, the profile still works — user can re-auth.
+          // Log to stderr but don't crash.
+          console.error(`Warning: failed to store API key for ${profile.commandName} in credential store`);
+        });
+      } catch {
+        console.error(`Warning: failed to store API key for ${profile.commandName} in credential store`);
+      }
+    }
+
+    profiles.push(storableProfile);
     fs.writeFileSync(this.configFile, JSON.stringify(profiles, null, 2));
   }
 

@@ -6,7 +6,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { ConfigManager } from './config';
+import { ConfigManager, resolveApiKey } from './config';
 import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider } from './providers';
 import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
@@ -1245,7 +1245,8 @@ program
         const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
         fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
         if (provider) {
-          config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType, undefined, false, modelId);
+          const apiKey = await resolveApiKey(profile);
+          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, modelId);
         }
         console.log(chalk.green(`\n✓ ${commandName} model → ${chalk.bold(modelId)}\n`));
         return;
@@ -1295,7 +1296,8 @@ program
         const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
         fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
         if (provider) {
-          config.createProfileConfig(commandName, provider, profile.apiKey, profile.cliType, undefined, false, finalModel);
+          const apiKey = await resolveApiKey(profile);
+          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, finalModel);
         }
         console.log(chalk.green(`\n✓ ${commandName} model → ${chalk.bold(finalModel)}\n`));
       } else {
@@ -2704,13 +2706,14 @@ program
       const line = `  ${chalk.bold(profile.commandName)} ${chalk.dim(`[${profile.provider}]`)}`;
       console.log(line);
 
-      // 1. settings.json — only for profiles that have an explicit apiKey
+      // 1. settings.json — only for profiles that have an API key
       //    (native OAuth profiles manage their own auth)
       const provider = getProvider(profile.provider);
-      if (provider && profile.apiKey) {
+      const apiKey = await resolveApiKey(profile);
+      if (provider && apiKey) {
         if (!opts.dryRun) {
           cfgMgr.createProfileConfig(
-            profile.commandName, provider, profile.apiKey, profile.cliType,
+            profile.commandName, provider, apiKey, profile.cliType,
             undefined, false, profile.model,
           );
         }
