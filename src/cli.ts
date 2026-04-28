@@ -29,6 +29,7 @@ import { buildLaunchArgs, shouldUseTmux, SWEECH_LAUNCH_FLAGS } from './launchCom
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { startSweechFedServerWithShutdown } from './fedServer';
+import { scrubSecrets } from './scrubSecrets';
 import { checkForUpdate, fetchChangelog } from './updateChecker';
 import { asciiBar, barColor } from './charts';
 import { installPlugin, uninstallPlugin, listPlugins } from './plugins';
@@ -67,7 +68,7 @@ program
     try {
       await runInit();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error during initialization:', msg));
       process.exit(1);
     }
@@ -174,7 +175,7 @@ program
       console.log(chalk.gray('Tip: You can add multiple accounts for the same provider!'));
       console.log(chalk.gray('   Example: claude-mini, minimax-work, minimax-personal, etc.'));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -361,7 +362,7 @@ program
       removeManagedProfile(commandName, { forceDependents: true }, config);
       console.log(chalk.green(`\n✓ Removed '${commandName}' successfully\n`));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -454,7 +455,7 @@ program
     try {
       await backupSweetch(options.output);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Backup failed:'), msg);
       process.exit(1);
     }
@@ -469,7 +470,7 @@ program
     try {
       await backupClaude(options.output);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Backup failed:'), msg);
       process.exit(1);
     }
@@ -483,7 +484,7 @@ program
     try {
       await restoreSweetch(backupFile);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Restore failed:'), msg);
       process.exit(1);
     }
@@ -670,7 +671,7 @@ program
 
       console.log();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -925,7 +926,7 @@ program
         console.log(chalk.gray(`  Token expires: ${new Date(token.expiresAt).toLocaleString()}\n`));
       }
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Authentication failed:'), msg);
       process.exit(1);
     }
@@ -1043,7 +1044,7 @@ program
         aliasManager.removeAlias(value);
         console.log(chalk.green(`\n✓ Removed alias '${value}'\n`));
       } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
         console.error(chalk.red('Error:'), msg);
         process.exit(1);
       }
@@ -1073,7 +1074,7 @@ program
         console.log(chalk.gray('Now you can use:'), chalk.bold(alias));
         console.log();
       } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
         console.error(chalk.red('Error:'), msg);
         process.exit(1);
       }
@@ -1173,7 +1174,7 @@ program
     try {
       await runDoctor();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1187,7 +1188,7 @@ program
     try {
       await runPath();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1201,7 +1202,7 @@ program
     try {
       await runTest(commandName);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1215,7 +1216,7 @@ program
     try {
       await runEdit(commandName);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1305,7 +1306,7 @@ program
         console.log(chalk.dim(`  Use: sweech model ${commandName} <model-id>\n`));
       }
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1319,7 +1320,7 @@ program
     try {
       await runClone(source, target);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1341,7 +1342,7 @@ program
       }
       console.log();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1373,7 +1374,7 @@ profileCmd
       });
       console.log();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1423,7 +1424,7 @@ profileCmd
       console.log(chalk.gray('  Config: ' + result.profileDir));
       console.log();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       if (opts.json) {
         process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
         console.error(msg);
@@ -1448,7 +1449,7 @@ profileCmd
 
       console.log(chalk.green(`\n✓ Renamed '${oldName}' to '${result.newName}'\n`));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       if (opts.json) {
         process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
         console.error(msg);
@@ -1474,7 +1475,7 @@ profileCmd
 
       console.log(chalk.green(`\n✓ Removed '${name}' successfully\n`));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       if (opts.json) {
         process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
         console.error(msg);
@@ -1504,7 +1505,7 @@ program
       }
       await runShare(profile, opts);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1519,7 +1520,7 @@ program
     try {
       await runUnshare(profile, opts);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1544,7 +1545,7 @@ program
       const profileDir = config.getProfileDir(commandName);
       await backupChatHistory(commandName, profileDir, options.output);
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Backup failed:'), msg);
       process.exit(1);
     }
@@ -1580,7 +1581,7 @@ program
       // Keep alive
       await new Promise(() => {});
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Failed to start server:'), msg);
       process.exit(1);
     }
@@ -1871,7 +1872,7 @@ pluginsCmd
       await installPlugin(npmPackage);
       console.log(chalk.green(`\n✓ Plugin "${npmPackage}" installed and enabled.\n`));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1885,7 +1886,7 @@ pluginsCmd
       await uninstallPlugin(name);
       console.log(chalk.green(`\n✓ Plugin "${name}" uninstalled.\n`));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -1973,7 +1974,7 @@ program
     try {
       await runReset();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
@@ -2022,7 +2023,7 @@ program
       execSyncUpdate('npm install -g github:vykeai/sweech', { stdio: 'inherit' });
       console.log(chalk.green('\n✓ sweech updated to ' + result.latest + '\n'));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Update failed:'), msg);
       process.exit(1);
     }
@@ -2406,7 +2407,7 @@ program
         process.stdout.write(json);
       }
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Export failed:'), msg);
       process.exit(1);
     }
@@ -2521,7 +2522,7 @@ program
       }
       console.log(chalk.dim(`  Run: ${commandName}\n`));
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Import failed:'), msg);
       process.exit(1);
     }
@@ -2543,7 +2544,7 @@ program
       // Keep alive
       await new Promise(() => {});
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Dashboard failed:'), msg);
       process.exit(1);
     }

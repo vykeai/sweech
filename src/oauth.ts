@@ -7,6 +7,7 @@ import * as url from 'url';
 import { randomBytes } from 'crypto';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import { scrubSecrets } from './scrubSecrets';
 
 export interface OAuthToken {
   accessToken: string;
@@ -204,7 +205,7 @@ async function exchangeCodeForToken(
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Token exchange failed: ${error}`);
+    throw new Error(`Token exchange failed: ${scrubSecrets(error)}`);
   }
 
   return response.json();

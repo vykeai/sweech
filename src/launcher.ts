@@ -16,6 +16,7 @@ import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { sweechEvents } from './events';
 import { runHook } from './plugins';
 import { isTmuxAvailable, launchInTmux } from './tmux';
+import { scrubSecrets } from './scrubSecrets';
 
 interface UsageBar {
   label: string;
@@ -746,9 +747,9 @@ export async function runLauncher(): Promise<void> {
         patchEntries(fresh);
         try { appendSnapshot(fresh); } catch {}
         draw();
-      }).catch(err => console.error('[sweech] usage refresh:', err.message || err));
+      }).catch(err => console.error('[sweech] usage refresh:', scrubSecrets(err.message || String(err))));
     }
-  }).catch(err => console.error('[sweech] initial fetch:', err.message || err));
+  }).catch(err => console.error('[sweech] initial fetch:', scrubSecrets(err.message || String(err))));
 
   // Enter alternate screen + hide cursor.
   // Enable SGR mouse reporting so scroll wheel arrives as \x1b[<64/65;...M sequences
@@ -795,7 +796,7 @@ export async function runLauncher(): Promise<void> {
         if (usageLoad === 'loaded') {
           getAccountInfo(
             accountList.map(a => ({ name: a.name, commandName: a.commandName })),
-          ).then(accounts => { patchEntries(accounts); draw(); }).catch(err => console.error('[sweech] bucket refresh:', err.message || err));
+          ).then(accounts => { patchEntries(accounts); draw(); }).catch(err => console.error('[sweech] bucket refresh:', scrubSecrets(err.message || String(err))));
         }
         draw();
       } else if (str === 'h' || str === 'H') {

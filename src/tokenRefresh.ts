@@ -9,6 +9,7 @@ import * as os from 'os';
 import { ProfileConfig } from './config';
 import { refreshOAuthToken, OAuthToken } from './oauth';
 import { sweechEvents } from './events';
+import { scrubSecrets } from './scrubSecrets';
 
 const TEN_MINUTES_MS = 10 * 60 * 1000;
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
@@ -94,7 +95,7 @@ export async function refreshExpiringTokens(profiles: ProfileConfig[]): Promise<
         expiresAt: newToken.expiresAt ? new Date(newToken.expiresAt).toISOString() : '',
       });
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = scrubSecrets(err instanceof Error ? err.message : String(err));
       console.error(`[sweech] token refresh failed for ${profile.name}:`, msg);
       sweechEvents.emit('token_expired', {
         account: profile.name,
@@ -112,10 +113,10 @@ export function startTokenRefreshLoop(
   intervalMs: number = DEFAULT_INTERVAL_MS,
 ): () => void {
   // Run immediately on start, then on the interval
-  refreshExpiringTokens(profiles).catch(err => console.error('[sweech] token refresh:', err.message || err));
+  refreshExpiringTokens(profiles).catch(err => console.error('[sweech] token refresh:', scrubSecrets(err.message || String(err))));
 
   const timer = setInterval(() => {
-    refreshExpiringTokens(profiles).catch(err => console.error('[sweech] token refresh:', err.message || err));
+    refreshExpiringTokens(profiles).catch(err => console.error('[sweech] token refresh:', scrubSecrets(err.message || String(err))));
   }, intervalMs);
 
   // Allow the Node process to exit even if the timer is still active
