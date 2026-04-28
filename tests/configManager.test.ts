@@ -131,8 +131,8 @@ describe('ConfigManager', () => {
 
       expect(mockFs.writeFileSync).toHaveBeenCalled();
       const callArgs = mockFs.writeFileSync.mock.calls[0];
-      // atomicWriteFileSync writes to a temp file (config.json.tmp.PID)
-      expect(String(callArgs[0])).toMatch(/config\.json\.tmp\.\d+$/);
+      // atomicWriteFileSync writes to a temp file (config.json.tmp.PID.timestamp)
+      expect(String(callArgs[0])).toMatch(/config\.json\.tmp\.\d+\.\d+$/);
 
       const writtenData = JSON.parse(callArgs[1] as string);
       expect(writtenData).toHaveLength(1);

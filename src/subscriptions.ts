@@ -11,6 +11,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { atomicWriteFileSync } from './atomicWrite'
 import { getLiveUsage, refreshLiveUsage, type LiveRateLimitData } from './liveUsage'
 import { SUPPORTED_CLIS } from './clis'
 import { checkUsageThresholds } from './usageMonitor'
@@ -99,7 +100,7 @@ function readMeta(): Record<string, SubscriptionMeta> {
 
 function writeMeta(data: Record<string, SubscriptionMeta>): void {
   fs.mkdirSync(path.join(os.homedir(), '.sweech'), { recursive: true, mode: 0o700 })
-  fs.writeFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(data, null, 2))
+  atomicWriteFileSync(SUBSCRIPTIONS_FILE, JSON.stringify(data, null, 2))
 }
 
 export function setMeta(commandName: string, config: Partial<SubscriptionMeta>): void {

@@ -133,7 +133,7 @@ export async function runShare(
 
     if (!fs.existsSync(targetPath)) {
       if (isDirItem) {
-        fs.mkdirSync(targetPath, { recursive: true });
+        fs.mkdirSync(targetPath, { recursive: true, mode: 0o700 });
       } else {
         fs.writeFileSync(targetPath, '');
       }
@@ -229,7 +229,7 @@ export async function runUnshare(
       && !(CODEX_SHAREABLE_FILES as readonly string[]).includes(item);
 
     if (isDirItem) {
-      fs.mkdirSync(linkPath, { recursive: true });
+      fs.mkdirSync(linkPath, { recursive: true, mode: 0o700 });
     } else {
       fs.writeFileSync(linkPath, '');
     }

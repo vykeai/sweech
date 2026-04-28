@@ -198,8 +198,9 @@ describe('UsageTracker', () => {
       tracker.clearStats();
 
       expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        mockUsageFile,
-        JSON.stringify([], null, 2)
+        expect.stringContaining(mockUsageFile),
+        JSON.stringify([], null, 2),
+        expect.anything()
       );
     });
 

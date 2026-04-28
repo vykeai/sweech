@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { atomicWriteFileSync } from './atomicWrite';
 
 export interface UsageRecord {
   commandName: string;
@@ -44,7 +45,7 @@ export class UsageTracker {
 
     // Keep last 1000 records
     const trimmed = records.slice(-1000);
-    fs.writeFileSync(this.usageFile, JSON.stringify(trimmed, null, 2));
+    atomicWriteFileSync(this.usageFile, JSON.stringify(trimmed, null, 2));
   }
 
   public getStats(commandName?: string): UsageStats[] {
@@ -82,12 +83,12 @@ export class UsageTracker {
 
   public clearStats(commandName?: string): void {
     if (!commandName) {
-      fs.writeFileSync(this.usageFile, JSON.stringify([], null, 2));
+      atomicWriteFileSync(this.usageFile, JSON.stringify([], null, 2));
       return;
     }
 
     const records = this.getRecords().filter(r => r.commandName !== commandName);
-    fs.writeFileSync(this.usageFile, JSON.stringify(records, null, 2));
+    atomicWriteFileSync(this.usageFile, JSON.stringify(records, null, 2));
   }
 
   private getRecords(): UsageRecord[] {

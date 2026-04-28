@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as http from 'node:http';
 import * as https from 'node:https';
+import { atomicWriteFileSync } from './atomicWrite';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,7 +82,7 @@ export function loadTeamConfig(): TeamConfig | null {
  */
 export function saveTeamConfig(config: TeamConfig): void {
   fs.mkdirSync(path.dirname(TEAM_CONFIG_PATH), { recursive: true, mode: 0o700 });
-  fs.writeFileSync(TEAM_CONFIG_PATH, JSON.stringify(config, null, 2));
+  atomicWriteFileSync(TEAM_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
 // ---------------------------------------------------------------------------

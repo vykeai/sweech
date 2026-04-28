@@ -204,7 +204,7 @@ describe('runShare', () => {
 
     expect(mockFs.mkdirSync).toHaveBeenCalledWith(
       expect.stringContaining('commands'),
-      { recursive: true }
+      { recursive: true, mode: 0o700 }
     );
   });
 
@@ -277,7 +277,7 @@ describe('runUnshare', () => {
 
     expect(mockFs.mkdirSync).toHaveBeenCalledWith(
       expect.stringContaining('commands'),
-      { recursive: true }
+      { recursive: true, mode: 0o700 }
     );
   });
 
