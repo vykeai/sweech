@@ -42,7 +42,7 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   // Resolve port: env var > fed config > fallback
   const envPort = parseInt(process.env.SWEECH_PORT ?? '');
   const fedCfg2 = await readFedConfig();
-  PORT = (Number.isFinite(envPort) && envPort > 0 ? envPort : fedCfg2?.tools?.sweech?.dash) ?? 7801;
+  PORT = (Number.isFinite(envPort) && envPort > 0 ? envPort : fedCfg2?.tools?.['sweech-engine']?.dash) ?? 7801;
 
   setDaemonLifecycleState('booting', 'initializing');
   resetDaemonStartedAt();
@@ -164,25 +164,25 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   }
 
   const fedCfg = await readFedConfig().catch(() => null);
-  const fedPort = fedCfg?.tools?.sweech?.fed ?? (PORT + 50);
+  const fedPort = fedCfg?.tools?.['sweech-engine']?.fed ?? (PORT + 50);
   const identity = fedCfg?.identity ?? os.hostname();
 
   server = serve({ fetch: app.fetch, port: PORT, hostname: '127.0.0.1' }, () => {
     void registerTool({
-      name: 'sweech',
-      displayName: 'Sweech',
+      name: 'sweech-engine',
+      displayName: 'Sweech Engine',
       port: PORT,
       fedPort,
       identity,
       version: '0.1.0',
       capabilities: ['engines', 'routing', 'quota', 'usage'],
       getInfo: async () => ({
-        displayName: 'Sweech',
+        displayName: 'Sweech Engine',
         mainPort: PORT,
         capabilities: ['engines', 'routing', 'quota', 'usage'],
         tools: [{
-          id: 'sweech',
-          name: 'Sweech',
+          id: 'sweech-engine',
+          name: 'Sweech Engine',
           version: '0.1.0',
           actions: [
             { name: 'chat', method: 'POST', path: '/api/chat', description: 'Chat with AI engines' },
