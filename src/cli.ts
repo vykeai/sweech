@@ -3093,6 +3093,107 @@ program
     }
   });
 
+// ── sweech engines ───────────────────────────────────────────────────────────────
+program
+  .command('engines')
+  .description('Query available engines, models, and providers from the engine daemon')
+  .option('--json', 'Output raw JSON')
+  .option('--all', 'Show unavailable engines too')
+  .option('--auto-start-daemon', 'Start daemon if not running (default: true)', true)
+  .option('--no-auto-start-daemon', 'Do not auto-start daemon')
+  .action(async (flags: { json?: boolean; all?: boolean; autoStartDaemon?: boolean }) => {
+    const port = await resolveDaemonPort();
+    const daemonUrl = `http://127.0.0.1:${port}`;
+
+    // Check daemon health, auto-start if needed
+    let healthy = false;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2_000);
+      const res = await fetch(`${daemonUrl}/healthz`, { signal: controller.signal });
+      const data = await res.json() as Record<string, unknown>;
+      clearTimeout(timer);
+      healthy = !!data.ok;
+    } catch { healthy = false; }
+
+    if (!healthy && flags.autoStartDaemon !== false) {
+      const engineDir = path.resolve(__dirname, '..', 'packages', 'engine');
+      const entryPoint = path.join(engineDir, 'dist', 'daemon', 'index.js');
+      if (!fs.existsSync(entryPoint)) {
+        console.error(chalk.red('Error:'), 'Engine not built. Run: cd packages/engine && npm run build');
+        process.exit(1);
+      }
+      const child = require('child_process').spawn('node', [entryPoint], { detached: true, stdio: 'ignore' });
+      child.unref();
+      console.error(chalk.dim(`Starting daemon (pid ${child.pid})...`));
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        try {
+          const res = await fetch(`${daemonUrl}/healthz`);
+          const data = await res.json() as Record<string, unknown>;
+          if (data.ok) { healthy = true; break; }
+        } catch { /* not ready yet */ }
+      }
+      if (!healthy) {
+        console.error(chalk.red('Error:'), 'Daemon did not become ready within 15s');
+        process.exit(1);
+      }
+    } else if (!healthy) {
+      console.error(chalk.red('Error:'), 'Daemon is not running. Start it with: sweech daemon start');
+      process.exit(1);
+    }
+
+    try {
+      const res = await fetch(`${daemonUrl}/query`);
+      if (!res.ok) {
+        console.error(chalk.red('Error:'), `Daemon returned ${res.status}`);
+        process.exit(1);
+      }
+      const data = await res.json() as {
+        engines: Array<{ engine: string; available: boolean; binaryPath?: string; providers: string[]; models: string[]; supportsEffort: boolean; supportsThinking: boolean }>;
+        providers: string[];
+        models: string[];
+        effortLevels: string[];
+        thinkingLevels: string[];
+      };
+
+      if (flags.json) {
+        process.stdout.write(JSON.stringify(data, null, 2) + '\n');
+        return;
+      }
+
+      const engines = flags.all ? data.engines : data.engines.filter(e => e.available);
+
+      console.log(chalk.bold('\n  Available Engines\n'));
+      for (const eng of engines) {
+        const status = eng.available ? chalk.green('✓') : chalk.dim('✗');
+        console.log(`  ${status} ${chalk.bold(eng.engine)}` + (eng.binaryPath ? chalk.dim(`  (${eng.binaryPath})`) : ''));
+        if (eng.providers.length > 0) {
+          console.log(chalk.dim(`    providers: `) + eng.providers.join(', '));
+        }
+        if (eng.models.length > 0) {
+          const display = eng.models.length > 8 ? eng.models.slice(0, 8).join(', ') + ` +${eng.models.length - 8} more` : eng.models.join(', ');
+          console.log(chalk.dim(`    models:    `) + display);
+        }
+        const features: string[] = [];
+        if (eng.supportsEffort) features.push('effort');
+        if (eng.supportsThinking) features.push('thinking');
+        if (features.length > 0) {
+          console.log(chalk.dim(`    features:  `) + features.join(', '));
+        }
+        console.log();
+      }
+
+      if (data.models.length > 0) {
+        console.log(chalk.dim(`  Total: ${engines.length} engines, ${data.models.length} models, ${data.providers.length} providers`));
+      }
+      console.log();
+    } catch (err) {
+      console.error(chalk.red('Error:'), (err as Error).message);
+      process.exit(1);
+    }
+  });
+
 // Default action: interactive launcher when no command given
 if (process.argv.length <= 2) {
   // First run: no profiles configured → run onboarding instead of empty launcher

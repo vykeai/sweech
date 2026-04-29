@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { detectEngines } from '../detect.js';
+import { queryAvailable } from '../query.js';
 import { makeRunner, resolveSelectionTarget, type ContentType } from '../select.js';
 import { loadEstate } from '../estate.js';
 import type { Estate } from '../estate.js';
@@ -1136,6 +1137,11 @@ export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker;
   app.get('/engines', async (c) => {
     const engines = await detectEngines();
     return c.json(engines);
+  });
+
+  app.get('/query', async (c) => {
+    const options = await queryAvailable();
+    return c.json(options);
   });
 
   app.get('/estate', async (c) => {
