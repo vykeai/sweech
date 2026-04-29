@@ -12,6 +12,6 @@ export { classifyToolIntent, evaluateToolPolicy, applyToolPolicyToOptions } from
 export { resolveProfile, resolveDefaultForEngine, loadProfiles, loadProfilesConfig, saveProfiles, saveProfilesConfig, clearProfileCache, importSweechProfiles, getProfilesPath, getDefaultProfile, setDefaultProfile, getFailoverOrder, setFailoverOrder } from './profiles.js';
 export type { ProfilesConfig } from './profiles.js';
 export { selectByBudget, budgetMiddleware } from './budget.js';
-export type { Middleware, CostAccumulator, RetryPolicy, RetryClassPolicy, RetryOperationClass, RetryDecisionAudit, CredentialProfile, BudgetGuard, ToolIntent, ToolDecision, ToolPolicy, ToolPolicyAuditRecord } from './types.js';
+export type { Middleware, CostAccumulator, RetryPolicy, RetryClassPolicy, RetryOperationClass, RetryDecisionAudit, Profile, OAuthToken, CredentialProfile, BudgetGuard, ToolIntent, ToolDecision, ToolPolicy, ToolPolicyAuditRecord } from './types.js';
 export { conversationMiddleware, memoryMiddleware } from '../memory/middleware.js';
 export type { MemoryMiddlewareOptions } from '../memory/middleware.js';

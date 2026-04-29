@@ -136,7 +136,7 @@ export async function migrateFromConfig(): Promise<number> {
       // Verify key made it to keychain before removing from config
       if (keyExists(account)) {
         delete profile.apiKey;
-        profile.keyStored = true;
+        profile.keyInKeychain = true;
         migrated++;
       }
     }

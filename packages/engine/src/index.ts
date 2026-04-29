@@ -122,6 +122,8 @@ export type {
   RetryOperationClass,
   RetryDecisionAudit,
   CredentialProfile,
+  Profile,
+  OAuthToken,
   BudgetGuard,
   ToolIntent,
   ToolDecision,

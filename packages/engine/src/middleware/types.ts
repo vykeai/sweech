@@ -44,17 +44,47 @@ export interface RetryDecisionAudit {
   terminalReason: string;
 }
 
-export interface CredentialProfile {
+export interface OAuthToken {
+  accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
+  tokenType: string;
+  provider: 'anthropic' | 'openai';
+}
+
+export interface Profile {
+  // Identity
   name: string;
+  commandName?: string;
+  cliType?: string;
+
+  // Provider
   provider: Provider;
-  env?: Record<string, string>;
+
+  // Credentials
   /** @deprecated Use keychain instead. Kept for migration compat. */
   apiKey?: string;
-  /** True after API key has been migrated to system keychain. */
-  keyStored?: boolean;
+  keyInKeychain?: boolean;
+  oauth?: OAuthToken;
+  env?: Record<string, string>;
+
+  // Network
   baseUrl?: string;
+
+  // Model selection
+  model?: string;
+  smallFastModel?: string;
+
+  // CLI-specific
   claudeConfigDir?: string;
+  sharedWith?: string;
+
+  // Metadata
+  createdAt?: string;
 }
+
+/** @deprecated Use Profile instead. */
+export type CredentialProfile = Profile;
 
 export interface BudgetGuard {
   maxCostUsd: number;
