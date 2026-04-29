@@ -49,7 +49,7 @@ export class SweechClient {
   private baseUrl: string;
 
   constructor(opts?: { port?: number; host?: string }) {
-    const port = opts?.port ?? 7845;
+    const port = opts?.port ?? 7801;
     const host = opts?.host ?? '127.0.0.1';
     this.baseUrl = `http://${host}:${port}`;
   }

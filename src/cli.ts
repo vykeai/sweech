@@ -2832,7 +2832,7 @@ async function resolveDaemonPort(): Promise<number> {
   try {
     const raw = fs.readFileSync(path.join(os.homedir(), '.fed', 'config.json'), 'utf-8');
     const cfg = JSON.parse(raw) as { tools?: Record<string, { dash?: number }> };
-    return cfg?.tools?.sweech?.dash ?? DEFAULT_DAEMON_PORT;
+    return cfg?.tools?.['sweech-engine']?.dash ?? DEFAULT_DAEMON_PORT;
   } catch { return DEFAULT_DAEMON_PORT; }
 }
 

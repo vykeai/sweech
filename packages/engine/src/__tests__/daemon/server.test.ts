@@ -294,13 +294,13 @@ describe('daemon server', () => {
     expect(body.accounts.main.provider).toBe('claude');
   });
 
-  it('GET /estate returns 500 when no estate file exists', async () => {
+  it('GET /estate returns empty accounts when no estate file exists', async () => {
     clearEstateCache();
     vi.spyOn(estateModule, 'loadEstate').mockRejectedValueOnce(new Error('missing estate'));
     const res = await app.request('/estate');
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error).toContain('missing estate');
+    expect(body).toEqual({ accounts: {} });
   });
 
   it('GET /quota returns accounts object', async () => {

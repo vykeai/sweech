@@ -8,10 +8,10 @@ describe('SweechClient', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('defaults to port 7845 and 127.0.0.1', () => {
+  it('defaults to port 7801 and 127.0.0.1', () => {
     const client = new SweechClient();
     // Access private baseUrl via any cast
-    expect((client as any).baseUrl).toBe('http://127.0.0.1:7845');
+    expect((client as any).baseUrl).toBe('http://127.0.0.1:7801');
   });
 
   it('accepts custom port and host', () => {
@@ -31,7 +31,7 @@ describe('SweechClient', () => {
     const result = await client.ping();
     expect(result).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:7845/health',
+      'http://127.0.0.1:7801/health',
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
@@ -66,7 +66,7 @@ describe('SweechClient', () => {
     const client = new SweechClient();
     await client.select({ account: 'claude-pole' });
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:7845/select',
+      'http://127.0.0.1:7801/select',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ account: 'claude-pole' }),
@@ -82,7 +82,7 @@ describe('SweechClient', () => {
     const client = new SweechClient();
     await client.select({ provider: 'kimi', fallbackAccounts: ['kimi-api', 'minimax-api'] });
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://127.0.0.1:7845/select',
+      'http://127.0.0.1:7801/select',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ provider: 'kimi', fallbackAccounts: ['kimi-api', 'minimax-api'] }),

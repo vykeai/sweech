@@ -1148,8 +1148,8 @@ export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker;
     if (!cachedEstate) {
       try {
         cachedEstate = await loadEstate();
-      } catch (err) {
-        return c.json({ error: (err as Error).message }, 500);
+      } catch {
+        return c.json({ accounts: {} });
       }
     }
     return c.json(cachedEstate);
