@@ -6,6 +6,9 @@ import {
   isSweechDaemonStreamEnvelope,
   isSweechUnsupportedStreamEvent,
 } from './stream-contract.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 type DaemonSSEFrame = AgentEvent | SweechDaemonStreamEnvelope | SweechUnsupportedStreamEvent;
 
@@ -45,13 +48,33 @@ function parseDaemonEventFrame(raw: string): AgentEvent | null {
   };
 }
 
+const FED_CONFIG_FILE = join(homedir(), '.fed', 'config.json');
+const DEFAULT_PORT = 7801;
+
+async function resolvePort(): Promise<number> {
+  const envPort = parseInt(process.env.SWEECH_PORT ?? '', 10);
+  if (Number.isFinite(envPort) && envPort > 0) return envPort;
+  try {
+    const raw = await readFile(FED_CONFIG_FILE, 'utf-8');
+    const cfg = JSON.parse(raw) as { tools?: Record<string, { dash?: number; enabled?: boolean }> };
+    const toolPort = cfg?.tools?.['sweech-engine']?.dash;
+    if (typeof toolPort === 'number' && toolPort > 0) return toolPort;
+  } catch { /* config not available */ }
+  return DEFAULT_PORT;
+}
+
 export class SweechClient {
   private baseUrl: string;
 
   constructor(opts?: { port?: number; host?: string }) {
-    const port = opts?.port ?? 7801;
+    const port = opts?.port ?? DEFAULT_PORT;
     const host = opts?.host ?? '127.0.0.1';
     this.baseUrl = `http://${host}:${port}`;
+  }
+
+  static async discover(opts?: { host?: string }): Promise<SweechClient> {
+    const port = await resolvePort();
+    return new SweechClient({ port, ...opts });
   }
 
   async ping(): Promise<boolean> {

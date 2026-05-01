@@ -1,6 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SweechClient } from '../client.js';
 import type { AgentEvent } from '../types.js';
+import { writeFile, mkdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 const envelopeEvent: AgentEvent = {
   type: 'result',
@@ -45,7 +48,7 @@ describe('SweechClient', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(runResponse);
 
     const events: AgentEvent[] = [];
-    for await (const event of new SweechClient({ port: 7845, host: '127.0.0.1' }).run('hello')) {
+    for await (const event of new SweechClient({ port: 9876, host: '127.0.0.1' }).run('hello')) {
       events.push(event);
     }
 
@@ -58,7 +61,7 @@ describe('SweechClient', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(runResponse);
 
     const events: AgentEvent[] = [];
-    for await (const event of new SweechClient({ port: 7845, host: '127.0.0.1' }).run('hello')) {
+    for await (const event of new SweechClient({ port: 9876, host: '127.0.0.1' }).run('hello')) {
       events.push(event);
     }
 
@@ -71,7 +74,7 @@ describe('SweechClient', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(runResponse);
 
     const events: AgentEvent[] = [];
-    for await (const event of new SweechClient({ port: 7845, host: '127.0.0.1' }).run('hello')) {
+    for await (const event of new SweechClient({ port: 9876, host: '127.0.0.1' }).run('hello')) {
       events.push(event);
     }
 
@@ -84,11 +87,48 @@ describe('SweechClient', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(runResponse);
 
     const events: AgentEvent[] = [];
-    for await (const event of new SweechClient({ port: 7845, host: '127.0.0.1' }).run('hello')) {
+    for await (const event of new SweechClient({ port: 9876, host: '127.0.0.1' }).run('hello')) {
       events.push(event);
     }
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'error', message: 'daemon stream produced unsupported payload shape' });
+  });
+
+  describe('discover()', () => {
+    const fedConfigPath = join(homedir(), '.fed', 'config.json');
+    let originalConfig: string | null = null;
+
+    beforeEach(async () => {
+      try { originalConfig = await import('node:fs/promises').then(fs => fs.readFile(fedConfigPath, 'utf-8')); } catch { originalConfig = null; }
+    });
+
+    afterEach(async () => {
+      if (originalConfig !== null) {
+        await writeFile(fedConfigPath, originalConfig, 'utf-8');
+      }
+    });
+
+    it('resolves port from fed config for sweech-engine', async () => {
+      await mkdir(join(homedir(), '.fed'), { recursive: true });
+      await writeFile(fedConfigPath, JSON.stringify({ tools: { 'sweech-engine': { dash: 17807, fed: 17857, enabled: true } } }), 'utf-8');
+      delete process.env.SWEECH_PORT;
+      const client = await SweechClient.discover();
+      expect((client as unknown as { baseUrl: string }).baseUrl).toBe('http://127.0.0.1:17807');
+    });
+
+    it('prefers SWEECH_PORT env var over fed config', async () => {
+      process.env.SWEECH_PORT = '9999';
+      const client = await SweechClient.discover();
+      expect((client as unknown as { baseUrl: string }).baseUrl).toBe('http://127.0.0.1:9999');
+      delete process.env.SWEECH_PORT;
+    });
+
+    it('falls back to default 7801 when config unavailable', async () => {
+      delete process.env.SWEECH_PORT;
+      await rm(fedConfigPath).catch(() => {});
+      const client = await SweechClient.discover();
+      expect((client as unknown as { baseUrl: string }).baseUrl).toBe('http://127.0.0.1:7801');
+    });
   });
 });
