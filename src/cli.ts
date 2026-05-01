@@ -250,7 +250,11 @@ program
     const isTTY = process.stdout.isTTY;
 
     const renderProfiles = (accountInfoMap?: Map<string, Awaited<ReturnType<typeof getAccountInfo>>[number]>): number => {
-      console.log(chalk.bold('\n  sweech · profiles\n'));
+      let lines = 0;
+
+      // Header: blank line + title + blank line = 3 lines
+      process.stdout.write('\n  sweech · profiles\n\n');
+      lines += 3;
 
       for (const cli of installedDefaults) {
         const configDir = path.join(os.homedir(), `.${cli.name}`);
@@ -265,6 +269,7 @@ program
         const lastStr = info ? relativeTime(info.lastActive) : chalk.dim('loading...');
         const configTag = hasConfig ? '' : chalk.yellow(' (not configured)');
         console.log(`  ${dot} ${chalk.bold(cli.command)}${chalk.gray(' [default]')}${planStr}${configTag}  ${lastStr}${reverseTag}`);
+        lines++;
       }
 
       for (const profile of profiles) {
@@ -281,13 +286,16 @@ program
         const planStr = info?.meta?.plan ? chalk.cyan(` [${info.meta.plan}]`) : '';
         const lastStr = info ? relativeTime(info.lastActive) : '';
         console.log(`  ${dot} ${chalk.bold(profile.commandName)}${planStr}${providerStr}${modelStr}${sharedTag}  ${lastStr}${reverseTag}`);
+        lines++;
       }
 
       if (installedDefaults.length === 0 && profiles.length === 0) {
         console.log(chalk.gray('  No profiles configured. Run'), chalk.bold('sweech add'), chalk.gray('to create one.'));
+        lines++;
       }
       console.log();
-      return installedDefaults.length + profiles.length + 3;
+      lines++;
+      return lines;
     };
 
     if (isTTY) {
