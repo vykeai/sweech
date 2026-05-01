@@ -900,6 +900,59 @@ program
     }
   });
 
+// Check command — verify profile model reachability
+program
+  .command('check [profile]')
+  .description('Check if a profile\'s model is reachable')
+  .option('--all', 'Check all profiles')
+  .option('--json', 'Output as JSON')
+  .action(async (profileName: string | undefined, opts: { all?: boolean; json?: boolean }) => {
+    const daemonPort = parseInt(process.env.SWEECH_PORT ?? '') || 7801;
+    const baseUrl = `http://127.0.0.1:${daemonPort}`;
+
+    if (opts.all || !profileName) {
+      try {
+        const res = await fetch(`${baseUrl}/check/all`, { signal: AbortSignal.timeout(30_000) });
+        if (!res.ok) throw new Error(`Daemon returned ${res.status}`);
+        const results = await res.json() as Array<{ profile: string; model: string | null; reachable: boolean; reason: string; suggestedFallback: string | null; latencyMs: number }>;
+        if (opts.json) {
+          console.log(JSON.stringify(results, null, 2));
+          return;
+        }
+        for (const r of results) {
+          const icon = r.reachable ? chalk.green('✓') : chalk.red('✗');
+          const model = r.model ?? 'unknown';
+          const fallback = r.suggestedFallback ? chalk.yellow(` (fallback: ${r.suggestedFallback})`) : '';
+          console.log(`${icon} ${chalk.bold(r.profile)} — ${model} — ${r.reachable ? 'reachable' : r.reason}${fallback} (${r.latencyMs}ms)`);
+        }
+      } catch (err) {
+        console.error(chalk.red(`Failed to check profiles: ${(err as Error).message}`));
+        console.error(chalk.gray('Is the sweech daemon running? Try: sweech daemon start'));
+        process.exit(1);
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch(`${baseUrl}/check?profile=${encodeURIComponent(profileName)}`, { signal: AbortSignal.timeout(15_000) });
+      if (!res.ok) throw new Error(`Daemon returned ${res.status}`);
+      const result = await res.json() as { profile: string; model: string | null; reachable: boolean; reason: string; suggestedFallback: string | null; latencyMs: number };
+      if (opts.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+      const icon = result.reachable ? chalk.green('✓') : chalk.red('✗');
+      const model = result.model ?? 'unknown';
+      const fallback = result.suggestedFallback ? chalk.yellow(` (fallback: ${result.suggestedFallback})`) : '';
+      console.log(`${icon} ${chalk.bold(result.profile)} — ${model} — ${result.reachable ? 'reachable' : result.reason}${fallback} (${result.latencyMs}ms)`);
+      if (!result.reachable) process.exit(1);
+    } catch (err) {
+      console.error(chalk.red(`Failed to check '${profileName}': ${(err as Error).message}`));
+      console.error(chalk.gray('Is the sweech daemon running? Try: sweech daemon start'));
+      process.exit(1);
+    }
+  });
+
 // Auth command — re-authenticate a profile
 program
   .command('auth <command-name>')

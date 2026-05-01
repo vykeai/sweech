@@ -28,6 +28,7 @@ import { handleMcpRequest } from './mcp.js';
 import { runParallel, type ParallelStrategy } from '../parallel.js';
 import { registerConfigRoutes } from './config-routes.js';
 import { publishFedEvent } from '../fed.js';
+import { checkProfile, checkAllProfiles } from '../check.js';
 
 let cachedEstate: Estate | null = null;
 let cachedQuotaTracker: QuotaTracker | null = null;
@@ -1221,6 +1222,25 @@ export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker;
     } catch (err) {
       return c.json({ error: (err as Error).message }, 500);
     }
+  });
+
+  app.get('/check', async (c) => {
+    const profile = c.req.query('profile');
+    if (!profile) {
+      return c.json({ error: 'profile query parameter required' }, 400);
+    }
+    const result = await checkProfile(profile);
+    return c.json(result);
+  });
+
+  app.get('/check/all', async (c) => {
+    const results = await checkAllProfiles();
+    return c.json(results);
+  });
+
+  app.get('/fed/status', async (c) => {
+    const results = await checkAllProfiles();
+    return c.json({ profiles: results });
   });
 
   app.post('/select', async (c) => {
