@@ -8,14 +8,15 @@ import {
 import type {
   ApprovalAction,
   ApprovalStage,
-  OmnaiUiEvent,
-  OmnaiUiStreamEnvelope,
-  OmnaiSessionArchiveMessage,
-  OmnaiSessionArchiveMessageType,
-  OmnaiSessionArchiveSnapshot,
-  OmnaiUnsupportedStreamEvent,
+  SweechUiEvent,
+  SweechUiStreamEnvelope,
+  SweechSessionArchiveMessage,
+  SweechSessionArchiveMessageType,
+  SweechSessionArchiveSnapshot,
+  SweechUnsupportedStreamEvent,
   QuestionOption,
 } from '@sweech/engine'
+import type { SweechTheme } from '../themes/theme.js'
 
 export {
   STREAM_PROTOCOL,
@@ -25,24 +26,24 @@ export {
 export type {
   ApprovalAction,
   ApprovalStage,
-  OmnaiUiEvent,
-  OmnaiUiStreamEnvelope,
-  OmnaiSessionArchiveMessage,
-  OmnaiSessionArchiveMessageType,
-  OmnaiSessionArchiveSnapshot,
-  OmnaiUnsupportedStreamEvent,
+  SweechUiEvent,
+  SweechUiStreamEnvelope,
+  SweechSessionArchiveMessage,
+  SweechSessionArchiveMessageType,
+  SweechSessionArchiveSnapshot,
+  SweechUnsupportedStreamEvent,
   QuestionOption,
 } from '@sweech/engine'
 
 // ── Execution events (orchestrator → UI) ─────────────────────────────────────
 
-export type OmnaiUIEvent = OmnaiUiEvent
+export type SweechUIEvent = SweechUiEvent
 
-export type OmnaiUIEventEnvelope = OmnaiUiStreamEnvelope
+export type SweechUIEventEnvelope = SweechUiStreamEnvelope
 
 // ── Commands (UI → orchestrator) ─────────────────────────────────────────────
 
-export type OmnaiUICommand =
+export type SweechUICommand =
   | { type: 'start' }
   | { type: 'stop' }
   | { type: 'approval_response'; taskId: string; action: ApprovalAction; hint?: string }
@@ -69,9 +70,9 @@ export interface QuestionRequest {
 
 // ── Normalized message line (internal render model) ───────────────────────────
 
-export type MessageType = OmnaiSessionArchiveMessageType
+export type MessageType = SweechSessionArchiveMessageType
 
-export interface Message extends OmnaiSessionArchiveMessage {}
+export interface Message extends SweechSessionArchiveMessage {}
 
 // ── Cost summary ─────────────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ export interface SessionState {
   connected: boolean
 }
 
-export type SessionArchiveSnapshot = OmnaiSessionArchiveSnapshot<Message>
+export type SessionArchiveSnapshot = SweechSessionArchiveSnapshot<Message>
 
 export interface SessionArchiveStore {
   save: (snapshots: SessionArchiveSnapshot[]) => void | Promise<void>
@@ -113,3 +114,26 @@ export interface SessionRetentionPolicy {
   preservePinnedMessages?: boolean
   archiveStore?: SessionArchiveStore
 }
+
+// ── Backward-compatible aliases (deprecated — use Sweech* names) ──────────────
+
+/** @deprecated Use SweechUIEvent */
+export type OmnaiUIEvent = SweechUIEvent
+/** @deprecated Use SweechUIEventEnvelope */
+export type OmnaiUIEventEnvelope = SweechUIEventEnvelope
+/** @deprecated Use SweechUICommand */
+export type OmnaiUICommand = SweechUICommand
+/** @deprecated Use SweechUiEvent from @sweech/engine */
+export type OmnaiUiEvent = SweechUiEvent
+/** @deprecated Use SweechUiStreamEnvelope from @sweech/engine */
+export type OmnaiUiStreamEnvelope = SweechUiStreamEnvelope
+/** @deprecated Use SweechSessionArchiveMessage from @sweech/engine */
+export type OmnaiSessionArchiveMessage = SweechSessionArchiveMessage
+/** @deprecated Use SweechSessionArchiveMessageType from @sweech/engine */
+export type OmnaiSessionArchiveMessageType = SweechSessionArchiveMessageType
+/** @deprecated Use SweechSessionArchiveSnapshot from @sweech/engine */
+export type OmnaiSessionArchiveSnapshot = SweechSessionArchiveSnapshot
+/** @deprecated Use SweechUnsupportedStreamEvent from @sweech/engine */
+export type OmnaiUnsupportedStreamEvent = SweechUnsupportedStreamEvent
+/** @deprecated Use SweechTheme */
+export type OmnaiTheme = SweechTheme

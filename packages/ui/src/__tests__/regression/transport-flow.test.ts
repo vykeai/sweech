@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { getEnvelopeReplayKey, isTerminalSessionEvent, registerReplayKey } from '../../hooks/transport-state.js'
-import { parseOmnaiUIMessage } from '../../utils/parse.js'
+import { parseSweechUiMessage } from '../../utils/parse.js'
 
 function makeEnvelope(sequence: number, event: Record<string, unknown>) {
   return JSON.stringify({
@@ -33,7 +33,7 @@ describe('transport regression flow', () => {
     const trace: string[] = []
 
     for (const raw of rawFrames) {
-      const parsed = parseOmnaiUIMessage(raw)
+      const parsed = parseSweechUiMessage(raw)
       if (!parsed.event) continue
 
       const replayKey = getEnvelopeReplayKey(parsed.envelope)

@@ -16,7 +16,7 @@
 
 import React from 'react'
 
-export interface OmnaiTheme {
+export interface SweechTheme {
   /** The product id — sets data-sweech-product attribute. */
   product: string
   /** Optional colour mode. Defaults to 'dark'. */
@@ -25,21 +25,24 @@ export interface OmnaiTheme {
   tokens?: Record<string, string>
 }
 
+/** @deprecated Use SweechTheme */
+export type OmnaiTheme = SweechTheme
+
 export interface ThemeProviderProps {
-  theme: string | OmnaiTheme
+  theme: string | SweechTheme
   children: React.ReactNode
   className?: string
   style?: React.CSSProperties
 }
 
 /**
- * Creates an OmnaiTheme object with optional token overrides.
+ * Creates a SweechTheme object with optional token overrides.
  * Pass the result to ThemeProvider.
  */
 export function createTheme(
   product: string,
   overrides: { colorScheme?: 'dark' | 'light'; tokens?: Record<string, string> } = {}
-): OmnaiTheme {
+): SweechTheme {
   return { product, ...overrides }
 }
 
@@ -49,7 +52,7 @@ export function createTheme(
  * then injects any token overrides as inline CSS variables.
  */
 export function ThemeProvider({ theme, children, className, style }: ThemeProviderProps) {
-  const resolved: OmnaiTheme =
+  const resolved: SweechTheme =
     typeof theme === 'string' ? { product: theme } : theme
 
   const { product, colorScheme, tokens } = resolved
@@ -75,5 +78,4 @@ export function ThemeProvider({ theme, children, className, style }: ThemeProvid
 export const themes = {
   jobforge: createTheme('jobforge'),
   keel: createTheme('keel'),
-} satisfies Record<string, OmnaiTheme>
-
+} satisfies Record<string, SweechTheme>

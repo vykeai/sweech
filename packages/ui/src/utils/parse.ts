@@ -1,33 +1,36 @@
-import type { AgentEvent } from '@sweech/engine'
+import type { AgentEvent, SweechUnsupportedStreamEvent } from '@sweech/engine'
 import {
   STREAM_KIND_UI,
   STREAM_PROTOCOL_VERSION,
-  isOmnaiUiEvent,
-  isOmnaiUiStreamEnvelope,
-  makeOmnaiUnsupportedStreamEvent,
-  type OmnaiUnsupportedStreamEvent,
+  isSweechUiEvent,
+  isSweechUiStreamEnvelope,
+  makeSweechUnsupportedStreamEvent,
 } from '@sweech/engine'
 import type {
   Message,
   MessageType,
-  OmnaiUIEvent,
-  OmnaiUIEventEnvelope,
+  SweechUIEvent,
+  SweechUIEventEnvelope,
 } from '../types/index.js'
 
-export interface ParsedOmnaiUiEnvelopeMeta {
+export interface ParsedSweechUiEnvelopeMeta {
   streamId: string
   requestId?: string
   sequence?: number
   traceId?: string
-  severity?: OmnaiUIEventEnvelope['severity']
+  severity?: SweechUIEventEnvelope['severity']
   componentId?: string
   correlationId?: string
 }
+/** @deprecated Use ParsedSweechUiEnvelopeMeta */
+export type ParsedOmnaiUiEnvelopeMeta = ParsedSweechUiEnvelopeMeta
 
-export interface ParsedOmnaiUiMessage {
-  event: OmnaiUIEvent | null
-  envelope?: ParsedOmnaiUiEnvelopeMeta
+export interface ParsedSweechUiMessage {
+  event: SweechUIEvent | null
+  envelope?: ParsedSweechUiEnvelopeMeta
 }
+/** @deprecated Use ParsedSweechUiMessage */
+export type ParsedOmnaiUiMessage = ParsedSweechUiMessage
 
 let counter = 0
 function nextId(): string { return `msg-${++counter}` }
@@ -35,14 +38,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export function parseOmnaiUIEvent(raw: string): OmnaiUIEvent | null {
-  return parseOmnaiUIMessage(raw).event
+export function parseSweechUIEvent(raw: string): SweechUIEvent | null {
+  return parseSweechUiMessage(raw).event
 }
+/** @deprecated Use parseSweechUIEvent */
+export const parseOmnaiUIEvent = parseSweechUIEvent
 
-export function parseOmnaiUIMessage(raw: string): ParsedOmnaiUiMessage {
-  let payload: OmnaiUIEvent | OmnaiUIEventEnvelope;
+export function parseSweechUiMessage(raw: string): ParsedSweechUiMessage {
+  let payload: SweechUIEvent | SweechUIEventEnvelope;
   try {
-    payload = JSON.parse(raw) as OmnaiUIEvent | OmnaiUIEventEnvelope;
+    payload = JSON.parse(raw) as SweechUIEvent | SweechUIEventEnvelope;
   } catch {
     return {
       event: makeUnsupportedUiEvent({
@@ -54,7 +59,7 @@ export function parseOmnaiUIMessage(raw: string): ParsedOmnaiUiMessage {
     }
   }
 
-  if (isOmnaiUiStreamEnvelope(payload)) {
+  if (isSweechUiStreamEnvelope(payload)) {
     return {
       event: payload.event,
       envelope: {
@@ -83,15 +88,13 @@ export function parseOmnaiUIMessage(raw: string): ParsedOmnaiUiMessage {
     }
   }
 
-  return { event: isOmnaiUIEvent(payload) ? payload : null }
+  return { event: isSweechUiEvent(payload) ? payload : null }
 }
+/** @deprecated Use parseSweechUiMessage */
+export const parseOmnaiUIMessage = parseSweechUiMessage
 
-function makeUnsupportedUiEvent(input: Pick<OmnaiUnsupportedStreamEvent, 'reason' | 'raw' | 'streamKind' | 'version'>): OmnaiUIEvent {
-  return makeOmnaiUnsupportedStreamEvent(input)
-}
-
-function isOmnaiUIEvent(value: unknown): value is OmnaiUIEvent {
-  return isOmnaiUiEvent(value)
+function makeUnsupportedUiEvent(input: Pick<SweechUnsupportedStreamEvent, 'reason' | 'raw' | 'streamKind' | 'version'>): SweechUIEvent {
+  return makeSweechUnsupportedStreamEvent(input)
 }
 
 function getToolHint(input: Record<string, unknown>): string {
@@ -105,7 +108,7 @@ function getToolHint(input: Record<string, unknown>): string {
 
 export function stripAnsi(s: string): string {
   // eslint-disable-next-line no-control-regex
-  return s.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g, '')
+  return s.replace(/[][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g, '')
 }
 
 function isNoiseLine(raw: string): boolean {

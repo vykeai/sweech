@@ -1,8 +1,8 @@
-import type { OmnaiUIEvent, SessionState, ApprovalRequest, QuestionRequest } from '../types/index.js'
+import type { SweechUIEvent, SessionState, ApprovalRequest, QuestionRequest } from '../types/index.js'
 import { parseStreamLine, makeMessage } from '../utils/parse.js'
 
 export type WebSessionAction =
-  | { type: 'EVENT'; event: OmnaiUIEvent }
+  | { type: 'EVENT'; event: SweechUIEvent }
   | { type: 'CLEAR' }
   | { type: 'CONNECTED'; connected: boolean }
 

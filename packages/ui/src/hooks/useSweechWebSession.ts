@@ -1,6 +1,6 @@
 import { useReducer, useCallback, useRef, useEffect } from 'react'
-import type { OmnaiUIEvent, OmnaiUICommand, SessionState } from '../types/index.js'
-import { parseOmnaiUIMessage } from '../utils/parse.js'
+import type { SweechUIEvent, SweechUICommand, SessionState } from '../types/index.js'
+import { parseSweechUiMessage } from '../utils/parse.js'
 import { initialWebSessionState, reduceWebSessionState } from './web-session-state.js'
 import {
   getEnvelopeReplayKey,
@@ -13,15 +13,15 @@ import {
 
 export interface UseSweechWebSessionOptions {
   wsUrl?: string
-  onCommand?: (cmd: OmnaiUICommand) => void
+  onCommand?: (cmd: SweechUICommand) => void
   reconnect?: WebSessionReconnectInput
 }
 
 export interface UseSweechWebSessionReturn {
   session: SessionState
-  send: (cmd: OmnaiUICommand) => void
+  send: (cmd: SweechUICommand) => void
   clear: () => void
-  dispatch: (event: OmnaiUIEvent) => void
+  dispatch: (event: SweechUIEvent) => void
 }
 
 export function useSweechWebSession(options: UseSweechWebSessionOptions = {}): UseSweechWebSessionReturn {
@@ -37,13 +37,13 @@ export function useSweechWebSession(options: UseSweechWebSessionOptions = {}): U
   const optionsRef = useRef(options)
   optionsRef.current = options
 
-  const send = useCallback((cmd: OmnaiUICommand) => {
+  const send = useCallback((cmd: SweechUICommand) => {
     if (optionsRef.current.onCommand) { optionsRef.current.onCommand(cmd); return }
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(cmd))
   }, [])
 
   const clear = useCallback(() => dispatch({ type: 'CLEAR' }), [])
-  const dispatchEvent = useCallback((event: OmnaiUIEvent) => dispatch({ type: 'EVENT', event }), [])
+  const dispatchEvent = useCallback((event: SweechUIEvent) => dispatch({ type: 'EVENT', event }), [])
 
   useEffect(() => {
     if (options.onCommand) return
@@ -112,7 +112,7 @@ export function useSweechWebSession(options: UseSweechWebSessionOptions = {}): U
       ws.onerror = () => ws.close()
 
       ws.onmessage = (ev) => {
-        const parsed = parseOmnaiUIMessage(String(ev.data))
+        const parsed = parseSweechUiMessage(String(ev.data))
         if (!parsed.event) return
 
         const reconnectPolicy = resolveReconnectPolicy(optionsRef.current.reconnect)

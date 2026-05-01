@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { OmnaiUIEventEnvelope } from '../types/index.js'
-import { parseOmnaiUIEvent, parseOmnaiUIMessage } from '../utils/parse.js'
+import type { SweechUIEventEnvelope } from '../types/index.js'
+import { parseSweechUIEvent, parseSweechUiMessage } from '../utils/parse.js'
 
-describe('parseOmnaiUIEvent', () => {
+describe('parseSweechUIEvent', () => {
   it('parses canonical ui envelopes', () => {
-    const envelope: OmnaiUIEventEnvelope = {
+    const envelope: SweechUIEventEnvelope = {
       schema: 'sweech.stream',
       version: 1,
       kind: 'ui_event',
@@ -19,11 +19,11 @@ describe('parseOmnaiUIEvent', () => {
       },
     }
 
-    expect(parseOmnaiUIEvent(JSON.stringify(envelope))).toEqual(envelope.event)
+    expect(parseSweechUIEvent(JSON.stringify(envelope))).toEqual(envelope.event)
   })
 
   it('normalizes malformed envelopes to unsupported_event', () => {
-    const parsed = parseOmnaiUIEvent(JSON.stringify({
+    const parsed = parseSweechUIEvent(JSON.stringify({
       schema: 'sweech.stream',
       version: 1,
       kind: 'ui_event',
@@ -43,7 +43,7 @@ describe('parseOmnaiUIEvent', () => {
   })
 
   it('normalizes malformed json to unsupported_event', () => {
-    expect(parseOmnaiUIEvent('{not-json')).toMatchObject({
+    expect(parseSweechUIEvent('{not-json')).toMatchObject({
       type: 'unsupported_event',
       kind: 'unsupported_event',
       reason: 'malformed_json',
@@ -51,7 +51,7 @@ describe('parseOmnaiUIEvent', () => {
   })
 
   it('extracts envelope metadata for replay-safe clients', () => {
-    const parsed = parseOmnaiUIMessage(JSON.stringify({
+    const parsed = parseSweechUiMessage(JSON.stringify({
       schema: 'sweech.stream',
       version: 1,
       kind: 'ui_event',

@@ -1,7 +1,7 @@
 /**
  * @sweech/ui/server — server-side SSE bridge
  *
- * Runs a ModelRunner and streams OmnaiUIEvent over HTTP SSE.
+ * Runs a ModelRunner and streams SweechUIEvent over HTTP SSE.
  * No WebSocket dependency. Use EventSource in the browser.
  *
  * @example
@@ -20,12 +20,15 @@ import {
   STREAM_KIND_UI,
   STREAM_PROTOCOL,
   STREAM_PROTOCOL_VERSION,
-  getOmnaiStreamSeverity,
+  getSweechStreamSeverity,
   type ModelRunner,
   type AgentEvent,
   type RunOptions,
 } from '@sweech/engine'
-import type { OmnaiUIEvent, OmnaiUIEventEnvelope } from '../types/index.js'
+import type { SweechUIEvent, SweechUIEventEnvelope } from '../types/index.js'
+
+/** @deprecated Use getSweechStreamSeverity from @sweech/engine */
+export { getSweechStreamSeverity as getOmnaiStreamSeverity } from '@sweech/engine'
 
 interface UiStreamEnvelopeContext {
   streamId: string
@@ -35,7 +38,7 @@ interface UiStreamEnvelopeContext {
   sequence: number
 }
 
-function makeStreamEnvelope(context: UiStreamEnvelopeContext, event: OmnaiUIEvent): OmnaiUIEventEnvelope {
+function makeStreamEnvelope(context: UiStreamEnvelopeContext, event: SweechUIEvent): SweechUIEventEnvelope {
   return {
     schema: STREAM_PROTOCOL,
     version: STREAM_PROTOCOL_VERSION,
@@ -44,7 +47,7 @@ function makeStreamEnvelope(context: UiStreamEnvelopeContext, event: OmnaiUIEven
     requestId: context.requestId,
     sequence: context.sequence,
     traceId: context.traceId,
-    severity: getOmnaiStreamSeverity(event),
+    severity: getSweechStreamSeverity(event),
     componentId: 'ui.bridge.sse',
     correlationId: context.correlationId,
     event,
@@ -66,8 +69,8 @@ export interface AgentSseOptions {
   correlationId?: string
 }
 
-/** Convert a single AgentEvent into the equivalent OmnaiUIEvents for the wire protocol */
-export function agentEventToUIEvents(event: AgentEvent, taskId: string, title = 'Agent'): OmnaiUIEvent[] {
+/** Convert a single AgentEvent into the equivalent SweechUIEvents for the wire protocol */
+export function agentEventToUIEvents(event: AgentEvent, taskId: string, title = 'Agent'): SweechUIEvent[] {
   switch (event.type) {
     case 'text':
       return [{ type: 'task_output', taskId, text: event.content }]
@@ -130,8 +133,8 @@ export function agentEventToUIEvents(event: AgentEvent, taskId: string, title = 
   }
 }
 
-/** Yields OmnaiUIEvents for an agent run — transport-agnostic. Use this when handleAgentSse doesn't fit your framework. */
-export async function* streamAgentEvents(opts: AgentSseOptions): AsyncGenerator<OmnaiUIEvent> {
+/** Yields SweechUIEvents for an agent run — transport-agnostic. Use this when handleAgentSse doesn't fit your framework. */
+export async function* streamAgentEvents(opts: AgentSseOptions): AsyncGenerator<SweechUIEvent> {
   const taskId = opts.taskId ?? `task-${Date.now()}`
   const title = opts.title ?? 'Agent'
 
@@ -154,7 +157,7 @@ export async function* streamAgentEvents(opts: AgentSseOptions): AsyncGenerator<
  * Handle a single HTTP response as an SSE stream for one agent session.
  *
  * Sets the correct SSE headers, emits session_started / task_started,
- * converts all AgentEvents to OmnaiUIEvents, and closes the stream when done.
+ * converts all AgentEvents to SweechUIEvents, and closes the stream when done.
  */
 export async function handleAgentSse(res: ServerResponse, opts: AgentSseOptions): Promise<void> {
   const streamId = opts.streamId ?? opts.taskId ?? randomUUID()
@@ -172,7 +175,7 @@ export async function handleAgentSse(res: ServerResponse, opts: AgentSseOptions)
 
   res.write('retry: 1000\n\n')
 
-  const send = (event: OmnaiUIEvent) => {
+  const send = (event: SweechUIEvent) => {
     sequence += 1
     const envelope = makeStreamEnvelope({
       streamId,

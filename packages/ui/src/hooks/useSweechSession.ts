@@ -7,27 +7,31 @@ import type { Message, SessionRetentionPolicy, SessionState } from '../types/ind
 import { agentEventToMessages } from '../utils/parse.js'
 import { clearSessionArchive, persistSessionArchiveSnapshots, rehydrateSessionArchive } from '../session/retention.js'
 import {
-  initialOmnaiSessionStateInternal,
-  reduceOmnaiSessionState,
+  initialSweechSessionStateInternal,
+  reduceSweechSessionState,
   toPublicSessionState,
 } from '../session/state.js'
 
-export interface UseOmnaiSessionOptions {
+export interface UseSweechSessionOptions {
   runner: ModelRunner
   runOptions?: Omit<RunOptions, 'abortSignal'>
   retention?: SessionRetentionPolicy
 }
+/** @deprecated Use UseSweechSessionOptions */
+export type UseOmnaiSessionOptions = UseSweechSessionOptions
 
-export interface UseOmnaiSessionReturn {
+export interface UseSweechSessionReturn {
   session: SessionState
   run: (prompt: string) => Promise<void>
   stop: () => void
   clear: () => void
   rehydrateArchive: () => Promise<Message[]>
 }
+/** @deprecated Use UseSweechSessionReturn */
+export type UseOmnaiSessionReturn = UseSweechSessionReturn
 
-export function useSweechSession({ runner, runOptions = {}, retention }: UseOmnaiSessionOptions): UseOmnaiSessionReturn {
-  const [state, dispatch] = useReducer(reduceOmnaiSessionState, initialOmnaiSessionStateInternal)
+export function useSweechSession({ runner, runOptions = {}, retention }: UseSweechSessionOptions): UseSweechSessionReturn {
+  const [state, dispatch] = useReducer(reduceSweechSessionState, initialSweechSessionStateInternal)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {

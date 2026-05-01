@@ -9,8 +9,8 @@ import {
   retainSessionMessages,
 } from '../session/retention.js'
 import {
-  initialOmnaiSessionStateInternal,
-  reduceOmnaiSessionState,
+  initialSweechSessionStateInternal,
+  reduceSweechSessionState,
   toPublicSessionState,
 } from '../session/state.js'
 
@@ -70,7 +70,7 @@ describe('session retention', () => {
       maxContextSnapshots: 5,
     }
 
-    const state = reduceOmnaiSessionState(initialOmnaiSessionStateInternal, {
+    const state = reduceSweechSessionState(initialSweechSessionStateInternal, {
       type: 'MESSAGES',
       messages: createMessages(1000),
       retention,
@@ -81,7 +81,7 @@ describe('session retention', () => {
     expect(state.pendingArchive[0]?.messages).toHaveLength(950)
     expect(toPublicSessionState(state).messages[0]?.id).toBe('msg-950')
 
-    const rehydratedState = reduceOmnaiSessionState(
+    const rehydratedState = reduceSweechSessionState(
       {
         ...state,
         pendingArchive: [],

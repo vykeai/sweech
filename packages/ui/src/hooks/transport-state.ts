@@ -1,5 +1,5 @@
-import type { OmnaiUIEvent } from '../types/index.js'
-import type { ParsedOmnaiUiEnvelopeMeta } from '../utils/parse.js'
+import type { SweechUIEvent } from '../types/index.js'
+import type { ParsedSweechUiEnvelopeMeta } from '../utils/parse.js'
 
 export interface WebSessionReconnectPolicy {
   enabled: boolean
@@ -51,7 +51,7 @@ export function getReconnectDelayMs(
   return Math.min(baseDelay + jitter, policy.maxDelayMs + policy.jitterMs)
 }
 
-export function getEnvelopeReplayKey(meta?: ParsedOmnaiUiEnvelopeMeta): string | null {
+export function getEnvelopeReplayKey(meta?: ParsedSweechUiEnvelopeMeta): string | null {
   if (!meta?.streamId || meta.sequence === undefined) {
     return null
   }
@@ -76,6 +76,6 @@ export function registerReplayKey(
   return { duplicate: false, next }
 }
 
-export function isTerminalSessionEvent(event: OmnaiUIEvent): boolean {
+export function isTerminalSessionEvent(event: SweechUIEvent): boolean {
   return event.type === 'session_completed' || event.type === 'session_failed'
 }

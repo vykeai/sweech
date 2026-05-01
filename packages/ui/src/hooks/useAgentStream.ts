@@ -1,10 +1,10 @@
 /**
  * useAgentStream — browser-side SSE hook for agent sessions.
  *
- * Connects to an SSE endpoint that streams OmnaiUIEvents and returns
- * the same SessionState shape as useParleySession.
+ * Connects to an SSE endpoint that streams SweechUIEvents and returns
+ * the same SessionState shape as useSweechSession.
  *
- * Use this instead of useParleySession when your backend uses handleAgentSse.
+ * Use this instead of useSweechSession when your backend uses handleAgentSse.
  *
  * @example
  * const { session, start, stop } = useAgentStream('/api/agent/stream')
@@ -14,11 +14,11 @@
  */
 
 import { useReducer, useCallback, useRef } from 'react'
-import type { OmnaiUIEvent, SessionState } from '../types/index.js'
-import { parseStreamLine, makeMessage, parseOmnaiUIEvent } from '../utils/parse.js'
+import type { SweechUIEvent, SessionState } from '../types/index.js'
+import { parseStreamLine, makeMessage, parseSweechUIEvent } from '../utils/parse.js'
 
 type Action =
-  | { type: 'EVENT'; event: OmnaiUIEvent }
+  | { type: 'EVENT'; event: SweechUIEvent }
   | { type: 'CONNECTED' }
   | { type: 'DISCONNECTED'; error?: string }
   | { type: 'CLEAR' }
@@ -187,7 +187,7 @@ export function useAgentStream(
     dispatch({ type: 'CONNECTED' })
 
     es.onmessage = (e) => {
-      const event = parseOmnaiUIEvent(e.data)
+      const event = parseSweechUIEvent(e.data)
       if (!event) return
 
       dispatch({ type: 'EVENT', event })

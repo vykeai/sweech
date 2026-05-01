@@ -6,11 +6,13 @@ import type {
 } from '../types/index.js'
 import { retainSessionMessages } from './retention.js'
 
-export interface OmnaiSessionStateInternal extends SessionState {
+export interface SweechSessionStateInternal extends SessionState {
   pendingArchive: SessionArchiveSnapshot[]
 }
+/** @deprecated Use SweechSessionStateInternal */
+export type OmnaiSessionStateInternal = SweechSessionStateInternal
 
-export type OmnaiSessionStateAction =
+export type SweechSessionStateAction =
   | { type: 'STARTED' }
   | { type: 'MESSAGES'; messages: Message[]; retention?: SessionRetentionPolicy }
   | { type: 'COST'; inputTokens: number; outputTokens: number; costUsd: number }
@@ -19,8 +21,10 @@ export type OmnaiSessionStateAction =
   | { type: 'CLEAR' }
   | { type: 'ARCHIVE_FLUSHED'; count: number }
   | { type: 'REHYDRATED'; messages: Message[]; retention?: SessionRetentionPolicy }
+/** @deprecated Use SweechSessionStateAction */
+export type OmnaiSessionStateAction = SweechSessionStateAction
 
-export const initialOmnaiSessionStateInternal: OmnaiSessionStateInternal = {
+export const initialSweechSessionStateInternal: SweechSessionStateInternal = {
   status: 'idle',
   messages: [],
   approval: null,
@@ -31,12 +35,14 @@ export const initialOmnaiSessionStateInternal: OmnaiSessionStateInternal = {
   connected: true,
   pendingArchive: [],
 }
+/** @deprecated Use initialSweechSessionStateInternal */
+export const initialOmnaiSessionStateInternal = initialSweechSessionStateInternal
 
 function appendMessages(
-  state: OmnaiSessionStateInternal,
+  state: SweechSessionStateInternal,
   nextMessages: Message[],
   retention?: SessionRetentionPolicy,
-): OmnaiSessionStateInternal {
+): SweechSessionStateInternal {
   if (nextMessages.length === 0) return state
 
   const retained = retainSessionMessages([...state.messages, ...nextMessages], retention)
@@ -59,10 +65,10 @@ function appendMessages(
 }
 
 function prependMessages(
-  state: OmnaiSessionStateInternal,
+  state: SweechSessionStateInternal,
   archivedMessages: Message[],
   retention?: SessionRetentionPolicy,
-): OmnaiSessionStateInternal {
+): SweechSessionStateInternal {
   if (archivedMessages.length === 0) return state
 
   const retained = retainSessionMessages([...archivedMessages, ...state.messages], retention)
@@ -84,10 +90,10 @@ function prependMessages(
   }
 }
 
-export function reduceOmnaiSessionState(
-  state: OmnaiSessionStateInternal,
-  action: OmnaiSessionStateAction,
-): OmnaiSessionStateInternal {
+export function reduceSweechSessionState(
+  state: SweechSessionStateInternal,
+  action: SweechSessionStateAction,
+): SweechSessionStateInternal {
   switch (action.type) {
     case 'STARTED':
       return { ...state, status: 'running', startedAt: Date.now(), error: null }
@@ -109,7 +115,7 @@ export function reduceOmnaiSessionState(
     case 'FAILED':
       return { ...state, status: 'failed', error: action.error }
     case 'CLEAR':
-      return { ...initialOmnaiSessionStateInternal }
+      return { ...initialSweechSessionStateInternal }
     case 'ARCHIVE_FLUSHED':
       if (action.count <= 0) return state
       return {
@@ -122,8 +128,10 @@ export function reduceOmnaiSessionState(
       return state
   }
 }
+/** @deprecated Use reduceSweechSessionState */
+export const reduceOmnaiSessionState = reduceSweechSessionState
 
-export function toPublicSessionState(state: OmnaiSessionStateInternal): SessionState {
+export function toPublicSessionState(state: SweechSessionStateInternal): SessionState {
   const { pendingArchive, ...session } = state
   return session
 }

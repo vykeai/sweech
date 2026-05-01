@@ -1,5 +1,7 @@
 export { ThemeProvider, createTheme, themes } from './themes/theme.js'
-export type { OmnaiTheme, ThemeProviderProps } from './themes/theme.js'
+export type { SweechTheme, ThemeProviderProps } from './themes/theme.js'
+/** @deprecated Use SweechTheme */
+export type { OmnaiTheme } from './themes/theme.js'
 
 export { ChatThread } from './components/ChatThread.js'
 export { ChatInput } from './components/ChatInput.js'
@@ -19,19 +21,31 @@ export { useSweechWebSession } from './hooks/useSweechWebSession.js'
 export { useSweechMessages } from './hooks/useSweechMessages.js'
 export { useAgentStream } from './hooks/useAgentStream.js'
 
-export { agentEventToMessages, parseStreamLine, parseOmnaiUIEvent, makeMessage, stripAnsi, filterTextBlock } from './utils/parse.js'
+export { agentEventToMessages, parseStreamLine, parseSweechUIEvent, makeMessage, stripAnsi, filterTextBlock } from './utils/parse.js'
+/** @deprecated Use parseSweechUIEvent */
+export { parseOmnaiUIEvent } from './utils/parse.js'
 
 export type {
   Message, MessageType, SessionState, SessionStatus, CostSummary,
   ApprovalRequest, ApprovalStage, ApprovalAction,
   QuestionRequest, QuestionOption,
   SessionArchiveSnapshot, SessionArchiveStore, SessionRetentionPolicy,
-  OmnaiUIEvent, OmnaiUICommand,
+  SweechUIEvent, SweechUICommand,
   // re-exported from sweech engine
   AgentEvent, ModelRunner, AgentRunner, RunOptions, TokenUsage, Provider, EngineId,
 } from './types/index.js'
 
-export type { UseOmnaiSessionOptions, UseOmnaiSessionReturn } from './hooks/useSweechSession.js'
+/** @deprecated Use SweechUIEvent */
+export type { OmnaiUIEvent } from './types/index.js'
+/** @deprecated Use SweechUICommand */
+export type { OmnaiUICommand } from './types/index.js'
+
+export type { UseSweechSessionOptions, UseSweechSessionReturn } from './hooks/useSweechSession.js'
+/** @deprecated Use UseSweechSessionOptions */
+export type { UseOmnaiSessionOptions } from './hooks/useSweechSession.js'
+/** @deprecated Use UseSweechSessionReturn */
+export type { UseOmnaiSessionReturn } from './hooks/useSweechSession.js'
+
 export type { UseSweechWebSessionOptions, UseSweechWebSessionReturn } from './hooks/useSweechWebSession.js'
 export type { UseSweechMessagesReturn, PushOptions } from './hooks/useSweechMessages.js'
 export type { UseAgentStreamOptions, UseAgentStreamReturn } from './hooks/useAgentStream.js'
