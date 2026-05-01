@@ -57,8 +57,13 @@ async function resolveApiKey(profile: CredentialProfile): Promise<string | null>
     return getKey(profile.commandName);
   }
   if (profile.env) {
+    const envKeyNames = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'API_KEY', 'XAI_API_KEY', 'GROQ_API_KEY', 'MISTRAL_API_KEY', 'DEEPSEEK_API_KEY', 'CEREBRAS_API_KEY', 'MINIMAX_API_KEY', 'GOOGLE_API_KEY'];
+    for (const keyName of envKeyNames) {
+      if (profile.env[keyName]) return profile.env[keyName];
+    }
+    // Fallback: any value that looks like an API key (20+ chars, no spaces)
     for (const val of Object.values(profile.env)) {
-      if (val.startsWith('sk-') || val.startsWith('sk-ant-')) return val;
+      if (typeof val === 'string' && val.length >= 20 && !val.includes(' ') && !val.includes('=')) return val;
     }
   }
   return null;
@@ -195,13 +200,10 @@ async function checkApiProvider(profileName: string, profile: CredentialProfile)
     } else if (response.status === 404) {
       reason = 'subscription_tier';
     } else if (response.status === 429) {
-      // Rate limit means the key works but tier may be exhausted
-      const body = responseText.toLowerCase();
-      if (body.includes('exceeded') || body.includes('quota') || body.includes('limit')) {
-        reason = 'subscription_tier';
-      } else {
-        reason = 'ok';
-      }
+      // Rate limit means the auth works but quota is exhausted
+      reason = 'subscription_tier';
+    } else if (response.status >= 500) {
+      reason = 'base_url_down';
     } else if (response.status === 400) {
       const body = responseText.toLowerCase();
       if (body.includes('invalid') && body.includes('api')) {
@@ -214,7 +216,7 @@ async function checkApiProvider(profileName: string, profile: CredentialProfile)
     return {
       profile: profileName,
       model,
-      reachable: reason === 'ok',
+      reachable: false,
       reason,
       suggestedFallback: null,
       checkedAt: new Date().toISOString(),
@@ -288,9 +290,6 @@ export async function checkProfile(profileName: string): Promise<CheckResult> {
 
 export async function checkAllProfiles(): Promise<CheckResult[]> {
   const profiles = await loadProfiles();
-  const results: CheckResult[] = [];
-  for (const name of Object.keys(profiles)) {
-    results.push(await checkProfile(name));
-  }
-  return results;
+  const names = Object.keys(profiles);
+  return Promise.all(names.map(name => checkProfile(name)));
 }

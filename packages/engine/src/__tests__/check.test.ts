@@ -102,6 +102,15 @@ describe('check', () => {
     expect(result.reason).toBe('base_url_down');
   });
 
+  it('detects subscription_tier on 429 rate limit', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { message: 'rate limit exceeded' } }), { status: 429 }),
+    );
+    const result = await checkProfile('openai-api');
+    expect(result.reachable).toBe(false);
+    expect(result.reason).toBe('subscription_tier');
+  });
+
   it('caches results for 5 minutes', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ id: 'msg_test', type: 'message', content: [] }), { status: 200 }),
