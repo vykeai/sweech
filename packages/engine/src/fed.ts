@@ -1,3 +1,7 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
+
 export interface FedEventClientLike {
   publish(type: string, source: string, data: unknown): Promise<unknown>;
 }
@@ -17,15 +21,39 @@ export interface FedToolRegistration {
 
 let fedClientPromise: Promise<FedEventClientLike> | null = null;
 
+const FED_CONFIG_FILE = join(homedir(), '.fed', 'config.json');
+const FALLBACK_FED_PORT = 7840;
+
+interface FedConfigTools {
+  [slug: string]: { dash?: number; fed?: number; enabled?: boolean };
+}
+
+async function readFedPort(): Promise<number> {
+  try {
+    const raw = await readFile(FED_CONFIG_FILE, 'utf-8');
+    const cfg = JSON.parse(raw) as { tools?: FedConfigTools };
+    const fedPort = cfg?.tools?.['fed']?.dash;
+    return typeof fedPort === 'number' && fedPort > 0 ? fedPort : FALLBACK_FED_PORT;
+  } catch {
+    return FALLBACK_FED_PORT;
+  }
+}
+
 async function loadFedClient(): Promise<FedEventClientLike> {
   if (!fedClientPromise) {
-    fedClientPromise = import('@vykeai/fed')
-      .then(({ FedEventClient }) => new FedEventClient('http://localhost:7840') as FedEventClientLike)
-      .catch(() => ({
-        async publish() {
-          return undefined;
-        },
-      }));
+    fedClientPromise = (async () => {
+      try {
+        const port = await readFedPort();
+        const { FedEventClient } = await import('@vykeai/fed');
+        return new FedEventClient(`http://localhost:${port}`) as FedEventClientLike;
+      } catch {
+        return {
+          async publish() {
+            return undefined;
+          },
+        };
+      }
+    })();
   }
   return fedClientPromise;
 }

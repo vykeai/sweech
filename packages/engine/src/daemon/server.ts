@@ -17,7 +17,6 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FedEventClient } from '@vykeai/fed';
 import {
   getSweechStreamSeverity,
   STREAM_PROTOCOL,
@@ -28,6 +27,7 @@ import {
 import { handleMcpRequest } from './mcp.js';
 import { runParallel, type ParallelStrategy } from '../parallel.js';
 import { registerConfigRoutes } from './config-routes.js';
+import { publishFedEvent } from '../fed.js';
 
 let cachedEstate: Estate | null = null;
 let cachedQuotaTracker: QuotaTracker | null = null;
@@ -40,7 +40,6 @@ let daemonLifecycleState: DaemonLifecycleState = 'booting';
 let daemonLifecycleReason = 'booting';
 let daemonStartedAt = Date.now();
 const activeRunControllers = new Set<AbortController>();
-const fedClient = new FedEventClient('http://localhost:7840');
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_JSON_DEPTH = 16;
 const MAX_PROMPT_CHARS = 200_000;
@@ -905,20 +904,20 @@ async function getRoutedFallbackOrder(
 }
 
 function publishQuotaExceeded(accountId: string, provider: string, engine: string): void {
-  fedClient.publish('sweech.provider.throttled', 'sweech', {
+  publishFedEvent('sweech.provider.throttled', 'sweech', {
     accountId,
     provider,
     engine,
-  }).catch(() => {});
+  });
 }
 
 function publishFailover(skipped: string[], accountId: string, engine: string, reason: string): void {
-  fedClient.publish('sweech.failover', 'sweech', {
+  publishFedEvent('sweech.failover', 'sweech', {
     from: skipped,
     to: accountId,
     engine,
     reason,
-  }).catch(() => {});
+  });
 }
 
 function selectFromEstate(params: {
@@ -1439,7 +1438,7 @@ export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker;
       return createDaemonStreamEnvelope(event, streamId, requestId, traceId, correlationId, sequence);
     };
 
-    fedClient.publish('sweech.run.started', 'sweech', {
+    publishFedEvent('sweech.run.started', 'sweech', {
       runId,
       requestId,
       traceId,
@@ -1447,7 +1446,7 @@ export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker;
       provider: resolvedOpts.provider,
       account: resolvedOpts.account,
       prompt: prompt.slice(0, 100),
-    }).catch(() => {});
+    });
 
     return new Response(
       new ReadableStream({
@@ -1484,7 +1483,7 @@ export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker;
                 controller.enqueue(encoder.encode(`data: ${frame}\n\n`));
               }
             }
-            fedClient.publish('sweech.run.completed', 'sweech', {
+            publishFedEvent('sweech.run.completed', 'sweech', {
               runId,
               requestId,
               traceId,
@@ -1492,11 +1491,11 @@ export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker;
               status: 'success',
               ...(lastResult ? { usage: lastResult.usage, costUsd: lastResult.costUsd, durationMs: lastResult.durationMs } : {}),
               ...(lastResult?.sessionId ? { sessionId: lastResult.sessionId } : {}),
-            }).catch(() => {});
+            });
           } catch (err) {
-            fedClient.publish('sweech.run.completed', 'sweech', {
+            publishFedEvent('sweech.run.completed', 'sweech', {
               runId, requestId, traceId, engine: runner.engine, status: 'error', error: (err as Error).message,
-            }).catch(() => {});
+            });
             const message = (err as Error).name === 'AbortError' ? 'daemon shutdown' : (err as Error).message;
             const frame = serializeEvent({ type: 'error', message });
             controller.enqueue(encoder.encode(`data: ${frame}\n\n`));
