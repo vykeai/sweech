@@ -849,8 +849,9 @@ program
   .option('-y, --yolo', 'Skip permission prompts (--dangerously-skip-permissions / equivalent)')
   .option('-r, --resume', 'Resume last session (--continue / equivalent)')
   .option('--no-tmux', 'Bypass tmux even if tmux is available')
+  .option('--force', 'Skip model reachability check')
   .allowUnknownOption(true)
-  .action((commandName: string, opts: { yolo?: boolean; resume?: boolean; tmux?: boolean }, cmd: any) => {
+  .action(async (commandName: string, opts: { yolo?: boolean; resume?: boolean; tmux?: boolean; force?: boolean }, cmd: any) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     const aliasManager = new AliasManager();
@@ -863,6 +864,55 @@ program
       console.error(chalk.red(`Profile '${commandName}' not found`));
       process.exit(1);
     }
+
+    // Pre-launch reachability check (unless --force)
+    if (!opts.force && profile) {
+      const daemonPort = parseInt(process.env.SWEECH_PORT ?? '') || 7801;
+      try {
+        const res = await fetch(`http://127.0.0.1:${daemonPort}/check?profile=${encodeURIComponent(profile.commandName)}`, {
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (res.ok) {
+          const result = await res.json() as { reachable: boolean; reason: string; model: string | null; suggestedFallback: string | null };
+          if (!result.reachable) {
+            const model = result.model ?? 'unknown';
+            console.error(chalk.red(`Profile '${profile.commandName}' has model ${model} which is not currently reachable (${result.reason}).`));
+
+            // Find reachable alternatives
+            try {
+              const allRes = await fetch(`http://127.0.0.1:${daemonPort}/check/all`, { signal: AbortSignal.timeout(10_000) });
+              if (allRes.ok) {
+                const allResults = await allRes.json() as Array<{ profile: string; reachable: boolean }>;
+                const reachable = allResults.filter(r => r.reachable).map(r => r.profile);
+                if (reachable.length > 0) {
+                  console.error(chalk.yellow(`Reachable profiles: ${reachable.join(', ')}`));
+                } else {
+                  console.error(chalk.yellow('No reachable profiles found.'));
+                }
+              }
+            } catch { /* ignore */ }
+
+            console.error(chalk.gray('Use --force to skip this check.'));
+            process.exit(1);
+          }
+        }
+      } catch {
+        // Daemon not running — skip check, proceed with launch
+      }
+    }
+
+    if (opts.force) {
+      // Audit the --force override
+      try {
+        const { appendFileSync, mkdirSync } = require('node:fs');
+        const { join } = require('node:path');
+        const { homedir } = require('node:os');
+        const auditDir = join(homedir(), '.sweech');
+        mkdirSync(auditDir, { recursive: true });
+        appendFileSync(join(auditDir, 'audit.log'), `${new Date().toISOString()} launch --force profile=${profile?.commandName ?? commandName}\n`);
+      } catch { /* best effort */ }
+    }
+
     const cli = cliConfig!;
     const profileDir = profile
       ? config.getProfileDir(profile.commandName)
