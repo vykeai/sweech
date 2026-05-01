@@ -4,6 +4,8 @@
  * 🍭 Sweetch CLI - Switch between Claude accounts and AI providers
  */
 
+process.title = 'sweech'
+
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { ConfigManager, resolveApiKey } from './config';
