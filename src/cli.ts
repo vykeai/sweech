@@ -2892,6 +2892,16 @@ program
         return out;
       };
 
+      // A turn is "broken" if any of:
+      //   - missing stop_reason (deadlocks --continue)
+      //   - thinking-only content (no user-visible output)
+      //   - contains a thinking block with a signature (cross-provider replay
+      //     hazard — Anthropic rejects 400 "Invalid signature in thinking
+      //     block" when a transcript produced by GLM-5.1/z.ai is resumed
+      //     against the real Anthropic API)
+      const hasThinkingWithSignature = (content: any[]): boolean =>
+        content.some((c: any) => c && c.type === 'thinking' && typeof c.signature === 'string');
+
       const isBrokenAssistant = (d: any): boolean => {
         if (d?.type !== 'assistant') return false;
         const msg = d.message;
@@ -2900,10 +2910,11 @@ program
         const missingStop = msg.stop_reason === undefined || msg.stop_reason === null;
         const thinkingOnly = content.length > 0
           && content.every((c: any) => c && c.type === 'thinking');
-        return missingStop || thinkingOnly;
+        return missingStop || thinkingOnly || hasThinkingWithSignature(content);
       };
 
       let filesScanned = 0, brokenFound = 0, filesPatched = 0;
+      let thinkingStripped = 0;
 
       for (const root of roots) {
         for (const file of walk(root)) {
@@ -2919,11 +2930,17 @@ program
             if (!isBrokenAssistant(d)) return ln;
             brokenFound++;
             const msg = d.message || {};
-            const content = Array.isArray(msg.content) ? msg.content : [];
+            let content = Array.isArray(msg.content) ? msg.content : [];
+            // Strip thinking blocks — signatures are provider-bound and break
+            // resume across providers. Anthropic accepts assistant turns with
+            // no thinking blocks at all.
+            const beforeLen = content.length;
+            content = content.filter((c: any) => !(c && c.type === 'thinking'));
+            thinkingStripped += beforeLen - content.length;
             const hasVisible = content.some((c: any) => c?.type === 'text' || c?.type === 'tool_use');
             if (!hasVisible) content.push({ type: 'text', text: '[session recovered — prior turn stalled]' });
             msg.content = content;
-            msg.stop_reason = 'end_turn';
+            msg.stop_reason = msg.stop_reason ?? 'end_turn';
             if (!('stop_sequence' in msg)) msg.stop_sequence = null;
             d.message = msg;
             changed = true;
@@ -2938,6 +2955,7 @@ program
         }
       }
       console.log(chalk.green(`  ✓ scanned ${filesScanned} transcript(s), ${brokenFound} broken turn(s)` +
+        (thinkingStripped ? `, ${thinkingStripped} cross-provider thinking block(s) stripped` : '') +
         (opts.dryRun ? '' : `, patched ${filesPatched} file(s) (originals → .bak)`)));
     }
 
