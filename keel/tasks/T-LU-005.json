@@ -14,7 +14,13 @@
   "spec": null,
   "parentId": null,
   "dueDate": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-05-03T19:52:26.988Z",
+      "by": "human",
+      "text": "From runecode RUNECODE_NEEDS_v3.md (S4). Implements ROADMAP Phase 1. AC: --install writes ~/Library/LaunchAgents/dev.sweech.serve.plist; auto-restart on crash; --uninstall removes plist + unloads. doctor warns if installed but not running."
+    }
+  ],
   "acceptanceCriteria": [],
   "cloudy_run": null,
   "statusHistory": [
@@ -29,7 +35,7 @@
   "stageHistory": [],
   "recurring": null,
   "createdAt": "2026-05-03T19:51:37.520Z",
-  "updatedAt": "2026-05-03T19:51:37.520Z",
+  "updatedAt": "2026-05-03T19:52:26.988Z",
   "validationOverrides": null,
   "executionMode": null,
   "cloudyTaskGraph": null,
