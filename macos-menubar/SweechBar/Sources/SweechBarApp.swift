@@ -1,46 +1,82 @@
 import SwiftUI
+import Combine
+import OnlyMenuBarKit
+
+// MARK: - App Entry Point
 
 @main
 struct SweechBarApp: App {
-    @StateObject private var service = SweechService()
-    @AppStorage("sweechBarLabelMode") private var labelMode: String = "capacity"
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
-    init() {
+    var body: some Scene {
+        Settings {
+            EmptyView()
+        }
+    }
+}
+
+// MARK: - AppDelegate
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+    var barController: SweechBarController!
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
         // Single instance: terminate older copies
         let myPID = ProcessInfo.processInfo.processIdentifier
         NSWorkspace.shared.runningApplications
             .filter { $0.localizedName == "SweechBar" && $0.processIdentifier != myPID }
             .forEach { $0.terminate() }
 
-        DispatchQueue.main.async {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        NSApp.setActivationPolicy(.accessory)
+
+        barController = SweechBarController()
 
         // Register global hotkey (Cmd+Shift+S) to toggle popover
-        HotkeyManager.shared.onToggle = {
-            // Find the SweechBar status item button and click it
+        HotkeyManager.shared.onToggle = { [weak self] in
             DispatchQueue.main.async {
-                guard let button = NSApp.windows
-                    .compactMap({ $0.value(forKey: "statusItem") as? NSStatusItem })
-                    .first?.button else { return }
-                button.performClick(nil)
+                self?.barController.togglePopover()
             }
         }
         HotkeyManager.shared.register()
     }
+}
+
+// MARK: - SweechBarController
+
+class SweechBarController: OnlyBarController {
+    let service = SweechService()
+    private var cancellables = Set<AnyCancellable>()
+
+    @AppStorage("sweechBarLabelMode") private var labelMode: String = "capacity"
+
+    init() {
+        // Use NSStatusItem.variableLength for dynamic text labels
+        super.init(
+            width: 360,
+            height: nil,
+            icon: "lollipop",
+            statusItemLength: NSStatusItem.variableLength
+        )
+        setupObserver()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - Dynamic Menu Bar Label
 
     private var menuBarLabel: String {
         let statusPrefix: String = {
             switch service.worstStatus {
-            case "limit_reached": return "\u{1F36D}\u{1F534}"   // 🍭🔴
-            case "warning":       return "\u{1F36D}\u{26A0}\u{FE0F}" // 🍭⚠️
+            case "limit_reached": return "\u{1F36D}\u{1F534}"   // lollipop + red circle
+            case "warning":       return "\u{1F36D}\u{26A0}\u{FE0F}" // lollipop + warning
             default:              return "\u{1F36D}"
             }
         }()
 
         switch labelMode {
         case "expiry":
-            // Most urgent: highest (remaining% / days_until_reset) within 72h
             let urgent = service.accounts
                 .filter { $0.needsReauth != true && $0.liveStatus != "limit_reached" }
                 .compactMap { a -> (pct: Int, urgency: Double)? in
@@ -52,9 +88,9 @@ struct SweechBarApp: App {
                 }
                 .max(by: { $0.urgency < $1.urgency })
             if let u = urgent {
-                return "\u{1F36D}\u{26A1}\(u.pct)%"  // 🍭⚡72%
+                return "\u{1F36D}\u{26A1}\(u.pct)%"  // lollipop + lightning + pct
             }
-            return statusPrefix  // nothing expiring soon — just show status
+            return statusPrefix
 
         case "count":
             let total = service.accounts.count
@@ -66,7 +102,7 @@ struct SweechBarApp: App {
         case "icon":
             return "\u{1F36D}"
 
-        default: // "capacity" — best available account's 5h free %
+        default: // "capacity" -- best available account's 5h free %
             let best = service.accounts
                 .filter { $0.liveStatus != "limit_reached" && $0.needsReauth != true }
                 .sorted { $0.smartScore > $1.smartScore }
@@ -76,12 +112,59 @@ struct SweechBarApp: App {
         }
     }
 
-    var body: some Scene {
-        MenuBarExtra {
-            AccountsView(service: service)
-        } label: {
-            Text(menuBarLabel)
+    // MARK: - Observer
+
+    private func setupObserver() {
+        service.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshMenuBarLabel()
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Re-render the text label in the menu bar (image + length).
+    /// Does NOT mutate iconName or badgeCount, avoiding infinite recursion.
+    private func refreshMenuBarLabel() {
+        guard let button = statusBarButton else { return }
+        let image = renderIcon()
+        button.image = image
+        // Fit status item width to the rendered label
+        if let img = image {
+            setStatusItemLength(img.size.width + 6)
         }
-        .menuBarExtraStyle(.window)
+    }
+
+    // MARK: - OnlyBarController Overrides
+
+    override func renderIcon() -> NSImage? {
+        let text = menuBarLabel
+        let font = NSFont.systemFont(ofSize: 14)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.labelColor,
+        ]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        let padding: CGFloat = 2
+        let width = ceil(textSize.width) + padding * 2
+        let height = ceil(textSize.height) + padding
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+        let drawRect = NSRect(
+            x: padding,
+            y: (height - textSize.height) / 2,
+            width: textSize.width,
+            height: textSize.height
+        )
+        (text as NSString).draw(in: drawRect, withAttributes: attrs)
+        image.unlockFocus()
+        return image
+    }
+
+    override func makeBody() -> AnyView {
+        AnyView(
+            AccountsView(service: service)
+        )
     }
 }
