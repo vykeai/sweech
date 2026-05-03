@@ -14,7 +14,13 @@
   "spec": null,
   "parentId": null,
   "dueDate": null,
-  "context": [],
+  "context": [
+    {
+      "at": "2026-05-03T19:52:27.123Z",
+      "by": "human",
+      "text": "From runecode RUNECODE_NEEDS_v3.md (S5). Implements ROADMAP Phase 2. AC: background daemon polls token expiry per profile; refreshes 24h before expiry via existing oauth.ts:167-192; logs to audit log; doctor reports next-refresh ETA per profile."
+    }
+  ],
   "acceptanceCriteria": [],
   "cloudy_run": null,
   "statusHistory": [
@@ -29,7 +35,7 @@
   "stageHistory": [],
   "recurring": null,
   "createdAt": "2026-05-03T19:51:37.710Z",
-  "updatedAt": "2026-05-03T19:51:37.710Z",
+  "updatedAt": "2026-05-03T19:52:27.123Z",
   "validationOverrides": null,
   "executionMode": null,
   "cloudyTaskGraph": null,
