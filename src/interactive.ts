@@ -112,12 +112,20 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
               }
             ];
           }
+          if (cliType === 'kimi') {
+            return [
+              {
+                name: 'Kimi for Coding (Moonshot AI) - Official Kimi subscription',
+                value: 'kimi-coding'
+              }
+            ];
+          }
           return [];
         }
 
         // For external, show compatible providers for the selected CLI
         const cliType = answers.cliType || detectedCLIs.find(d => d.installed)?.cli.name || 'claude';
-        return getProviderList(cliType as 'claude' | 'codex').filter(p => p.value !== 'anthropic');
+        return getProviderList(cliType as 'claude' | 'codex' | 'kimi').filter(p => p.value !== 'anthropic' && p.value !== 'kimi-coding');
       },
       pageSize: 10
     },
@@ -131,6 +139,9 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
         const cliType = answers.cliType || 'claude';
         if (cliType === 'codex') {
           return providerName === 'openai' ? 'codex-work' : `codex-${providerName}`;
+        }
+        if (cliType === 'kimi') {
+          return providerName === 'kimi-coding' ? 'kimi-work' : `kimi-${providerName}`;
         }
         const defaultMap: Record<string, string> = {
           'minimax': 'claude-mini',
@@ -153,12 +164,12 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
           return 'Use only lowercase letters, numbers, and hyphens (e.g., "claude-mini", "cmini")';
         }
 
-        if (trimmed === 'claude' || trimmed === 'codex') {
+        if (trimmed === 'claude' || trimmed === 'codex' || trimmed === 'kimi') {
           return `Cannot use "${trimmed}" - this is reserved for your default account`;
         }
 
         const cliType = answers.cliType || 'claude';
-        const prefix = cliType === 'codex' ? 'codex-' : 'claude-';
+        const prefix = cliType === 'codex' ? 'codex-' : cliType === 'kimi' ? 'kimi-' : 'claude-';
         if (!trimmed.startsWith(prefix)) {
           return `Command name must start with "${prefix}" (e.g., "${prefix}work", "${prefix}pole")`;
         }
@@ -214,7 +225,7 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
       when: (answers: any) => answers.dataMode === 'shared',
       choices: (answers: any) => {
         const cliType = answers.cliType || 'claude';
-        const defaultName = cliType === 'codex' ? 'codex' : 'claude';
+        const defaultName = cliType === 'codex' ? 'codex' : cliType === 'kimi' ? 'kimi' : 'claude';
         const defaultDir = `~/.${defaultName}/`;
         const sameCliProfiles = existingProfiles.filter(p => (p.cliType || 'claude') === cliType);
         return [
@@ -238,9 +249,10 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
         const cliType = answers.cliType || 'claude';
         const providerConfig = getProvider(provider);
 
-        // OAuth only available for official providers (anthropic for claude, openai for codex)
+        // OAuth only available for official providers (anthropic for claude, openai for codex, kimi-coding for kimi)
         if ((cliType === 'claude' && provider === 'anthropic') ||
-            (cliType === 'codex' && provider === 'openai')) {
+            (cliType === 'codex' && provider === 'openai') ||
+            (cliType === 'kimi' && provider === 'kimi-coding')) {
           return [
             {
               name: 'OAuth (browser login - adds another account without logging out)',
@@ -281,7 +293,8 @@ export async function interactiveAddProvider(existingProfiles: ProfileConfig[] =
         const providerConfig = getProvider(provider);
         // Default to OAuth for official subscription providers
         if ((cliType === 'claude' && provider === 'anthropic') ||
-            (cliType === 'codex' && provider === 'openai')) {
+            (cliType === 'codex' && provider === 'openai') ||
+            (cliType === 'kimi' && provider === 'kimi-coding')) {
           return 'oauth';
         }
         // Default to no auth for local providers

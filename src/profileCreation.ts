@@ -26,7 +26,8 @@ export async function createProfile(
   // - Using official provider (anthropic for claude, openai for codex)
   const isOfficialProvider =
     (cli.name === 'claude' && answers.provider === 'anthropic') ||
-    (cli.name === 'codex' && answers.provider === 'openai');
+    (cli.name === 'codex' && answers.provider === 'openai') ||
+    (cli.name === 'kimi' && answers.provider === 'kimi-coding');
   const useNativeAuth = answers.authMethod === 'oauth' && isOfficialProvider;
 
   // Handle OAuth if selected (but not for native auth - CLI handles it)

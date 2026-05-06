@@ -36,6 +36,16 @@ export const SUPPORTED_CLIS: Record<string, CLIConfig> = {
     yoloFlag: '--yolo',
     resumeFlag: 'resume --last',
   },
+  kimi: {
+    name: 'kimi',
+    displayName: 'Kimi (Moonshot AI)',
+    command: 'kimi',
+    configDirEnvVar: 'KIMI_SHARE_DIR',
+    description: 'Kimi CLI - AI coding agent by Moonshot AI',
+    installUrl: 'https://moonshotai.github.io/kimi-cli/',
+    yoloFlag: '--yolo',
+    resumeFlag: '--continue',
+  },
 };
 
 export function getCLI(name: string): CLIConfig | undefined {

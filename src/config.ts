@@ -22,7 +22,7 @@ import { atomicWriteFileSync } from './atomicWrite';
 export interface ProfileConfig {
   name: string;
   commandName: string;
-  cliType: string; // 'claude' or 'codex'
+  cliType: string; // 'claude', 'codex', or 'kimi'
   provider: string;
   apiKey?: string;           // DEPRECATED: use keyInKeychain instead. Only present pre-migration.
   keyInKeychain?: boolean;   // true means apiKey is stored in platform credential store
@@ -76,6 +76,15 @@ export const CODEX_SHAREABLE_FILES = ['models_cache.json'] as const;
 // the codex app-server caches per-account rate limits there — sharing it causes all
 // profiles to report the same account's usage.
 export const CODEX_SHAREABLE_DBS = ['logs_1.sqlite'] as const;
+
+// Kimi-specific shareable dirs.
+// Sessions and user-history are conversation data safe to share.
+// NOT shared: config.toml (account-specific provider settings), credentials/ (auth),
+// device_id, telemetry/, logs/.
+export const KIMI_SHAREABLE_DIRS = ['sessions', 'user-history'] as const;
+
+// Kimi-specific shareable files — none by default (kimi.json is runtime state).
+export const KIMI_SHAREABLE_FILES = [] as const;
 
 /**
  * Escape a string for safe inclusion inside double-quoted bash.
@@ -309,6 +318,22 @@ export class ConfigManager {
         if (provider.smallFastModel) {
           settings.env.OPENAI_SMALL_FAST_MODEL = provider.smallFastModel;
         }
+      } else if (cliType === 'kimi') {
+        // Kimi CLI — configure via config.toml env overrides.
+        // The CLI reads provider settings from ~/.kimi/config.toml;
+        // we point KIMI_HOME to the sweech profile dir so it gets its
+        // own isolated config, sessions, and credentials.
+        if (authToken) {
+          settings.env.KIMI_API_KEY = authToken;
+        }
+
+        if (provider.baseUrl) {
+          settings.env.KIMI_BASE_URL = provider.baseUrl;
+        }
+
+        if (effectiveModel) {
+          settings.env.KIMI_MODEL = effectiveModel;
+        }
       } else {
         // Claude Code CLI uses Anthropic environment variables
         // Only set auth token if we have one (local providers may have no auth)
@@ -334,7 +359,9 @@ export class ConfigManager {
       // has slow cold-starts; Alibaba dashscope occasionally times out.
       // Claude Code's default 60s timeout and 2 retries aren't enough for
       // long tool-use chains through these proxies.
-      if (cliType !== 'codex') {
+      // Claude-specific timeout/retry tuning.
+      // Kimi and Codex CLIs manage their own timeouts internally.
+      if (cliType === 'claude') {
         const providerName = provider.name;
         if (providerName === 'minimax') {
           settings.env.API_TIMEOUT_MS = '3000000';
@@ -361,9 +388,48 @@ export class ConfigManager {
     const settingsPath = path.join(profileDir, 'settings.json');
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
-    // Only create .claude.json to skip onboarding for external providers
+    if (cliType === 'kimi') {
+      // Kimi CLI reads config.toml (not settings.json).
+      // Generate a config.toml with provider and model settings.
+      const effectiveModel = modelOverride || provider.defaultModel;
+      const tomlLines: string[] = [
+        `# Sweech-managed config for ${commandName}`,
+        `default_model = "${effectiveModel || ''}"`,
+        `default_thinking = true`,
+        `default_yolo = false`,
+        '',
+        `[models."${effectiveModel || 'default'}"]`,
+        `provider = "managed:sweech"`,
+        `model = "${effectiveModel || ''}"`,
+        '',
+        `[providers."managed:sweech"]`,
+        `type = "openai"`,
+      ];
+      if (provider.baseUrl) {
+        tomlLines.push(`base_url = "${provider.baseUrl}/v1"`);
+      } else {
+        tomlLines.push(`base_url = ""`);
+      }
+      if (!useNativeAuth && (apiKey || oauthToken?.accessToken)) {
+        tomlLines.push(`api_key = "${apiKey || ''}"`);
+      } else {
+        tomlLines.push(`api_key = ""`);
+      }
+
+      const configTomlPath = path.join(profileDir, 'config.toml');
+      fs.writeFileSync(configTomlPath, tomlLines.join('\n') + '\n');
+
+      // Create empty dirs the kimi CLI expects
+      for (const dir of ['sessions', 'user-history', 'logs', 'telemetry', 'credentials']) {
+        const d = path.join(profileDir, dir);
+        if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+      }
+    }
+
+    // Only create .claude.json to skip onboarding for external providers (Claude/Codex)
     // For official Anthropic/OpenAI with native auth, let the CLI's onboarding flow run
-    if (!useNativeAuth) {
+    // Kimi CLI does its own onboarding via config.toml
+    if (cliType !== 'kimi' && !useNativeAuth) {
       const claudeJsonPath = path.join(profileDir, '.claude.json');
       const claudeConfig = {
         hasCompletedOnboarding: true,
@@ -441,16 +507,22 @@ ARGS=()
 while [ $# -gt 0 ]; do
   case "\$1" in
     --model)
-      # Update settings.json so Claude Code picks up the model (env vars get overridden by settings.json)
-      SETTINGS="${eProfileDir}/settings.json"
-      if [ -f "\$SETTINGS" ] && command -v python3 &>/dev/null; then
-        if [ "${eCliCommand}" = "claude" ]; then
-          python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['ANTHROPIC_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
-        else
-          python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['OPENAI_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
+      if [ "${eCliCommand}" = "kimi" ]; then
+        # Kimi CLI accepts --model/-m directly — pass it through
+        ARGS+=("--model" "\$2")
+        shift 2
+      else
+        # Update settings.json so Claude Code / Codex picks up the model
+        SETTINGS="${eProfileDir}/settings.json"
+        if [ -f "\$SETTINGS" ] && command -v python3 &>/dev/null; then
+          if [ "${eCliCommand}" = "claude" ]; then
+            python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['ANTHROPIC_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
+          else
+            python3 -c "import json,sys;d=json.load(open(sys.argv[1]));d.setdefault('env',{})['OPENAI_MODEL']=sys.argv[2];json.dump(d,open(sys.argv[1],'w'),indent=2)" "\$SETTINGS" "\$2"
+          fi
         fi
+        shift 2
       fi
-      shift 2
       ;;
     --yolo)
       if [ "${eCliCommand}" = "claude" ]; then
@@ -497,15 +569,22 @@ exec "${eCliCommand}" "\${ARGS[@]}"
     const isCodex = cliType === 'codex'
       || masterCommandName === 'codex'
       || commandName.startsWith('codex');
+    const isKimi = cliType === 'kimi'
+      || masterCommandName === 'kimi'
+      || commandName.startsWith('kimi');
 
     // Resolve master dir
-    const defaultDirs = ['claude', 'codex'];
+    const defaultDirs = ['claude', 'codex', 'kimi'];
     const masterDir = defaultDirs.includes(masterCommandName)
       ? path.join(os.homedir(), `.${masterCommandName}`)
       : this.getProfileDir(masterCommandName);
 
-    const dirs = isCodex ? CODEX_SHAREABLE_DIRS : SHAREABLE_DIRS;
-    const files = isCodex ? CODEX_SHAREABLE_FILES : SHAREABLE_FILES;
+    const dirs = isCodex ? CODEX_SHAREABLE_DIRS
+      : isKimi ? KIMI_SHAREABLE_DIRS
+      : SHAREABLE_DIRS;
+    const files = isCodex ? CODEX_SHAREABLE_FILES
+      : isKimi ? KIMI_SHAREABLE_FILES
+      : SHAREABLE_FILES;
 
     for (const dir of dirs) {
       const linkPath = path.join(profileDir, dir);

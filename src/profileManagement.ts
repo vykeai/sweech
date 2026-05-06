@@ -72,12 +72,17 @@ function requireProvider(providerName: string, cliType: CLIType): ProviderConfig
 
 function isOfficialOAuthProvider(cliType: CLIType, providerName: string): boolean {
   return (cliType === 'claude' && providerName === 'anthropic')
-    || (cliType === 'codex' && providerName === 'openai');
+    || (cliType === 'codex' && providerName === 'openai')
+    || (cliType === 'kimi' && providerName === 'kimi-coding');
 }
 
 function defaultCommandName(cliType: CLIType, providerName: string): string {
   if (cliType === 'codex') {
     return providerName === 'openai' ? 'codex-work' : `codex-${providerName.replace(/-openai$/, '')}`;
+  }
+
+  if (cliType === 'kimi') {
+    return providerName === 'kimi-coding' ? 'kimi-work' : `kimi-${providerName}`;
   }
 
   const defaults: Record<string, string> = {
@@ -110,11 +115,11 @@ async function validateProfileName(
     throw new Error('Use only lowercase letters, numbers, and hyphens');
   }
 
-  if (trimmed === 'claude' || trimmed === 'codex') {
+  if (trimmed === 'claude' || trimmed === 'codex' || trimmed === 'kimi') {
     throw new Error(`Cannot use "${trimmed}" - this is reserved for your default account`);
   }
 
-  const prefix = cliType === 'codex' ? 'codex-' : 'claude-';
+  const prefix = cliType === 'codex' ? 'codex-' : cliType === 'kimi' ? 'kimi-' : 'claude-';
   if (!trimmed.startsWith(prefix)) {
     throw new Error(`Command name must start with "${prefix}"`);
   }
@@ -135,7 +140,7 @@ function validateShareTarget(sharedWith: string | undefined, cliType: CLIType, p
   if (!sharedWith) return undefined;
 
   const trimmed = sharedWith.trim().toLowerCase();
-  const defaultTarget = cliType === 'codex' ? 'codex' : 'claude';
+  const defaultTarget = cliType === 'codex' ? 'codex' : cliType === 'kimi' ? 'kimi' : 'claude';
   if (trimmed === defaultTarget) {
     return trimmed;
   }

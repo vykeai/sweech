@@ -36,6 +36,9 @@ export async function getOAuthToken(
     return getAnthropicOAuthToken();
   } else if (cliType === 'codex') {
     return getOpenAIOAuthToken();
+  } else if (cliType === 'kimi') {
+    // Kimi CLI handles OAuth natively via `kimi login` — use native auth
+    throw new Error('Kimi CLI uses native authentication (kimi login). Use --auth native or omit --auth.');
   } else {
     throw new Error(`OAuth not supported for CLI type: ${cliType}`);
   }
@@ -291,6 +294,10 @@ export function oauthTokenToEnv(
     return {
       OPENAI_API_KEY: `sk-oauth-${token.accessToken}`,
       OPENAI_BEARER_TOKEN: token.accessToken
+    };
+  } else if (cliType === 'kimi') {
+    return {
+      KIMI_API_KEY: token.accessToken,
     };
   }
 

@@ -10,7 +10,7 @@ import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, CODEX_SHAREABLE_FILES, CODEX_SHAREABLE_DBS, resolveApiKey, KEYCHAIN_SERVICE } from './config';
+import { ConfigManager, ProfileConfig, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, CODEX_SHAREABLE_FILES, CODEX_SHAREABLE_DBS, KIMI_SHAREABLE_DIRS, KIMI_SHAREABLE_FILES, resolveApiKey, KEYCHAIN_SERVICE } from './config';
 import { getCredentialStore } from './credentialStore';
 import { getCLI } from './clis';
 import { getProvider, ModelInfo } from './providers';
@@ -258,13 +258,17 @@ export async function runDoctor(): Promise<void> {
       if (profile.sharedWith) {
         const isCodex = profile.cliType === 'codex'
           || profile.commandName.startsWith('codex');
-        const masterDir = ['claude', 'codex'].includes(profile.sharedWith)
+        const isKimi = profile.cliType === 'kimi'
+          || profile.commandName.startsWith('kimi');
+        const masterDir = ['claude', 'codex', 'kimi'].includes(profile.sharedWith)
           ? path.join(os.homedir(), `.${profile.sharedWith}`)
           : config.getProfileDir(profile.sharedWith);
 
-        const expectedDirs = isCodex ? CODEX_SHAREABLE_DIRS : SHAREABLE_DIRS;
+        const expectedDirs = isCodex ? CODEX_SHAREABLE_DIRS : isKimi ? KIMI_SHAREABLE_DIRS : SHAREABLE_DIRS;
         const expectedFiles = isCodex
           ? [...CODEX_SHAREABLE_FILES, ...CODEX_SHAREABLE_DBS]
+          : isKimi
+          ? [...KIMI_SHAREABLE_FILES]
           : [...SHAREABLE_FILES];
 
         console.log(chalk.gray(`    Shared symlinks (→ ${profile.sharedWith}):`));

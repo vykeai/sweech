@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-import { ConfigManager, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, CODEX_SHAREABLE_FILES } from './config';
+import { ConfigManager, SHAREABLE_DIRS, SHAREABLE_FILES, CODEX_SHAREABLE_DIRS, CODEX_SHAREABLE_FILES, KIMI_SHAREABLE_DIRS, KIMI_SHAREABLE_FILES } from './config';
 
 // ── Item categorization ──────────────────────────────────────────────────────
 
@@ -25,8 +25,9 @@ type ShareableItem = string;
 
 function getShareableItems(cliType?: string): ShareableItem[] {
   const isCodex = cliType === 'codex';
-  const dirs = isCodex ? [...CODEX_SHAREABLE_DIRS] : [...SHAREABLE_DIRS];
-  const files = isCodex ? [...CODEX_SHAREABLE_FILES] : [...SHAREABLE_FILES];
+  const isKimi = cliType === 'kimi';
+  const dirs = isCodex ? [...CODEX_SHAREABLE_DIRS] : isKimi ? [...KIMI_SHAREABLE_DIRS] : [...SHAREABLE_DIRS];
+  const files = isCodex ? [...CODEX_SHAREABLE_FILES] : isKimi ? [...KIMI_SHAREABLE_FILES] : [...SHAREABLE_FILES];
   return [...dirs, ...files];
 }
 
@@ -35,7 +36,7 @@ function isSkillsItem(item: string): boolean {
 }
 
 function resolveSourceDir(source: string, config: ConfigManager): string {
-  const defaultDirs = ['claude', 'codex'];
+  const defaultDirs = ['claude', 'codex', 'kimi'];
   return defaultDirs.includes(source)
     ? path.join(os.homedir(), `.${source}`)
     : config.getProfileDir(source);
@@ -275,7 +276,7 @@ export async function runShareStatus(): Promise<void> {
   }
 
   // Show default CLIs that have dependents
-  for (const defaultName of ['claude', 'codex']) {
+  for (const defaultName of ['claude', 'codex', 'kimi']) {
     const dependents = reverseMap.get(defaultName);
     if (dependents) {
       console.log(`  ${chalk.bold(defaultName)} ${chalk.dim('[default]')}`);

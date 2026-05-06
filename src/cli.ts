@@ -119,7 +119,8 @@ program
 
         // Determine auth method: no auth for local providers, OAuth for official, API key otherwise
         const isOfficialOAuth = (tpl.cliType === 'claude' && tpl.provider === 'anthropic')
-          || (tpl.cliType === 'codex' && tpl.provider === 'openai');
+          || (tpl.cliType === 'codex' && tpl.provider === 'openai')
+          || (tpl.cliType === 'kimi' && tpl.provider === 'kimi-coding');
         const authMethod = templateProvider.authOptional ? 'none'
           : isOfficialOAuth ? 'oauth'
           : 'api-key';
@@ -409,8 +410,9 @@ program
       cacheAge = mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
     } catch {}
 
-    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex' && !isExternalProvider(p.provider));
+    const claudeProfiles = profiles.filter(p => p.cliType !== 'codex' && p.cliType !== 'kimi' && !isExternalProvider(p.provider));
     const codexProfiles = profiles.filter(p => p.cliType === 'codex' && !isExternalProvider(p.provider));
+    const kimiProfiles = profiles.filter(p => p.cliType === 'kimi' && !isExternalProvider(p.provider));
     const externalProfiles = profiles.filter(p => isExternalProvider(p.provider));
 
     // Include update info (uses cached check — fast, no network if fresh)
@@ -424,7 +426,7 @@ program
       process.stdout.write(JSON.stringify({
         version: packageJson.version,
         configDir, binDir, cacheAge,
-        profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length, external: externalProfiles.length },
+        profiles: { total: profiles.length, claude: claudeProfiles.length, codex: codexProfiles.length, kimi: kimiProfiles.length, external: externalProfiles.length },
         platform: process.platform, node: process.version,
         ...(updateInfo && { latestVersion: updateInfo.latestVersion, updateAvailable: updateInfo.updateAvailable }),
       }, null, 2) + '\n');
@@ -440,7 +442,7 @@ program
     console.log(chalk.cyan('  Platform:'), process.platform);
     console.log(chalk.cyan('  Config:'), configDir);
     console.log(chalk.cyan('  Wrappers:'), binDir);
-    const profileParts = [`${claudeProfiles.length} Claude`, `${codexProfiles.length} Codex`];
+    const profileParts = [`${claudeProfiles.length} Claude`, `${codexProfiles.length} Codex`, `${kimiProfiles.length} Kimi`];
     if (externalProfiles.length > 0) profileParts.push(`${externalProfiles.length} External`);
     console.log(chalk.cyan('  Profiles:'), `${profiles.length} total (${profileParts.join(', ')})`);
     if (cacheAge) console.log(chalk.cyan('  Cache:'), `updated ${cacheAge}`);
@@ -1481,9 +1483,9 @@ const profileCmd = program
 profileCmd
   .command('providers')
   .description('List createable providers for a CLI')
-  .requiredOption('--cli <type>', 'CLI type: claude or codex')
+  .requiredOption('--cli <type>', 'CLI type: claude, codex, or kimi')
   .option('--json', 'Output machine-readable JSON')
-  .action((opts: { cli: 'claude' | 'codex'; json?: boolean }) => {
+  .action((opts: { cli: 'claude' | 'codex' | 'kimi'; json?: boolean }) => {
     try {
       const providers = getManageableProviders(opts.cli);
       if (opts.json) {
@@ -1509,7 +1511,7 @@ profileCmd
 profileCmd
   .command('create')
   .description('Create a profile without interactive prompts')
-  .requiredOption('--cli <type>', 'CLI type: claude or codex')
+  .requiredOption('--cli <type>', 'CLI type: claude, codex, or kimi')
   .requiredOption('--provider <name>', 'Provider name')
   .requiredOption('--name <command-name>', 'Profile command name')
   .option('--auth <method>', 'Authentication method: oauth or api-key', 'oauth')
@@ -1820,7 +1822,7 @@ const usageCmd = program
         if (!map.has(g)) map.set(g, []);
         map.get(g)!.push(a);
       }
-      const groupOrder = ['claude', 'codex', ...Array.from(map.keys()).filter(k => k !== 'claude' && k !== 'codex').sort()];
+      const groupOrder = ['claude', 'codex', 'kimi', ...Array.from(map.keys()).filter(k => k !== 'claude' && k !== 'codex' && k !== 'kimi').sort()];
       groups = groupOrder.filter(g => map.has(g)).map(g => ({ name: g, items: applySort(map.get(g)!) }));
     } else {
       groups = [{ name: '', items: applySort(accounts) }];
@@ -2056,7 +2058,7 @@ templatesCmd
 templatesCmd
   .command('save <name>')
   .description('Save a custom template')
-  .requiredOption('--cli <type>', 'CLI type (claude or codex)')
+  .requiredOption('--cli <type>', 'CLI type: claude, codex, or kimi')
   .requiredOption('--provider <name>', 'Provider name')
   .option('--description <text>', 'Template description', '')
   .option('--model <model>', 'Default model')
@@ -2580,7 +2582,7 @@ program
       // Check CLI type
       const cli = getCLI(cliType);
       if (!cli) {
-        console.error(chalk.red(`Unknown CLI type: '${cliType}' (expected 'claude' or 'codex')`));
+        console.error(chalk.red(`Unknown CLI type: '${cliType}' (expected 'claude', 'codex', or 'kimi')`));
         process.exit(1);
       }
 

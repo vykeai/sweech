@@ -146,7 +146,7 @@ export function createCustomProviderConfig(
   const displayName = prompts.displayName || `Custom (${new URL(prompts.baseUrl).hostname})`;
 
   // Determine CLI compatibility based on API format
-  const compatibility = prompts.apiFormat === 'openai' ? ['codex' as const] : ['claude' as const];
+  const compatibility = prompts.apiFormat === 'openai' ? ['codex' as const] : ['claude' as const, 'kimi' as const];
 
   return {
     name,

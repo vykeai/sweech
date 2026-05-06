@@ -149,6 +149,13 @@ export const BUILT_IN_TEMPLATES: ProfileTemplate[] = [
     baseUrl: 'http://localhost:11434',
     tags: ['ollama', 'local', 'self-hosted'],
   },
+  {
+    name: 'kimi-cli',
+    description: 'Kimi CLI with native Kimi for Coding',
+    cliType: 'kimi',
+    provider: 'kimi-coding',
+    tags: ['kimi', 'moonshot', 'cli'],
+  },
 ];
 
 // ---------------------------------------------------------------------------

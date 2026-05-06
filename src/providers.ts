@@ -2,7 +2,7 @@
  * Provider templates with pre-configured settings
  */
 
-export type CLIType = 'claude' | 'codex';
+export type CLIType = 'claude' | 'codex' | 'kimi';
 export type APIFormat = 'anthropic' | 'openai';
 
 export interface ModelInfo {
@@ -94,7 +94,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'kimi-k2.6',
     description: 'Moonshot Kimi K2.6 — long-horizon coding, 256K context',
     pricing: '$0.14-$2.49 per million tokens',
-    compatibility: ['claude'],
+    compatibility: ['claude', 'kimi'],
     apiFormat: 'anthropic',
     availableModels: [
       { id: 'kimi-k2.6',              name: 'Kimi K2.6',              type: 'reasoning', context: '256k', note: 'Latest flagship — long-horizon coding' },
@@ -112,7 +112,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'kimi-k2.6',
     description: 'Kimi for Coding subscription — K2.6, 256K context',
     pricing: 'Subscription plan',
-    compatibility: ['claude'],
+    compatibility: ['claude', 'kimi'],
     apiFormat: 'anthropic',
     availableModels: [
       { id: 'kimi-k2.6',              name: 'Kimi K2.6',              type: 'reasoning', context: '256k', note: 'Latest flagship — best for coding' },
@@ -339,6 +339,7 @@ export function isProviderCompatible(providerName: string, cliType: CLIType): bo
 export function displayGroup(providerKey?: string): string {
   if (!providerKey || providerKey === 'anthropic') return 'claude';
   if (providerKey === 'openai') return 'codex';
+  if (providerKey === 'kimi' || providerKey === 'kimi-coding') return 'kimi';
   const p = PROVIDERS[providerKey];
   return p?.displayName || providerKey;
 }
