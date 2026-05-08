@@ -1375,7 +1375,7 @@ program
         fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
         if (provider) {
           const apiKey = await resolveApiKey(profile);
-          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, modelId);
+          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, modelId, profile.baseUrl);
         }
         console.log(chalk.green(`\n✓ ${commandName} model → ${chalk.bold(modelId)}\n`));
         return;
@@ -1426,7 +1426,7 @@ program
         fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
         if (provider) {
           const apiKey = await resolveApiKey(profile);
-          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, finalModel);
+          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, finalModel, profile.baseUrl);
         }
         console.log(chalk.green(`\n✓ ${commandName} model → ${chalk.bold(finalModel)}\n`));
       } else {
@@ -2844,7 +2844,7 @@ program
         if (!opts.dryRun) {
           cfgMgr.createProfileConfig(
             profile.commandName, provider, apiKey, profile.cliType,
-            undefined, false, profile.model,
+            undefined, false, profile.model, profile.baseUrl,
           );
         }
         console.log(chalk.dim(`    settings.json ✓`));

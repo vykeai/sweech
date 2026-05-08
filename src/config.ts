@@ -294,7 +294,8 @@ export class ConfigManager {
     cliType: string = 'claude',
     oauthToken?: OAuthToken,
     useNativeAuth: boolean = false,
-    modelOverride?: string
+    modelOverride?: string,
+    baseUrlOverride?: string
   ): void {
     const profileDir = this.getProfileDir(commandName);
 
@@ -312,6 +313,11 @@ export class ConfigManager {
       // Resolve effective model (profile override > provider default)
       const effectiveModel = modelOverride || provider.defaultModel;
 
+      // Resolve effective base URL (profile override > provider default).
+      // Lets a profile point at a local proxy (e.g. LiteLLM) while sharing
+      // a provider definition that defaults to the upstream's direct port.
+      const effectiveBaseUrl = baseUrlOverride || provider.baseUrl;
+
       // Set environment variables based on CLI type
       if (cliType === 'codex') {
         // Codex CLI uses OpenAI environment variables
@@ -320,8 +326,8 @@ export class ConfigManager {
           settings.env.OPENAI_API_KEY = authToken;
         }
 
-        if (provider.baseUrl) {
-          settings.env.OPENAI_BASE_URL = provider.baseUrl;
+        if (effectiveBaseUrl) {
+          settings.env.OPENAI_BASE_URL = effectiveBaseUrl;
         }
 
         if (effectiveModel) {
@@ -340,8 +346,8 @@ export class ConfigManager {
           settings.env.KIMI_API_KEY = authToken;
         }
 
-        if (provider.baseUrl) {
-          settings.env.KIMI_BASE_URL = provider.baseUrl;
+        if (effectiveBaseUrl) {
+          settings.env.KIMI_BASE_URL = effectiveBaseUrl;
         }
 
         if (effectiveModel) {
@@ -354,8 +360,8 @@ export class ConfigManager {
           settings.env.ANTHROPIC_AUTH_TOKEN = authToken;
         }
 
-        if (provider.baseUrl) {
-          settings.env.ANTHROPIC_BASE_URL = provider.baseUrl;
+        if (effectiveBaseUrl) {
+          settings.env.ANTHROPIC_BASE_URL = effectiveBaseUrl;
         }
 
         if (effectiveModel) {
@@ -418,8 +424,9 @@ export class ConfigManager {
         `[providers."managed:sweech"]`,
         `type = "openai"`,
       ];
-      if (provider.baseUrl) {
-        tomlLines.push(`base_url = "${tomlEscape(provider.baseUrl)}/v1"`);
+      const tomlBaseUrl = baseUrlOverride || provider.baseUrl;
+      if (tomlBaseUrl) {
+        tomlLines.push(`base_url = "${tomlEscape(tomlBaseUrl)}/v1"`);
       } else {
         tomlLines.push(`base_url = ""`);
       }

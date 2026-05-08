@@ -678,7 +678,8 @@ export async function runEdit(commandName: string): Promise<void> {
   // Update settings.json (pass model override if model was changed)
   if (provider) {
     const modelOverride = field === 'model' ? newValue : profile.model;
-    config.createProfileConfig(commandName, provider, effectiveApiKey, profile.cliType, undefined, false, modelOverride);
+    const baseUrlOverride = field === 'baseUrl' ? newValue : profile.baseUrl;
+    config.createProfileConfig(commandName, provider, effectiveApiKey, profile.cliType, undefined, false, modelOverride, baseUrlOverride);
   }
 
   console.log(chalk.green(`\n✓ Updated ${field} for ${commandName}\n`));
