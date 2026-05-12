@@ -821,6 +821,7 @@ program
 
     // Set config dir env var and exec the CLI
     const env = { ...process.env, [cli.configDirEnvVar]: profileDir };
+    if (profile?.envOverrides) Object.assign(env, profile.envOverrides);
     // Strip nesting vars per AGENTS.md
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
@@ -839,6 +840,45 @@ program
     try {
       const { execFileSync } = require('child_process');
       execFileSync(cli.command, passthroughArgs, { env, stdio: 'inherit' });
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'status' in error) {
+        process.exit((error as { status: number }).status ?? 1);
+      }
+      process.exit(1);
+    }
+  });
+
+// Agents command — env-routed shortcut to the CLI's agents/sessions view.
+// claude → `claude agents`, codex → `codex resume` (closest analog).
+program
+  .command('agents <command-name>')
+  .description('Open the underlying CLI\'s agents/sessions view for a profile')
+  .allowUnknownOption(true)
+  .action((commandName: string, _opts: any, cmd: any) => {
+    const config = new ConfigManager();
+    const aliasManager = new AliasManager();
+    const resolvedName = aliasManager.resolveAlias(commandName);
+    const profile = config.getProfiles().find(p => p.commandName === resolvedName);
+    const cli = profile ? getCLI(profile.cliType) : getCLI(resolvedName);
+    if (!cli) {
+      console.error(chalk.red(`Profile '${commandName}' not found`));
+      process.exit(1);
+    }
+    if (!cli.agentsCommand) {
+      console.error(chalk.yellow(`${cli.displayName} has no agents/sessions subcommand. Try \`sweech use ${commandName}\` instead.`));
+      process.exit(2);
+    }
+    const profileDir = profile
+      ? config.getProfileDir(profile.commandName)
+      : path.join(require('os').homedir(), `.${cli.name}`);
+    const passthrough = cmd.args.slice(1);
+    const args = [...cli.agentsCommand, ...passthrough];
+    const env = { ...process.env, [cli.configDirEnvVar]: profileDir };
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+    try {
+      const { execFileSync } = require('child_process');
+      execFileSync(cli.command, args, { env, stdio: 'inherit' });
     } catch (error: unknown) {
       if (error && typeof error === 'object' && 'status' in error) {
         process.exit((error as { status: number }).status ?? 1);
@@ -1377,7 +1417,7 @@ program
         fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
         if (provider) {
           const apiKey = await resolveApiKey(profile);
-          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, modelId, profile.baseUrl);
+          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, modelId, profile.baseUrl, profile.envOverrides);
         }
         console.log(chalk.green(`\n✓ ${commandName} model → ${chalk.bold(modelId)}\n`));
         return;
@@ -1428,7 +1468,7 @@ program
         fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
         if (provider) {
           const apiKey = await resolveApiKey(profile);
-          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, finalModel, profile.baseUrl);
+          config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, finalModel, profile.baseUrl, profile.envOverrides);
         }
         console.log(chalk.green(`\n✓ ${commandName} model → ${chalk.bold(finalModel)}\n`));
       } else {
@@ -2846,7 +2886,7 @@ program
         if (!opts.dryRun) {
           cfgMgr.createProfileConfig(
             profile.commandName, provider, apiKey, profile.cliType,
-            undefined, false, profile.model, profile.baseUrl,
+            undefined, false, profile.model, profile.baseUrl, profile.envOverrides,
           );
         }
         console.log(chalk.dim(`    settings.json ✓`));

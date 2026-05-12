@@ -51,6 +51,7 @@ export interface LaunchEntry {
   tokenExpiresAt?: number;
   /** Active promotion info */
   promotion?: { label: string; multiplier?: number; expiresAt?: number };
+  envOverrides?: Record<string, string>;
 }
 
 export interface LaunchState {
@@ -543,7 +544,7 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
 function buildStaticEntry(
   name: string, command: string, configDir: string | null, label: string,
   yoloFlag: string, resumeFlag: string, isDefault: boolean,
-  opts?: { sharedWith?: string; model?: string; providerKey?: string }
+  opts?: { sharedWith?: string; model?: string; providerKey?: string; envOverrides?: Record<string, string> }
 ): LaunchEntry {
   const dataDir = configDir ?? path.join(os.homedir(), `.${name}`);
   return {
@@ -551,6 +552,7 @@ function buildStaticEntry(
     sharedWith: opts?.sharedWith,
     model: opts?.model,
     providerKey: opts?.providerKey,
+    envOverrides: opts?.envOverrides,
     dataDir,
     dataSizeMB: '',
     authType: '',
@@ -595,7 +597,7 @@ export async function runLauncher(): Promise<void> {
       cli?.yoloFlag || '--dangerously-skip-permissions',
       cli?.resumeFlag || '--continue',
       false,
-      { sharedWith: profile.sharedWith, model: profile.model, providerKey: profile.provider }
+      { sharedWith: profile.sharedWith, model: profile.model, providerKey: profile.provider, envOverrides: profile.envOverrides }
     );
   });
 
@@ -855,6 +857,7 @@ export async function runLauncher(): Promise<void> {
         const cli = getCLI(entry.command);
         if (cli) env[cli.configDirEnvVar] = entry.configDir;
       }
+      if (entry.envOverrides) Object.assign(env, entry.envOverrides);
 
       // Model picker for external providers with model catalogs
       if (entry.providerKey && isExternalProvider(entry.providerKey)) {

@@ -30,6 +30,7 @@ export interface ProfileConfig {
   baseUrl?: string;
   model?: string;
   smallFastModel?: string;
+  envOverrides?: Record<string, string>; // arbitrary per-profile env vars (CLAUDE_EFFORT, ENABLE_PROMPT_CACHING_1H, etc.)
   createdAt: string;
   sharedWith?: string; // commandName of master profile (e.g. 'claude') if dirs are symlinked
 }
@@ -295,7 +296,8 @@ export class ConfigManager {
     oauthToken?: OAuthToken,
     useNativeAuth: boolean = false,
     modelOverride?: string,
-    baseUrlOverride?: string
+    baseUrlOverride?: string,
+    envOverrides?: Record<string, string>
   ): void {
     const profileDir = this.getProfileDir(commandName);
 
@@ -402,6 +404,13 @@ export class ConfigManager {
           expiresAt: oauthToken.expiresAt
         };
       }
+    }
+
+    // Per-profile env overrides win over computed env (e.g. CLAUDE_EFFORT,
+    // ENABLE_PROMPT_CACHING_1H, CLAUDE_CODE_FORCE_SYNC_OUTPUT).
+    if (envOverrides) {
+      settings.env = settings.env || {};
+      Object.assign(settings.env, envOverrides);
     }
 
     const settingsPath = path.join(profileDir, 'settings.json');

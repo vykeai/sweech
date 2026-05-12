@@ -13,6 +13,7 @@ export interface CLIConfig {
   checkInstalled?: () => boolean;
   yoloFlag?: string;   // The actual CLI flag for skip-permissions mode
   resumeFlag?: string; // Flag/subcommand to resume last session
+  agentsCommand?: string[]; // Subcommand for "show me my agents/sessions"
 }
 
 export const SUPPORTED_CLIS: Record<string, CLIConfig> = {
@@ -25,6 +26,7 @@ export const SUPPORTED_CLIS: Record<string, CLIConfig> = {
     installUrl: 'https://code.claude.com/',
     yoloFlag: '--dangerously-skip-permissions',
     resumeFlag: '--continue',
+    agentsCommand: ['agents'],
   },
   codex: {
     name: 'codex',
@@ -33,8 +35,9 @@ export const SUPPORTED_CLIS: Record<string, CLIConfig> = {
     configDirEnvVar: 'CODEX_HOME',
     description: 'OpenAI Codex CLI - lightweight coding agent',
     installUrl: 'https://github.com/openai/codex',
-    yoloFlag: '--yolo',
+    yoloFlag: '--dangerously-bypass-approvals-and-sandbox',
     resumeFlag: 'resume --last',
+    agentsCommand: ['resume'], // codex has no `agents` — picker for prior sessions is closest
   },
   kimi: {
     name: 'kimi',
@@ -45,6 +48,7 @@ export const SUPPORTED_CLIS: Record<string, CLIConfig> = {
     installUrl: 'https://moonshotai.github.io/kimi-cli/',
     yoloFlag: '--yolo',
     resumeFlag: '--continue',
+    // kimi has no agents/session picker exposed
   },
 };
 
