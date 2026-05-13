@@ -3,7 +3,23 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 
-export interface AgentRecord {
+export interface ConfigDir { label: string; dir: string; }
+
+export interface LiveSession {
+  pid: number;
+  sessionId: string;
+  cwd: string;
+  name?: string;
+  status?: string;   // "idle" | "working" | "completed" | ...
+  kind?: string;     // "interactive" | "background"
+  startedAt?: number;
+  updatedAt?: number;
+  version?: string;
+  profile: string;   // which ~/.claude* dir this came from
+  alive: boolean;    // pid still exists
+}
+
+export interface ConfiguredAgent {
   name: string;
   source: 'user' | 'builtin';
   profiles: Set<string>;
@@ -11,7 +27,7 @@ export interface AgentRecord {
   lastTs: number | null;
 }
 
-export interface ConfigDir { label: string; dir: string; }
+// ── Discovery ─────────────────────────────────────────────────────────────
 
 export function enumerateClaudeConfigDirs(home: string = os.homedir()): ConfigDir[] {
   let entries: string[];
@@ -23,6 +39,47 @@ export function enumerateClaudeConfigDirs(home: string = os.homedir()): ConfigDi
       try { return fs.statSync(dir).isDirectory(); } catch { return false; }
     });
 }
+
+// ── Live sessions ─────────────────────────────────────────────────────────
+
+function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+export function readLiveSessions(dirs?: ConfigDir[]): LiveSession[] {
+  const sources = dirs ?? enumerateClaudeConfigDirs();
+  const out: LiveSession[] = [];
+  for (const { label, dir } of sources) {
+    const sessionsDir = path.join(dir, 'sessions');
+    let files: string[];
+    try { files = fs.readdirSync(sessionsDir); } catch { continue; }
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      const fpath = path.join(sessionsDir, f);
+      let raw: string;
+      try { raw = fs.readFileSync(fpath, 'utf-8'); } catch { continue; }
+      let obj: any;
+      try { obj = JSON.parse(raw); } catch { continue; }
+      if (typeof obj?.pid !== 'number') continue;
+      out.push({
+        pid: obj.pid,
+        sessionId: obj.sessionId ?? '',
+        cwd: obj.cwd ?? '',
+        name: obj.name,
+        status: obj.status,
+        kind: obj.kind,
+        startedAt: obj.startedAt,
+        updatedAt: obj.updatedAt,
+        version: obj.version,
+        profile: label,
+        alive: pidAlive(obj.pid),
+      });
+    }
+  }
+  return out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+}
+
+// ── Configured agents (file-based + invocation counts) ────────────────────
 
 export function readUserAgents(dir: string): string[] {
   const agentsDir = path.join(dir, 'agents');
@@ -72,11 +129,10 @@ export function scanSessionsForSubagents(dir: string, sinceMs: number): Map<stri
   return out;
 }
 
-export function aggregate(windowDays: number, dirs?: ConfigDir[]): AgentRecord[] {
+export function aggregateConfigured(windowDays: number, dirs?: ConfigDir[]): ConfiguredAgent[] {
   const sinceMs = Date.now() - windowDays * 86_400_000;
   const sources = dirs ?? enumerateClaudeConfigDirs();
-  const records = new Map<string, AgentRecord>();
-
+  const records = new Map<string, ConfiguredAgent>();
   for (const { label, dir } of sources) {
     for (const name of readUserAgents(dir)) {
       let r = records.get(name);
@@ -92,15 +148,16 @@ export function aggregate(windowDays: number, dirs?: ConfigDir[]): AgentRecord[]
       r.profiles.add(label);
     }
   }
-
   return [...records.values()].sort((a, b) => {
     if (b.invocations !== a.invocations) return b.invocations - a.invocations;
     return (b.lastTs ?? 0) - (a.lastTs ?? 0);
   });
 }
 
-function timeAgo(ms: number | null): string {
-  if (ms === null) return chalk.dim('never');
+// ── Rendering ──────────────────────────────────────────────────────────────
+
+function timeAgo(ms: number | undefined | null): string {
+  if (!ms) return chalk.dim('—');
   const diff = Date.now() - ms;
   if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
@@ -108,42 +165,103 @@ function timeAgo(ms: number | null): string {
   return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
-export function render(records: AgentRecord[], windowDays: number, dirCount: number): string {
+function shortCwd(cwd: string): string {
+  const home = os.homedir();
+  return cwd.startsWith(home) ? '~' + cwd.slice(home.length) : cwd;
+}
+
+function colorStatus(status: string | undefined, alive: boolean): string {
+  if (!alive) return chalk.red('dead   ');
+  switch (status) {
+    case 'busy':
+    case 'working':   return chalk.yellow((status).padEnd(7));
+    case 'waiting':   return chalk.magenta('waiting');
+    case 'idle':      return chalk.green('idle   ');
+    case 'completed':
+    case 'done':      return chalk.cyan('done   ');
+    default:          return chalk.dim((status ?? '?').padEnd(7));
+  }
+}
+
+export function renderLiveSessions(sessions: LiveSession[], dirCount: number): string {
   const lines: string[] = [];
-  lines.push(chalk.bold(`sweech agents`) + chalk.dim(` — ${records.length} agents across ${dirCount} profile dir(s), ${windowDays}d window`));
+  const alive = sessions.filter(s => s.alive);
+  const dead = sessions.filter(s => !s.alive);
+  lines.push(chalk.bold('sweech agents') + chalk.dim(` — ${alive.length} live / ${dead.length} stale across ${dirCount} profile dir(s)`));
   lines.push('');
 
-  if (records.length === 0) {
-    lines.push(chalk.dim('  no agents configured and no recent invocations'));
+  if (sessions.length === 0) {
+    lines.push(chalk.dim('  no live Claude Code sessions registered'));
+    lines.push(chalk.dim('  (only Claude Code ≥2.1.131 writes to sessions/<pid>.json)'));
     return lines.join('\n');
   }
 
+  const shown = [...alive, ...dead.slice(0, 5)]; // suppress most dead entries
+  const widthName = Math.max(6, ...shown.map(s => (s.name || s.sessionId.slice(0, 8)).length));
+  const widthProf = Math.max(7, ...shown.map(s => s.profile.length));
+  const widthCwd  = Math.max(3, ...shown.map(s => shortCwd(s.cwd).length));
+
+  lines.push(
+    '  ' +
+    chalk.dim('SESSION'.padEnd(widthName)) + '  ' +
+    chalk.dim('PROFILE'.padEnd(widthProf)) + '  ' +
+    chalk.dim('STATUS ') + '  ' +
+    chalk.dim('CWD'.padEnd(widthCwd)) + '  ' +
+    chalk.dim('UPDATED'.padStart(8)) + '  ' +
+    chalk.dim('PID')
+  );
+
+  for (const s of shown) {
+    const label = s.name || chalk.dim(s.sessionId.slice(0, 8));
+    const labelPadded = (s.name ?? s.sessionId.slice(0, 8)).padEnd(widthName);
+    lines.push(
+      '  ' +
+      (s.name ? label.padEnd(widthName) : label + ' '.repeat(widthName - 8)) + '  ' +
+      s.profile.padEnd(widthProf) + '  ' +
+      colorStatus(s.status, s.alive) + '  ' +
+      shortCwd(s.cwd).padEnd(widthCwd) + '  ' +
+      timeAgo(s.updatedAt).padStart(8) + '  ' +
+      (s.alive ? String(s.pid) : chalk.dim(String(s.pid)))
+    );
+    void labelPadded;
+  }
+  if (dead.length > 5) {
+    lines.push(chalk.dim(`  …and ${dead.length - 5} more stale entries (run \`sweech agents --all\` to see them)`));
+  }
+  return lines.join('\n');
+}
+
+export function renderConfigured(records: ConfiguredAgent[], windowDays: number, dirCount: number): string {
+  const lines: string[] = [];
+  lines.push(chalk.bold('Configured agents') + chalk.dim(` — ${records.length} across ${dirCount} profile dir(s), ${windowDays}d invocations`));
+  lines.push('');
+  if (records.length === 0) {
+    lines.push(chalk.dim('  no agents configured'));
+    return lines.join('\n');
+  }
   const fmtProfs = (set: Set<string>): string => {
     const sorted = [...set].sort();
     if (sorted.length <= 3) return sorted.join(', ');
     return `${sorted.slice(0, 2).join(', ')} +${sorted.length - 2} more`;
   };
-
   const widthName = Math.max(5, ...records.map(r => r.name.length));
   const widthProf = Math.max(8, ...records.map(r => fmtProfs(r.profiles).length));
-  const header =
+  lines.push(
     '  ' +
     chalk.dim('AGENT'.padEnd(widthName)) + '  ' +
     chalk.dim('SRC    ') + '  ' +
     chalk.dim('PROFILES'.padEnd(widthProf)) + '  ' +
     chalk.dim('USED'.padStart(5)) + '  ' +
-    chalk.dim('LAST');
-  lines.push(header);
-
+    chalk.dim('LAST')
+  );
   for (const r of records) {
     const src = r.source === 'user' ? chalk.green('user   ') : chalk.cyan('builtin');
-    const profs = fmtProfs(r.profiles);
     const used = r.invocations > 0 ? chalk.bold(String(r.invocations).padStart(5)) : chalk.dim('    0');
     lines.push(
       '  ' +
       r.name.padEnd(widthName) + '  ' +
       src + '  ' +
-      profs.padEnd(widthProf) + '  ' +
+      fmtProfs(r.profiles).padEnd(widthProf) + '  ' +
       used + '  ' +
       timeAgo(r.lastTs)
     );
@@ -151,8 +269,24 @@ export function render(records: AgentRecord[], windowDays: number, dirCount: num
   return lines.join('\n');
 }
 
-export function runAggregatedAgents(windowDays = 7): void {
+// ── Entry points used by cli.ts ───────────────────────────────────────────
+
+export function runLiveAgents(opts: { showAll?: boolean } = {}): void {
   const dirs = enumerateClaudeConfigDirs();
-  const records = aggregate(windowDays, dirs);
-  console.log(render(records, windowDays, dirs.length));
+  let sessions = readLiveSessions(dirs);
+  if (!opts.showAll) {
+    // Hide stale entries older than 24h
+    const cutoff = Date.now() - 86_400_000;
+    sessions = sessions.filter(s => s.alive || (s.updatedAt ?? 0) > cutoff);
+  }
+  console.log(renderLiveSessions(sessions, dirs.length));
 }
+
+export function runConfiguredAgents(windowDays = 7): void {
+  const dirs = enumerateClaudeConfigDirs();
+  const records = aggregateConfigured(windowDays, dirs);
+  console.log(renderConfigured(records, windowDays, dirs.length));
+}
+
+// Backward-compat alias for the prior export.
+export const runAggregatedAgents = runConfiguredAgents;

@@ -904,15 +904,18 @@ program
 //   sweech agents --days 30    → widen invocation window from default 7d
 program
   .command('agents [command-name]')
-  .description('Aggregated agents view across all claude profiles (no arg), or env-route to one')
+  .description('Live Claude Code sessions across all profiles (no arg), or env-route to one')
   .option('--native', 'Defer to the underlying `claude agents` instead of sweech-native view')
-  .option('--days <n>', 'Invocation window in days (default 7)', '7')
+  .option('--configured', 'Show file-based configured agents + invocation counts (the old view)')
+  .option('--all', 'With live view: include stale entries beyond the 24h cutoff')
+  .option('--days <n>', 'Invocation window in days for --configured view (default 7)', '7')
   .allowUnknownOption(true)
-  .action((commandName: string | undefined, opts: { native?: boolean; days: string }, cmd: any) => {
-    // No-arg + no --native → sweech-native aggregated view
+  .action((commandName: string | undefined, opts: { native?: boolean; configured?: boolean; all?: boolean; days: string }, cmd: any) => {
+    // No-arg → sweech-native view (live by default, configured with flag)
     if (!commandName && !opts.native) {
-      const { runAggregatedAgents } = require('./agentsView');
-      runAggregatedAgents(parseInt(opts.days, 10) || 7);
+      const view = require('./agentsView');
+      if (opts.configured) view.runConfiguredAgents(parseInt(opts.days, 10) || 7);
+      else view.runLiveAgents({ showAll: opts.all });
       return;
     }
 
