@@ -897,32 +897,34 @@ program
     }
   });
 
-// Agents command — env-routed shortcut to the CLI's agents/sessions view.
-// claude → `claude agents`, codex → `codex resume` (closest analog).
+// Agents command — env-routed shortcut to the CLI's agents view.
+// No arg → runs `claude agents` against the default claude config.
+// With profile → env-routes to that profile's CLI.
 program
-  .command('agents <command-name>')
-  .description('Open the underlying CLI\'s agents/sessions view for a profile')
+  .command('agents [command-name]')
+  .description('Open the underlying CLI\'s agents view (defaults to claude)')
   .allowUnknownOption(true)
-  .action((commandName: string, _opts: any, cmd: any) => {
+  .action((commandName: string | undefined, _opts: any, cmd: any) => {
     const config = new ConfigManager();
     const aliasManager = new AliasManager();
-    const resolvedName = aliasManager.resolveAlias(commandName);
-    const profile = config.getProfiles().find(p => p.commandName === resolvedName);
-    const cli = profile ? getCLI(profile.cliType) : getCLI(resolvedName);
+    const resolvedName = commandName ? aliasManager.resolveAlias(commandName) : undefined;
+    const profile = resolvedName ? config.getProfiles().find(p => p.commandName === resolvedName) : undefined;
+    const cli = profile ? getCLI(profile.cliType) : (resolvedName ? getCLI(resolvedName) : getCLI('claude'));
     if (!cli) {
       console.error(chalk.red(`Profile '${commandName}' not found`));
       process.exit(1);
     }
     if (!cli.agentsCommand) {
-      console.error(chalk.yellow(`${cli.displayName} has no agents/sessions subcommand. Try \`sweech use ${commandName}\` instead.`));
+      console.error(chalk.yellow(`${cli.displayName} has no agents subcommand.`));
       process.exit(2);
     }
-    const profileDir = profile
-      ? config.getProfileDir(profile.commandName)
-      : path.join(require('os').homedir(), `.${cli.name}`);
-    const passthrough = cmd.args.slice(1);
+    const passthrough = cmd.args.slice(commandName ? 1 : 0);
     const args = [...cli.agentsCommand, ...passthrough];
-    const env = { ...process.env, [cli.configDirEnvVar]: profileDir };
+    const env = { ...process.env };
+    if (profile) {
+      env[cli.configDirEnvVar] = config.getProfileDir(profile.commandName);
+      if (profile.envOverrides) Object.assign(env, profile.envOverrides);
+    }
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
     try {
