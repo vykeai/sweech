@@ -260,7 +260,7 @@ export function buildEntry(
     sharedWith: opts?.sharedWith,
     model: opts?.model,
     dataDir,
-    dataSizeMB: getDirSize(dataDir),
+    dataSizeMB: '', // filled lazily in the background — see fillDirSizes()
     authType: resolveAuthType(account, command),
     needsReauth: account.needsReauth || false,
     lastActive,
@@ -674,7 +674,7 @@ export async function runLauncher(): Promise<void> {
       entry.lastActive = account.lastActive ? timeAgo(account.lastActive) : '';
       entry.needsReauth = account.needsReauth || false;
       entry.authType = resolveAuthType(account, entry.command);
-      entry.dataSizeMB = getDirSize(entry.dataDir);
+      // Keep any existing size (filled by background fillDirSizes) — don't reblock.
       entry.bars = [];
       const live = account.live;
       if (live?.buckets) {
@@ -736,9 +736,27 @@ export async function runLauncher(): Promise<void> {
       });
   };
 
-  // Phase 1: cached bars (no network). Phase 2: optional background refresh.
-  // Defer via setImmediate so the synchronous portion of getAccountInfo
-  // (24 × file reads) doesn't block alt-screen + keypress wiring below.
+  // Background: fill dataSizeMB for each entry via async `du -sh`, one at a
+  // time with event-loop yields. Sync getDirSize was the dominant cause of
+  // the startup freeze (24 × ~100ms = 2-4s sync block).
+  const fillDirSizes = async () => {
+    const { execFile } = require('child_process');
+    for (const entry of entries) {
+      if (!entry.dataDir) continue;
+      await new Promise<void>((resolve) => {
+        execFile('du', ['-sh', entry.dataDir], { timeout: 3000, encoding: 'utf-8' }, (_err: unknown, stdout: string) => {
+          const size = (stdout || '').split('\t')[0].trim();
+          if (size) { entry.dataSizeMB = size; draw(); }
+          resolve();
+        });
+      });
+    }
+  };
+
+  // Cached bars only. Deferred to next event-loop tick so alt-screen +
+  // keypress wiring below can run first. Background auto-refresh was removed
+  // because its sync portion (24 profiles × keychain access + file reads) was
+  // the cause of the post-render TUI freeze. Press 'u' to manually refresh.
   setImmediate(() => {
     getAccountInfo(
       accountList.map(a => ({ name: a.name, commandName: a.commandName })),
@@ -750,17 +768,9 @@ export async function runLauncher(): Promise<void> {
         state.usage = true;
         usageLoad = 'loaded';
         draw();
-        setImmediate(() => {
-          getAccountInfo(
-            accountList.map(a => ({ name: a.name, commandName: a.commandName })),
-            { refresh: true, timeoutMs: 5000 },
-          ).then(fresh => {
-            patchEntries(fresh);
-            try { appendSnapshot(fresh); } catch {}
-            draw();
-          }).catch(err => console.error('[sweech] usage refresh:', scrubSecrets(err.message || String(err))));
-        });
       }
+      // Kick off background dataSizeMB fill — non-blocking, redraws per entry.
+      fillDirSizes();
     }).catch(err => console.error('[sweech] initial fetch:', scrubSecrets(err.message || String(err))));
   });
 
