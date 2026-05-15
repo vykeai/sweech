@@ -21,6 +21,9 @@ jest.mock('../src/subscriptions', () => ({
   getAccountInfo: jest.fn(async () => []),
   getKnownAccounts: jest.fn(() => []),
 }));
+jest.mock('../src/auditLog', () => ({
+  readAuditLog: jest.fn(() => []),
+}));
 
 import {
   accountScore,
@@ -33,6 +36,7 @@ import {
 import { getAccountInfo, getKnownAccounts } from '../src/subscriptions';
 import * as fs from 'fs';
 import { getCLI, SUPPORTED_CLIS } from '../src/clis';
+import { readAuditLog } from '../src/auditLog';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -219,6 +223,7 @@ describe('suggestBestAccount', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (fs.statSync as jest.Mock).mockReturnValue({ mode: 0o755 });
+    (readAuditLog as jest.Mock).mockReturnValue([]);
   });
 
   test('returns undefined when no accounts available', async () => {
@@ -354,6 +359,7 @@ describe('recommendRoute', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (fs.statSync as jest.Mock).mockReturnValue({ mode: 0o755 });
+    (readAuditLog as jest.Mock).mockReturnValue([]);
   });
 
   test('returns selected route with provider, model, account, and capabilities', async () => {
@@ -407,6 +413,25 @@ describe('recommendRoute', () => {
     });
     expect(result.selected!.route.launch.command).toContain('/.sweech/bin/codex-fast');
     expect(result.selected!.route.launchCommand).toBe(result.selected!.route.launch.command);
+    expect(result.selected!.route.health).toMatchObject({
+      status: 'healthy',
+      checkMode: 'cache-only',
+      failureClass: null,
+      checks: {
+        launch: 'pass',
+        auth: 'pass',
+        quota: 'pass',
+        capability: 'pass',
+      },
+    });
+    expect(result.selected!.route.quota).toMatchObject({
+      source: 'live-cache',
+      status: 'allowed',
+      messages5h: 0,
+      messages7d: 0,
+      totalMessages: 0,
+      utilization7d: 0.3,
+    });
     expect(result.rejected).toHaveLength(0);
   });
 
@@ -449,8 +474,24 @@ describe('recommendRoute', () => {
     const limited = result.rejected.find(candidate => candidate.route.commandName === 'claude-limited');
     const codex = result.rejected.find(candidate => candidate.route.commandName === 'codex-main');
     expect(limited!.reasons).toContain('availability:limit_reached');
+    expect(limited!.route.health).toMatchObject({
+      status: 'unavailable',
+      failureClass: 'quota-exhausted',
+      checks: {
+        launch: 'pass',
+        auth: 'pass',
+        quota: 'fail',
+        capability: 'pass',
+      },
+    });
+    expect(limited!.route.quota).toMatchObject({
+      source: 'live-cache',
+      status: 'limit_reached',
+      utilization7d: 0.9,
+    });
     expect(codex!.reasons).toContain('cli-type-mismatch:codex');
     expect(codex!.reasons).toContain('missing-capability:provider:anthropic');
+    expect(codex!.route.health.failureClass).toBe('unsupported-capability');
   });
 
   test('rejects wrapper-only managed profiles when the wrapper is missing', async () => {
@@ -492,6 +533,60 @@ describe('recommendRoute', () => {
       failureClass: 'missing-wrapper',
       installGuidance: 'Run: sweech repair codex-missing',
     });
+    expect(result.rejected[0].route.health).toMatchObject({
+      status: 'unavailable',
+      failureClass: 'missing-wrapper',
+      checks: {
+        launch: 'fail',
+        auth: 'pass',
+        quota: 'pass',
+        capability: 'pass',
+      },
+    });
+  });
+
+  test('reports sanitized last failure metadata from audit log', async () => {
+    const profiles = [
+      {
+        name: 'codex failed',
+        commandName: 'codex-failed',
+        cliType: 'codex' as const,
+        provider: 'openai',
+        createdAt: '2025-01-01T00:00:00Z',
+      },
+    ];
+
+    (readAuditLog as jest.Mock).mockReturnValue([
+      {
+        timestamp: '2026-05-15T12:00:00.000Z',
+        action: 'route_failure',
+        account: 'codex-failed',
+        details: {
+          failureClass: 'auth-required',
+          error: 'API error 401 with sk-ant-api03-BADKEY123456789012345678901234',
+        },
+      },
+    ]);
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'codex failed',
+        commandName: 'codex-failed',
+        cliType: 'codex',
+        live: makeLive({ status: 'allowed', utilization7d: 0.2 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const result = await recommendRoute({ preferredProfile: 'codex-failed' }, profiles as any);
+
+    expect(result.selected!.route.lastFailure).toMatchObject({
+      at: '2026-05-15T12:00:00.000Z',
+      action: 'route_failure',
+      failureClass: 'auth-required',
+    });
+    expect(result.selected!.route.lastFailure!.message).toContain('[REDACTED]');
+    expect(result.selected!.route.lastFailure!.message).not.toContain('sk-ant');
   });
 
   test('exposes native launch metadata for default CLI accounts', async () => {

@@ -14,6 +14,18 @@ import { ConfigManager, ProfileConfig } from './config';
 import { CLIType, getProvider } from './providers';
 import { SUPPORTED_CLIS, getCLI } from './clis';
 import { getAccountInfo, getKnownAccounts, type AccountInfo } from './subscriptions';
+import { readAuditLog, type AuditEntry } from './auditLog';
+import { scrubSecrets } from './scrubSecrets';
+
+export type CodeuctorRouteFailureClass =
+  | 'auth-required'
+  | 'quota-exhausted'
+  | 'provider-rejected'
+  | 'missing-wrapper'
+  | 'wrapper-not-executable'
+  | 'unsupported-capability'
+  | 'route-policy-mismatch'
+  | 'unknown-unavailable';
 
 export interface AccountEntry {
   name: string;
@@ -62,6 +74,48 @@ export interface RouteCandidate {
       failureClass: 'missing-wrapper' | 'wrapper-not-executable' | null;
       installGuidance: string | null;
     };
+    health: {
+      status: 'healthy' | 'degraded' | 'unavailable' | 'unknown';
+      checkMode: 'cache-only';
+      checkedAt: string;
+      failureClass: CodeuctorRouteFailureClass | null;
+      reasons: string[];
+      checks: {
+        launch: 'pass' | 'fail';
+        auth: 'pass' | 'fail';
+        quota: 'pass' | 'fail' | 'unknown';
+        capability: 'pass' | 'fail';
+      };
+    };
+    quota: {
+      source: 'live-cache' | 'manual-plan' | 'unknown';
+      status: string | null;
+      planType: string | null;
+      planLabel: string | null;
+      isStale: boolean;
+      messages5h: number;
+      messages7d: number;
+      totalMessages: number;
+      utilization5h: number | null;
+      utilization7d: number | null;
+      reset5hAt: number | null;
+      reset7dAt: number | null;
+      weeklyResetAt: string | null;
+      hoursUntilWeeklyReset: number | null;
+      minutesUntilFirstCapacity: number | null;
+      buckets: Array<{
+        label: string;
+        session?: { utilization: number; resetsAt?: number };
+        weekly?: { utilization: number; resetsAt?: number };
+      }>;
+      limits: { window5h?: number; window7d?: number } | null;
+    };
+    lastFailure: {
+      at: string;
+      action: string;
+      failureClass: CodeuctorRouteFailureClass | null;
+      message: string | null;
+    } | null;
   };
   account: {
     name: string;
@@ -316,6 +370,125 @@ function buildLaunchPlan(account: AccountEntry): RouteCandidate['route']['launch
   };
 }
 
+function routeQuota(info: AccountInfo): RouteCandidate['route']['quota'] {
+  const live = info.live;
+  const primaryBucket = live?.buckets?.[0];
+  return {
+    source: live ? 'live-cache' : (info.meta.plan || info.meta.limits ? 'manual-plan' : 'unknown'),
+    status: live?.status ?? null,
+    planType: live?.planType ?? null,
+    planLabel: info.meta.plan ?? null,
+    isStale: Boolean(live?.isStale),
+    messages5h: info.messages5h,
+    messages7d: info.messages7d,
+    totalMessages: info.totalMessages,
+    utilization5h: live?.utilization5h ?? primaryBucket?.session?.utilization ?? null,
+    utilization7d: live?.utilization7d ?? primaryBucket?.weekly?.utilization ?? null,
+    reset5hAt: live?.reset5hAt ?? primaryBucket?.session?.resetsAt ?? null,
+    reset7dAt: live?.reset7dAt ?? primaryBucket?.weekly?.resetsAt ?? null,
+    weeklyResetAt: info.weeklyResetAt ?? null,
+    hoursUntilWeeklyReset: info.hoursUntilWeeklyReset ?? null,
+    minutesUntilFirstCapacity: info.minutesUntilFirstCapacity ?? null,
+    buckets: (live?.buckets ?? []).map((bucket) => ({
+      label: bucket.label,
+      ...(bucket.session ? { session: { utilization: bucket.session.utilization, ...(bucket.session.resetsAt !== undefined ? { resetsAt: bucket.session.resetsAt } : {}) } } : {}),
+      ...(bucket.weekly ? { weekly: { utilization: bucket.weekly.utilization, ...(bucket.weekly.resetsAt !== undefined ? { resetsAt: bucket.weekly.resetsAt } : {}) } } : {}),
+    })),
+    limits: info.meta.limits ?? null,
+  };
+}
+
+function failureClassFromReasons(reasons: string[]): CodeuctorRouteFailureClass | null {
+  if (reasons.includes('needs-reauth')) return 'auth-required';
+  if (reasons.includes('availability:limit_reached')) return 'quota-exhausted';
+  if (reasons.includes('availability:rejected')) return 'provider-rejected';
+  if (reasons.includes('route-unavailable:missing-wrapper')) return 'missing-wrapper';
+  if (reasons.includes('route-unavailable:wrapper-not-executable')) return 'wrapper-not-executable';
+  if (reasons.some((reason) => reason.startsWith('missing-capability:'))) return 'unsupported-capability';
+  if (reasons.some((reason) => reason.startsWith('cli-type-mismatch:') || reason.startsWith('profile-mismatch:'))) {
+    return 'route-policy-mismatch';
+  }
+  return reasons.length > 0 ? 'unknown-unavailable' : null;
+}
+
+function routeHealth(
+  reasons: string[],
+  launch: RouteCandidate['route']['launch'],
+  info: AccountInfo,
+): RouteCandidate['route']['health'] {
+  const failureClass = failureClassFromReasons(reasons);
+  const liveStatus = info.live?.status;
+  const quotaFailure = liveStatus === 'rejected' || liveStatus === 'limit_reached';
+  const quotaUnknown = liveStatus === undefined;
+
+  return {
+    status: failureClass
+      ? 'unavailable'
+      : liveStatus === 'allowed_warning' || info.live?.isStale
+        ? 'degraded'
+        : quotaUnknown
+          ? 'unknown'
+          : 'healthy',
+    checkMode: 'cache-only',
+    checkedAt: new Date().toISOString(),
+    failureClass,
+    reasons,
+    checks: {
+      launch: launch.status === 'available' ? 'pass' : 'fail',
+      auth: info.needsReauth ? 'fail' : 'pass',
+      quota: quotaFailure ? 'fail' : quotaUnknown ? 'unknown' : 'pass',
+      capability: reasons.some((reason) => reason.startsWith('missing-capability:')) ? 'fail' : 'pass',
+    },
+  };
+}
+
+function lastFailureFor(commandName: string): RouteCandidate['route']['lastFailure'] {
+  let entries: AuditEntry[];
+  try {
+    entries = readAuditLog({ limit: 100 });
+  } catch {
+    return null;
+  }
+
+  const entry = [...entries].reverse().find((candidate) => {
+    if (candidate.account !== commandName) return false;
+    const action = candidate.action.toLowerCase();
+    const details = candidate.details ?? {};
+    return action.includes('fail')
+      || action.includes('error')
+      || typeof details.failureClass === 'string'
+      || typeof details.error === 'string';
+  });
+
+  if (!entry) return null;
+  const details = entry.details ?? {};
+  const rawFailureClass = typeof details.failureClass === 'string' ? details.failureClass : null;
+  const failureClass = rawFailureClass && [
+    'auth-required',
+    'quota-exhausted',
+    'provider-rejected',
+    'missing-wrapper',
+    'wrapper-not-executable',
+    'unsupported-capability',
+    'route-policy-mismatch',
+    'unknown-unavailable',
+  ].includes(rawFailureClass)
+    ? rawFailureClass as CodeuctorRouteFailureClass
+    : null;
+  const rawMessage = typeof details.message === 'string'
+    ? details.message
+    : typeof details.error === 'string'
+      ? details.error
+      : null;
+
+  return {
+    at: entry.timestamp,
+    action: entry.action,
+    failureClass,
+    message: rawMessage ? scrubSecrets(rawMessage) : null,
+  };
+}
+
 function requestedTaskBonus(request: RouteRecommendationRequest, candidate: RouteCandidate): number {
   const taskType = request.taskType?.toLowerCase() ?? '';
   let bonus = 0;
@@ -376,6 +549,9 @@ function buildCandidate(
       configDir: account.configDir,
       launchCommand: account.isManaged ? launch.command : (cli?.command ?? account.cliType),
       launch,
+      health: routeHealth([], launch, info),
+      quota: routeQuota(info),
+      lastFailure: lastFailureFor(account.commandName),
     },
     account: {
       name: account.name,
@@ -395,6 +571,7 @@ function buildCandidate(
     candidate.score += requestedTaskBonus(request, candidate);
   }
   candidate.reasons = rejectionReasons(request, candidate);
+  candidate.route.health = routeHealth(candidate.reasons, launch, info);
   return candidate;
 }
 
