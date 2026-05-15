@@ -1908,7 +1908,14 @@ const usageCmd = program
       return;
     }
 
-    const accounts = await getAccountInfo(accountList, { refresh: opts.refresh });
+    // Default: cache-only (instant, no network). --refresh forces a live fetch
+    // with a 5s per-profile race ceiling. The default keeps SweechBar's 30s
+    // poll from spawning 9-second blocking subprocesses (was burning ~30% CPU
+    // sustained when this command did synchronous network fetches).
+    const accounts = await getAccountInfo(
+      accountList,
+      opts.refresh ? { refresh: true, timeoutMs: 5000 } : { cacheOnly: true },
+    );
 
     // Record history snapshot (non-blocking, max once per hour)
     try { appendSnapshot(accounts); } catch {}
