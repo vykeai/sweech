@@ -379,6 +379,15 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
 // ── Codex app-server rate limits ──────────────────────────────────────────────
 
 async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitData | null> {
+  // Only profiles with a real codex auth (under ~/.codex* dirs) have a
+  // meaningful rateLimits endpoint. Claude-named profiles routed through
+  // the codex CLI for third-party providers (groq, gemini, openrouter, etc.)
+  // have no openai auth, so the app-server returns an empty byId after
+  // ~5s — wasting a slot and contending with real codex profiles.
+  const path = require('path')
+  const dirName = path.basename(configDir)
+  if (!/^\.codex(-.*)?$/.test(dirName)) return null
+
   const { spawn } = require('child_process')
 
   return new Promise<LiveRateLimitData | null>((resolve) => {
@@ -418,16 +427,26 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
             // Legacy fields from the first (main) bucket
             let u5h: number | undefined, u7d: number | undefined, r5h: number | undefined, r7d: number | undefined
 
+            // Assign primary/secondary to session (5h) vs weekly (7d) by
+            // their windowDurationMins, NOT by position. The free plan only
+            // returns a single weekly window in `primary` — assuming
+            // primary=session previously surfaced a 100% 5h bar with a 6-day
+            // reset, which is the weekly limit mislabeled.
+            const isWeeklyWindow = (m: number | undefined) => m !== undefined && m >= 24 * 60; // >=1 day
+            const assignWindow = (bucket: RateLimitBucket, win: any) => {
+              if (!win) return false;
+              const data = { utilization: win.usedPercent / 100, resetsAt: win.resetsAt };
+              if (isWeeklyWindow(win.windowDurationMins)) bucket.weekly = data;
+              else bucket.session = data;
+              return win.usedPercent >= 100;
+            };
+
             for (const [id, limit] of Object.entries(byId) as [string, any][]) {
               const label = limit.limitName || 'All models'
               const bucket: RateLimitBucket = { label }
-              if (limit.primary) {
-                bucket.session = { utilization: limit.primary.usedPercent / 100, resetsAt: limit.primary.resetsAt }
-              }
-              if (limit.secondary) {
-                bucket.weekly = { utilization: limit.secondary.usedPercent / 100, resetsAt: limit.secondary.resetsAt }
-                if (limit.secondary.usedPercent >= 100) mainStatus = 'limit_reached'
-              }
+              const primaryHit = assignWindow(bucket, limit.primary);
+              const secondaryHit = assignWindow(bucket, limit.secondary);
+              if (primaryHit || secondaryHit) mainStatus = 'limit_reached'
               if (limit.planType) mainPlanType = limit.planType
               buckets.push(bucket)
 
@@ -435,8 +454,8 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
               if (!limit.limitName) {
                 u5h = bucket.session?.utilization
                 u7d = bucket.weekly?.utilization
-                r5h = limit.primary?.resetsAt
-                r7d = limit.secondary?.resetsAt
+                r5h = bucket.session?.resetsAt
+                r7d = bucket.weekly?.resetsAt
               }
             }
 
