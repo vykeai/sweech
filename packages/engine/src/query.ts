@@ -21,9 +21,25 @@ const MODELS_BY_ENGINE: Record<EngineId, string[]> = {
   'http':        [],
 };
 
-const ENGINES_WITH_EFFORT = new Set<EngineId>(['claude-code', 'pi-mono']);
+/**
+ * Effort vocabularies per engine, sourced from each CLI's own help/error
+ * output (NOT guesswork):
+ *
+ *   claude-code:  `claude --help | grep effort`
+ *                 → low | medium | high | xhigh | max
+ *   codex:        `codex exec -c model_reasoning_effort=__invalid__ 2>&1`
+ *                 → none | minimal | low | medium | high | xhigh
+ *   pi-mono:      inherits Anthropic-style budget tokens (claude vocab).
+ *
+ * Re-verify whenever a CLI updates. The previous shared `EFFORT_LEVELS`
+ * constant was wrong for both engines (claude missing xhigh, codex empty).
+ */
+const ENGINE_EFFORT_LEVELS: Partial<Record<EngineId, readonly string[]>> = {
+  'claude-code': ['low', 'medium', 'high', 'xhigh', 'max'],
+  codex: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+  'pi-mono': ['low', 'medium', 'high', 'xhigh', 'max'],
+};
 const ENGINES_WITH_THINKING = new Set<EngineId>(['claude-code', 'pi-mono']);
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 const THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
 export interface EngineQuery {
@@ -55,7 +71,8 @@ export async function queryAvailable(config?: SweechConfig): Promise<AvailableOp
 
   const engines: EngineQuery[] = statuses.map((status) => {
     const id = status.engine;
-    const supportsEffort = ENGINES_WITH_EFFORT.has(id);
+    const effortLevels = ENGINE_EFFORT_LEVELS[id] ?? [];
+    const supportsEffort = effortLevels.length > 0;
     const supportsThinking = ENGINES_WITH_THINKING.has(id);
     return {
       engine: id,
@@ -64,7 +81,7 @@ export async function queryAvailable(config?: SweechConfig): Promise<AvailableOp
       providers: (status.providers ?? []) as Provider[],
       models: MODELS_BY_ENGINE[id] ?? [],
       supportsEffort,
-      effortLevels: supportsEffort ? [...EFFORT_LEVELS] : [],
+      effortLevels: [...effortLevels],
       supportsThinking,
       thinkingLevels: supportsThinking ? [...THINKING_LEVELS] : [],
     };
@@ -73,14 +90,14 @@ export async function queryAvailable(config?: SweechConfig): Promise<AvailableOp
   const available = engines.filter((e) => e.available);
   const providers = [...new Set(available.flatMap((e) => e.providers))] as Provider[];
   const models = [...new Set(available.flatMap((e) => e.models))];
-  const anyEffort = available.some((e) => e.supportsEffort);
+  const unionEffort = [...new Set(available.flatMap((e) => e.effortLevels))];
   const anyThinking = available.some((e) => e.supportsThinking);
 
   return {
     engines,
     providers,
     models,
-    effortLevels: anyEffort ? [...EFFORT_LEVELS] : [],
+    effortLevels: unionEffort,
     thinkingLevels: anyThinking ? [...THINKING_LEVELS] : [],
   };
 }
