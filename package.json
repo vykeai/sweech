@@ -1,6 +1,6 @@
 {
   "name": "sweech",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI CLI switcher — isolated profile dirs per provider. Switch between Claude Code, Codex, and 10+ AI providers seamlessly.",
   "main": "dist/index.js",
   "bin": {

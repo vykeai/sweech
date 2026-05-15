@@ -1,5 +1,33 @@
 # 🍭 Sweech Changelog
 
+## v0.3.0 (2026-05-15)
+
+### ✨ Features
+
+- **`sweech agents` — live dashboard.** Aggregated view of running Claude Code sessions across every `~/.claude*` profile dir. Reads `sessions/<pid>.json` registries (Claude Code ≥2.1.131), verifies PIDs are alive, dedupes by `pid+sessionId`. Each row shows session name, profile, status (busy/idle/waiting/done/dead), cwd, last-update, pid — plus a 120-char preview of the latest assistant response. In TTY, hit **Enter** on a row to attach via `claude --resume <sessionId>` env-routed to the right profile.
+- **`sweech agents --configured`** — file-based subagent listing with invocation counts from session logs.
+- **`sweech agents <profile>`** — env-routes to that profile's native `claude agents`.
+- **`sweech resume <profile>`** — env-routed prior-session picker (`claude --resume` / `codex resume`).
+- **Autoname new Claude sessions** from `basename(cwd)` via `--name` when not already set and not resuming. Codex has no name flag; its `resume` picker is already cwd-filtered.
+- **Per-profile `envOverrides`** in ProfileConfig — arbitrary env vars (`CLAUDE_EFFORT`, `ENABLE_PROMPT_CACHING_1H`, etc.) written into `settings.json` env block AND injected into the spawned process env.
+- **`baseUrlOverride`** on ProfileConfig — point a profile at a local proxy (e.g. LiteLLM) while sharing the provider definition.
+
+### 🐛 Fixes
+
+- **ENOENT process.cwd at startup** — when the launching shell's cwd was deleted, `graceful-fs/polyfills.js` crashed Node on import. Added `src/cwdGuard.ts` imported first; chdirs to `$HOME` if cwd is gone.
+- **Codex `--yolo` was wrong** — corrected to `--dangerously-bypass-approvals-and-sandbox` (codex 0.128 removed `--full-auto` and never had `--yolo`).
+- **Live sessions deduped across symlinked profile dirs** — sweech profile shares symlink `sessions/` between dirs; previously the same session appeared once per profile (81 rows on shared-master machines).
+
+### ⚡ Performance
+
+- **`sweech list` 10s → 1.5s.** Quota refresh was awaited synchronously across all profiles via `Promise.all`; the slowest network call dominated. Now cache-only by default — `getAccountInfo({ cacheOnly: true })` returns disk-cached data with zero network. Opt in with `sweech list --refresh` (5s per-profile race ceiling).
+- **Inner network timeouts** dropped 8s/10s → 5s so race losers can't keep the event loop alive after the ceiling fires.
+- Same cache-only default applied to the TUI launcher and `sweech dashboard`.
+
+### 🔧 Build / DevEx
+
+- **Self-healing build:** `postbuild` chmod, `prepare` script, and `scripts/install-hooks.sh` wires git post-merge/post-checkout/post-rewrite hooks. After any pull that changes `src/`, `dist/` is rebuilt automatically.
+
 ## v0.2.1 (2026-03-09)
 
 ### ✨ New Features
