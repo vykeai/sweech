@@ -942,12 +942,11 @@ struct AccountCard: View {
                 }
             }
 
-            // Header row 2: provider / plan / promo / tier badges — wraps
-            // independently of the name so nothing gets squeezed off-screen.
+            // Header row 2: provider / plan / tier badges — wraps independently
+            // of the name so nothing gets squeezed off-screen.
             let hasAnyBadge = account.isExternal
                 || account.cliType != nil
                 || account.planType != nil
-                || account.live?.promotion != nil
                 || tier.badgeLabel != nil
             if hasAnyBadge {
                 HStack(spacing: 6) {
@@ -983,23 +982,6 @@ struct AccountCard: View {
                             .background(Sweech.Color.core.opacity(0.1))
                             .clipShape(Capsule())
                             .help("Subscription plan: \(plan)")
-                    }
-
-                    if let promo = account.live?.promotion {
-                        HStack(spacing: 3) {
-                            Image(systemName: "sparkles").font(.system(size: 8))
-                            Text(promo.label)
-                                .font(.system(size: 9, weight: .bold))
-                                .lineLimit(1)
-                        }
-                        .fixedSize()
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(
-                            LinearGradient(colors: [Sweech.Color.accent, Sweech.Color.core], startPoint: .leading, endPoint: .trailing)
-                        )
-                        .clipShape(Capsule())
-                        .help(promo.expiresAt.map { "Promotion active — expires \(Date(timeIntervalSince1970: $0 / 1000).formatted())" } ?? "Promotion active")
                     }
 
                     if let label = tier.badgeLabel {

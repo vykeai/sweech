@@ -53,14 +53,6 @@ export interface LiveRateLimitData {
   /** Token expiry time (ms epoch), if known */
   tokenExpiresAt?: number
 
-  /** Promotion info — detected from API headers or manual config */
-  promotion?: {
-    label: string         // e.g. "2x Tokens", "Double Usage"
-    multiplier?: number   // e.g. 2
-    expiresAt?: number    // epoch ms, if known
-    source?: 'manual' | 'provider' | 'inferred'
-  }
-
   // Legacy fields for backward compat with existing code
   /** @deprecated use buckets[0].session.utilization */
   utilization5h?: number
@@ -364,26 +356,10 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
       })
     }
 
-    // Detect promotions from fallback/overage headers
-    const fallback = get('anthropic-ratelimit-unified-fallback')
-    const fallbackPct = num('anthropic-ratelimit-unified-fallback-percentage')
-    const overageStatus = get('anthropic-ratelimit-unified-overage-status')
-    let promotion: LiveRateLimitData['promotion'] | undefined
-    // If fallback percentage > 0, that's bonus capacity (the "available" header may or may not be present)
-    if (fallbackPct && fallbackPct > 0) {
-      const multiplier = 1 + fallbackPct  // 0.5 fallback = 1.5x, 1.0 fallback = 2x
-      const label = multiplier >= 2 ? `${multiplier}x Tokens` : `+${Math.round(fallbackPct * 100)}% Bonus`
-      promotion = { label, multiplier, source: 'provider' }
-    }
-    if (overageStatus === 'allowed') {
-      promotion = promotion || { label: 'Overage Active', multiplier: undefined, source: 'provider' }
-    }
-
     return {
       buckets,
       status: get('anthropic-ratelimit-unified-status') ?? undefined,
       capturedAt: Date.now(),
-      promotion,
       // Legacy
       utilization5h: u5h, utilization7d: u7d, utilizationSonnet7d: uSonnet7d,
       reset5hAt: r5h, reset7dAt: r7d,
@@ -477,22 +453,11 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
               }
             }
 
-            // Detect codex promotions from credits or unlimited fields
-            let codexPromo: LiveRateLimitData['promotion'] | undefined
-            for (const [, limit] of Object.entries(byId) as [string, any][]) {
-              if (limit.credits?.unlimited) {
-                codexPromo = { label: 'Unlimited', multiplier: undefined, source: 'provider' }
-              } else if (limit.credits?.hasCredits && Number(limit.credits.balance) > 0) {
-                codexPromo = { label: `+${limit.credits.balance} Credits`, multiplier: undefined, source: 'provider' }
-              }
-            }
-
             resolve({
               buckets,
               status: mainStatus,
               planType: mainPlanType,
               capturedAt: Date.now(),
-              promotion: codexPromo,
               utilization5h: u5h, utilization7d: u7d,
               reset5hAt: r5h, reset7dAt: r7d,
             })
@@ -509,80 +474,6 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
   })
 }
 
-// ── Promotions ───────────────────────────────────────────────────────────────
-
-interface PromotionConfig {
-  /** Which CLI type this applies to: "claude", "codex", or "*" */
-  cliType: string
-  /** Display label, e.g. "2x Tokens" */
-  label: string
-  /** Multiplier, e.g. 2 */
-  multiplier?: number
-  /** ISO date when promotion expires */
-  expiresAt?: string
-}
-
-const PROMOTIONS_FILE = path.join(os.homedir(), '.sweech', 'promotions.json')
-
-function loadPromotions(): PromotionConfig[] {
-  try {
-    const data = JSON.parse(fs.readFileSync(PROMOTIONS_FILE, 'utf-8'))
-    return Array.isArray(data) ? data : []
-  } catch {
-    return []
-  }
-}
-
-function getActivePromotion(cliType: string): LiveRateLimitData['promotion'] | undefined {
-  const promos = loadPromotions()
-  const now = Date.now()
-  for (const p of promos) {
-    if (p.cliType !== '*' && p.cliType !== cliType) continue
-    if (p.expiresAt && new Date(p.expiresAt).getTime() < now) continue
-    return {
-      label: p.label,
-      multiplier: p.multiplier,
-      expiresAt: p.expiresAt ? new Date(p.expiresAt).getTime() : undefined,
-      source: 'manual',
-    }
-  }
-  return undefined
-}
-
-function inferPromotion(data: LiveRateLimitData, cliType: string): LiveRateLimitData['promotion'] | undefined {
-  if (cliType !== 'codex') return undefined
-
-  const planType = data.planType?.toLowerCase()
-  if (!planType) return undefined
-
-  // Verified April 10, 2026 from OpenAI Help:
-  // Plus, Pro, Business, Enterprise, and Edu currently receive 2x Codex rate limits.
-  const eligiblePlans = new Set(['plus', 'pro', 'business', 'enterprise', 'edu', 'education'])
-  if (!eligiblePlans.has(planType)) return undefined
-
-  return {
-    label: '2x Limits',
-    multiplier: 2,
-    source: 'inferred',
-  }
-}
-
-function applyPromotion(data: LiveRateLimitData, cliType: string): LiveRateLimitData {
-  // Manual config overrides API-detected; API-detected is the fallback
-  const manual = getActivePromotion(cliType)
-  if (manual) {
-    data.promotion = manual
-    return data
-  }
-
-  // data.promotion may already be set from provider responses
-  if (!data.promotion) {
-    data.promotion = inferPromotion(data, cliType)
-  }
-
-  return data
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -593,21 +484,20 @@ function applyPromotion(data: LiveRateLimitData, cliType: string): LiveRateLimit
  */
 export async function getLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
   const cached = getCached(configDir)
-  if (cached) return applyPromotion(cached, cliType || 'claude')
+  if (cached) return cached
 
   // Codex: use app-server JSON-RPC
   if (cliType === 'codex') {
     const data = await fetchCodexRateLimits(configDir)
-    if (data) { setCached(configDir, data); return applyPromotion(data, 'codex') }
-    const stale = getStaleCache(configDir)
-    return stale ? applyPromotion(stale, 'codex') : null
+    if (data) { setCached(configDir, data); return data }
+    return getStaleCache(configDir)
   }
 
   // Claude: use OAuth token + Anthropic API headers
   const result = await readOAuthToken(configDir)
   if (!result.token) {
     const stale = getStaleCache(configDir)
-    if (stale) { stale.tokenStatus = result.tokenStatus; return applyPromotion(stale, 'claude') }
+    if (stale) { stale.tokenStatus = result.tokenStatus; return stale }
     return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus }
   }
 
@@ -617,11 +507,10 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
     data.tokenRefreshedAt = result.tokenRefreshedAt
     data.tokenExpiresAt = result.tokenExpiresAt
     setCached(configDir, data)
-    return applyPromotion(data, 'claude')
+    return data
   }
 
-  const stale = getStaleCache(configDir)
-  return stale ? applyPromotion(stale, 'claude') : null
+  return getStaleCache(configDir)
 }
 
 /**
