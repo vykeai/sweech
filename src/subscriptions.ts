@@ -328,7 +328,7 @@ export function getKnownAccounts(
       name: cli.command,
       commandName: cli.name,
       cliType: cli.name,
-      provider: cli.name === 'claude' ? 'anthropic' : 'openai',
+      provider: cli.name === 'claude' ? 'anthropic' : cli.name === 'kimi' ? 'kimi' : 'openai',
       isDefault: true,
     })
   }

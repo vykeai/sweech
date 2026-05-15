@@ -7,7 +7,7 @@
  *
  * Two safeguards:
  *  - Throttle: a marker file at ~/.sweech/.last-bg-refresh prevents more than
- *    one kick per 60 seconds, no matter how often the CLI is invoked.
+ *    one kick per minute, no matter how often the CLI is invoked.
  *  - Recursion guard: the SWEECH_BG_REFRESH env var prevents the background
  *    subprocess from kicking *its own* background refresh.
  */
@@ -17,10 +17,11 @@ import * as os from 'os';
 import * as path from 'path';
 
 const MARKER_FILE = path.join(os.homedir(), '.sweech', '.last-bg-refresh');
-// Cache TTL in liveUsage.ts is 5 min; refreshing every 2.5 min keeps the
-// cache age between 0 and ~2.5 min while spending ~4% CPU (one 7s refresh
-// per 150s) rather than ~12% (refresh every 60s).
-const THROTTLE_MS = 2.5 * 60 * 1000;
+// Cache TTL in liveUsage.ts is 5 min; refreshing every 60s keeps the
+// cache age between 0 and ~1 min. Costs ~12% CPU only while SweechBar (30s
+// poll) or the user is actively triggering reads — refresh is detached so
+// no foreground latency. Idle = no refresh.
+const THROTTLE_MS = 60 * 1000;
 
 export function kickBackgroundRefresh(): void {
   // Recursion guard: the background subprocess sets this env var.
