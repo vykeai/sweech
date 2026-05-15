@@ -23,7 +23,7 @@
     {
       "at": "2026-05-03T20:06:23.796Z",
       "by": "human",
-      "text": "v3.2 EXTENSION (from codeuctor pushback). S6 must expose 'route_within_budget(profile, tier, max_cost_per_call_usd) -> {account, model}' API. Codeuctor's pre-plan cost forecast (T-LU-100) is decorative without this — codeuctor estimates, but if sweech can't constrain model selection by USD/call, sweech routes to cheapest-by-quota and the budget cap gets ignored. AC: S6 ships both the user-facing 'sweech cost' command AND the route_within_budget() API used by callers."
+      "text": "v3.2 EXTENSION (from requestor pushback). S6 must expose 'route_within_budget(profile, tier, max_cost_per_call_usd) -> {account, model}' API. requestor's pre-plan cost forecast (T-LU-100) is decorative without this — requestor estimates, but if sweech can't constrain model selection by USD/call, sweech routes to cheapest-by-quota and the budget cap gets ignored. AC: S6 ships both the user-facing 'sweech cost' command AND the route_within_budget() API used by callers."
     }
   ],
   "acceptanceCriteria": [],

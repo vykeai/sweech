@@ -18,7 +18,7 @@
     {
       "at": "2026-05-03T19:52:26.802Z",
       "by": "human",
-      "text": "From runecode RUNECODE_NEEDS_v3.md (S3). AC: liveUsage.ts gains provider-specific header parsers for Kimi (kimi.com), Qwen (dashscope), DeepSeek, Z.ai/glm. Status field semantics consistent with Claude path. Codeuctor's quota tracker depends on this."
+      "text": "From runecode RUNECODE_NEEDS_v3.md (S3). AC: liveUsage.ts gains provider-specific header parsers for Kimi (kimi.com), Qwen (dashscope), DeepSeek, Z.ai/glm. Status field semantics consistent with Claude path. requestor's quota tracker depends on this."
     }
   ],
   "acceptanceCriteria": [],

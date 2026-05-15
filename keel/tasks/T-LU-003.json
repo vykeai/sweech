@@ -18,7 +18,7 @@
     {
       "at": "2026-05-03T19:52:26.654Z",
       "by": "human",
-      "text": "From runecode RUNECODE_NEEDS_v3.md (S2). Closes T-LU-859 root cause. AC: daemon-side 429 detection from response headers; auto-rotates to next-ranked profile by accountScore(); emits webhook + audit log entry; configurable cooldown before retry. Codeuctor v1 depends on this."
+      "text": "From runecode RUNECODE_NEEDS_v3.md (S2). Closes T-LU-859 root cause. AC: daemon-side 429 detection from response headers; auto-rotates to next-ranked profile by accountScore(); emits webhook + audit log entry; configurable cooldown before retry. requestor v1 depends on this."
     }
   ],
   "acceptanceCriteria": [],
