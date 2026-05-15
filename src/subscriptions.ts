@@ -12,7 +12,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { atomicWriteFileSync } from './atomicWrite'
-import { getLiveUsage, refreshLiveUsage, type LiveRateLimitData } from './liveUsage'
+import { getLiveUsage, refreshLiveUsage, getCached, getStaleCache, type LiveRateLimitData } from './liveUsage'
 import { SUPPORTED_CLIS } from './clis'
 import { checkUsageThresholds } from './usageMonitor'
 
@@ -130,7 +130,7 @@ interface ClaudeJson {
   }
 }
 
-function readClaudeJson(configDir: string): ClaudeJson {
+function readClaudeJson(configDir: string, opts: { skipKeychain?: boolean } = {}): ClaudeJson {
   let result: ClaudeJson = {}
 
   // Try .claude.json first (sweech-managed profiles)
@@ -161,7 +161,10 @@ function readClaudeJson(configDir: string): ClaudeJson {
   // Enrich with Keychain data — primary source for default claude (creds live
   // in Keychain, not in .credentials.json). Also fills gaps when file-based
   // auth is missing rateLimitTier.
-  if (process.platform === 'darwin') {
+  // Skipped in cache-only paths because each call is a ~100ms blocking
+  // sync exec of `security find-generic-password` — across 14+ Claude
+  // profiles that's seconds of event-loop block (the TUI freeze).
+  if (process.platform === 'darwin' && !opts.skipKeychain) {
     const needsEnrichment = !result.oauthAccount
       || !result.oauthAccount.rateLimitTier
       || !result.oauthAccount.billingType
@@ -356,8 +359,11 @@ export async function getAccountInfo(
     const configDir = getConfigDir(p.commandName)
     const cliType = p.cliType || p.commandName || 'claude'
     const meta = allMeta[p.commandName] ?? {}
-    const claude = readClaudeJson(configDir)
-    const history = readHistory(configDir)
+    const claude = readClaudeJson(configDir, { skipKeychain: !!options.cacheOnly })
+    // Skip history parsing in cache-only paths — reading + JSON-parsing
+    // multi-megabyte history.jsonl files across 24 profiles is the dominant
+    // cost (3-4s sync block on the TUI). Windows are filled in on refresh.
+    const history = options.cacheOnly ? [] : readHistory(configDir)
     const windows = computeWindows(history)
 
     const sub = claude.oauthAccount
@@ -368,7 +374,6 @@ export async function getAccountInfo(
     let live: LiveRateLimitData | undefined
     if (options.cacheOnly) {
       // Never touch the network — return whatever's in cache (fresh or stale).
-      const { getCached, getStaleCache } = await import('./liveUsage')
       live = (getCached(configDir) ?? getStaleCache(configDir)) ?? undefined
     } else {
       const usageFn = options.refresh ? refreshLiveUsage : getLiveUsage
@@ -386,9 +391,10 @@ export async function getAccountInfo(
       checkUsageThresholds(p.name, live)
     }
 
-    // Only flag reauth if the Keychain token is actually expired (not just a transient fetch failure)
+    // Only flag reauth if the Keychain token is actually expired (not just a transient fetch failure).
+    // Skipped in cache-only paths to avoid 14+ sync `security` execs blocking the event loop.
     let needsReauth = false
-    if (process.platform === 'darwin' && cliType === 'claude' && !live) {
+    if (process.platform === 'darwin' && cliType === 'claude' && !live && !options.cacheOnly) {
       try {
         const crypto = require('crypto')
         const defaultDir = path.join(os.homedir(), '.claude')
