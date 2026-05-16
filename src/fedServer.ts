@@ -219,13 +219,14 @@ export function createSweechFedServer(port: number): http.Server {
         if (a.live?.status === 'limit_reached') {
           alerts.push({ type: 'limit', severity: 'warning', account: a.name, message: '5h rate limit reached' })
         }
-        if (a.live?.utilization7d !== undefined && a.live.utilization7d >= 0.9) {
-          alerts.push({ type: 'usage', severity: 'warning', account: a.name, message: `Weekly usage at ${Math.round(a.live.utilization7d * 100)}%` })
+        const weekly = a.live?.buckets?.[0]?.weekly
+        if (weekly?.utilization !== undefined && weekly.utilization >= 0.9) {
+          alerts.push({ type: 'usage', severity: 'warning', account: a.name, message: `Weekly usage at ${Math.round(weekly.utilization * 100)}%` })
         }
         // Expiry alert
-        if (a.live?.reset7dAt) {
-          const hoursLeft = (a.live.reset7dAt - Date.now() / 1000) / 3600
-          const remaining = 1 - (a.live.utilization7d ?? 0)
+        if (weekly?.resetsAt) {
+          const hoursLeft = (weekly.resetsAt - Date.now() / 1000) / 3600
+          const remaining = 1 - (weekly.utilization ?? 0)
           if (hoursLeft > 0 && hoursLeft < 24 && remaining > 0.2) {
             alerts.push({ type: 'expiry', severity: 'info', account: a.name, message: `${Math.round(remaining * 100)}% expiring in ${Math.round(hoursLeft)}h` })
           }

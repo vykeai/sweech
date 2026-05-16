@@ -31,8 +31,6 @@ function makeCacheData(overrides: Partial<LiveRateLimitData> = {}): LiveRateLimi
     buckets: [{ label: 'All models', session: { utilization: 0.3 }, weekly: { utilization: 0.5, resetsAt: Date.now() / 1000 + 3600 } }],
     status: 'allowed',
     capturedAt: Date.now(),
-    utilization5h: 0.3,
-    utilization7d: 0.5,
     ...overrides,
   };
 }
@@ -52,7 +50,8 @@ describe('liveUsage cache', () => {
       const result = await getLiveUsage('/mock/.claude');
       expect(result).toBeDefined();
       expect(result!.status).toBe('allowed');
-      expect(result!.utilization5h).toBe(0.3);
+      expect(result!.buckets?.[0]?.session?.utilization).toBe(0.3);
+      expect(result!.buckets?.[0]?.weekly?.utilization).toBe(0.5);
       // fetch should NOT have been called since cache is fresh
       expect(mockFetch).not.toHaveBeenCalled();
     });

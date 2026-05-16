@@ -405,8 +405,8 @@ program
           const reverseTag = row.sharingProfiles.length > 0
             ? chalk.dim(` (shared by: ${row.sharingProfiles.join(', ')})`)
             : '';
-          const u5h = info?.live?.utilization5h;
-          const u7d = info?.live?.utilization7d;
+          const u5h = info?.live?.buckets?.[0]?.session?.utilization;
+          const u7d = info?.live?.buckets?.[0]?.weekly?.utilization;
           const usageStr = (u5h !== undefined || u7d !== undefined)
             ? chalk.dim(`  5h:${Math.round((u5h ?? 0) * 100)}% 7d:${Math.round((u7d ?? 0) * 100)}%`)
             : '';
@@ -454,8 +454,8 @@ program
         email: info.emailAddress ?? info.activeAccount?.email,
         activeAccount: info.activeAccount,
         live: info.live,
-        utilization5h: info.live?.utilization5h ?? 0,
-        utilization7d: info.live?.utilization7d ?? 0,
+        utilization5h: info.live?.buckets?.[0]?.session?.utilization ?? 0,
+        utilization7d: info.live?.buckets?.[0]?.weekly?.utilization ?? 0,
         liveStatus: info.live?.status,
         needsReauth: !!info.needsReauth,
         lastActive: info.lastActive,
@@ -786,8 +786,8 @@ program
       const smartScore = (acct: typeof infoA): number => {
         if (acct.needsReauth) return -2;
         if (acct.live?.status === 'limit_reached') return -1;
-        const remaining7d = 1 - (acct.live?.utilization7d ?? 0);
-        const reset7dAt = acct.live?.reset7dAt;
+        const remaining7d = 1 - (acct.live?.buckets?.[0]?.weekly?.utilization ?? 0);
+        const reset7dAt = acct.live?.buckets?.[0]?.weekly?.resetsAt;
         if (!reset7dAt) return remaining7d / 7;
         const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
         const daysLeft = hoursLeft / 24;
@@ -836,15 +836,15 @@ program
 
       // 5h usage bars
       const barW = 14;
-      const u5hA = infoA.live?.utilization5h ?? 0;
-      const u5hB = infoB.live?.utilization5h ?? 0;
+      const u5hA = infoA.live?.buckets?.[0]?.session?.utilization ?? 0;
+      const u5hB = infoB.live?.buckets?.[0]?.session?.utilization ?? 0;
       const bar5hA = asciiBar({ label: '', value: u5hA, max: 1, width: barW, color: barColor(u5hA) });
       const bar5hB = asciiBar({ label: '', value: u5hB, max: 1, width: barW, color: barColor(u5hB) });
       console.log(`  ${'5h:'.padEnd(7)}${bar5hA.padEnd(colW)}${bar5hB}`);
 
       // 7d usage bars
-      const u7dA = infoA.live?.utilization7d ?? 0;
-      const u7dB = infoB.live?.utilization7d ?? 0;
+      const u7dA = infoA.live?.buckets?.[0]?.weekly?.utilization ?? 0;
+      const u7dB = infoB.live?.buckets?.[0]?.weekly?.utilization ?? 0;
       const bar7dA = asciiBar({ label: '', value: u7dA, max: 1, width: barW, color: barColor(u7dA) });
       const bar7dB = asciiBar({ label: '', value: u7dB, max: 1, width: barW, color: barColor(u7dB) });
       console.log(`  ${'Week:'.padEnd(7)}${bar7dA.padEnd(colW)}${bar7dB}`);
@@ -934,11 +934,13 @@ program
           const barColor = (r: number) => r <= 0.5 ? chalk.green : r <= 0.8 ? chalk.yellow : chalk.red;
           console.log();
           console.log(chalk.bold('Live rate limits:'));
-          if (acctInfo.live.utilization5h !== undefined) {
-            console.log('  ' + asciiBar({ label: '  5h', value: acctInfo.live.utilization5h, max: 1, width: 25, color: barColor(acctInfo.live.utilization5h) }));
+          const u5h = acctInfo.live.buckets?.[0]?.session?.utilization;
+          const u7d = acctInfo.live.buckets?.[0]?.weekly?.utilization;
+          if (u5h !== undefined) {
+            console.log('  ' + asciiBar({ label: '  5h', value: u5h, max: 1, width: 25, color: barColor(u5h) }));
           }
-          if (acctInfo.live.utilization7d !== undefined) {
-            console.log('  ' + asciiBar({ label: 'week', value: acctInfo.live.utilization7d, max: 1, width: 25, color: barColor(acctInfo.live.utilization7d) }));
+          if (u7d !== undefined) {
+            console.log('  ' + asciiBar({ label: 'week', value: u7d, max: 1, width: 25, color: barColor(u7d) }));
           }
           if (acctInfo.live.status) {
             const statusColor = acctInfo.live.status === 'allowed' ? chalk.green : acctInfo.live.status === 'limit_reached' ? chalk.red : chalk.yellow;
@@ -2242,15 +2244,17 @@ const usageCmd = program
         console.log(`  ${chalk.bold(a.name)}${planStr}${emailStr}${recommendedStr}${tokenStr}`);
 
         // 5h window
+        const liveSession = a.live?.buckets?.[0]?.session;
+        const liveWeekly = a.live?.buckets?.[0]?.weekly;
         const cap5hStr = a.minutesUntilFirstCapacity !== undefined
           ? chalk.yellow(` · capacity in ${a.minutesUntilFirstCapacity}m`)
           : '';
-        const live5hStr = a.live?.utilization5h !== undefined
-          ? ` (${Math.round(a.live.utilization5h * 100)}% used)`
+        const live5hStr = liveSession?.utilization !== undefined
+          ? ` (${Math.round(liveSession.utilization * 100)}% used)`
           : '';
-        const reset5hStr = a.live?.reset5hAt !== undefined
+        const reset5hStr = liveSession?.resetsAt !== undefined
           ? (() => {
-              const mins = Math.round((a.live!.reset5hAt! - Date.now() / 1000) / 60);
+              const mins = Math.round((liveSession.resetsAt! - Date.now() / 1000) / 60);
               if (mins < 30) return chalk.red(` · resets in ${mins}m`);
               if (mins < 120) return chalk.yellow(` · resets in ${mins}m`);
               const h = Math.floor(mins / 60), m = mins % 60;
@@ -2260,7 +2264,7 @@ const usageCmd = program
         console.log(`    5h:   ${chalk.white(String(a.messages5h))} messages${live5hStr}${reset5hStr}${cap5hStr}`);
 
         // week window + expiry alert
-        const reset7dAt = a.live?.reset7dAt;
+        const reset7dAt = liveWeekly?.resetsAt;
         const weeklyResetStr = reset7dAt !== undefined
           ? (() => {
               const h = Math.round((reset7dAt - Date.now() / 1000) / 3600);
@@ -2271,14 +2275,14 @@ const usageCmd = program
           : a.hoursUntilWeeklyReset !== undefined
             ? chalk.cyan(` · resets in ${a.hoursUntilWeeklyReset}h`)
             : chalk.dim(' · set plan to compute');
-        const live7dStr = a.live?.utilization7d !== undefined
-          ? ` (${Math.round(a.live.utilization7d * 100)}% used)`
+        const live7dStr = liveWeekly?.utilization !== undefined
+          ? ` (${Math.round(liveWeekly.utilization * 100)}% used)`
           : '';
         // Expiry alert: >10% remaining and resetting in <72h
         let expiryAlertStr = '';
         if (reset7dAt) {
           const hoursLeft = (reset7dAt - Date.now() / 1000) / 3600;
-          const remaining = 1 - (a.live?.utilization7d ?? 0);
+          const remaining = 1 - (liveWeekly?.utilization ?? 0);
           if (remaining > 0 && hoursLeft > 0 && hoursLeft < 72) {
             const pct = Math.round(remaining * 100);
             const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
@@ -3964,8 +3968,8 @@ program
     }
 
     const pick = candidates[0];
-    const u5h = Math.round((pick.live?.utilization5h ?? 0) * 100);
-    const u7d = Math.round((pick.live?.utilization7d ?? 0) * 100);
+    const u5h = Math.round((pick.live?.buckets?.[0]?.session?.utilization ?? 0) * 100);
+    const u7d = Math.round((pick.live?.buckets?.[0]?.weekly?.utilization ?? 0) * 100);
     const cmd = `sweech use ${pick.commandName}`;
 
     if (opts.json) {

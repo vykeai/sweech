@@ -123,8 +123,8 @@ describe('Compare Command', () => {
       const smartScore = (acct: any): number => {
         if (acct.needsReauth) return -2;
         if (acct.live?.status === 'limit_reached') return -1;
-        const remaining7d = 1 - (acct.live?.utilization7d ?? 0);
-        const reset7dAt = acct.live?.reset7dAt;
+        const remaining7d = 1 - (acct.live?.buckets?.[0]?.weekly?.utilization ?? 0);
+        const reset7dAt = acct.live?.buckets?.[0]?.weekly?.resetsAt;
         if (!reset7dAt) return remaining7d / 7;
         const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
         const daysLeft = hoursLeft / 24;
@@ -134,7 +134,7 @@ describe('Compare Command', () => {
       };
 
       const acct = mockAccount({
-        live: { utilization7d: 0.3, status: 'allowed' },
+        live: { buckets: [{ label: 'All models', weekly: { utilization: 0.3 } }], status: 'allowed' },
       });
       const score = smartScore(acct);
       expect(score).toBeCloseTo(0.7 / 7, 2);

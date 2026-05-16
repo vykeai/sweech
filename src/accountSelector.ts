@@ -183,8 +183,8 @@ export function accountScore(info: AccountInfo): number {
   const status = live?.status;
   if (status === 'rejected' || status === 'limit_reached') return Number.NEGATIVE_INFINITY;
 
-  const weeklyUtil = live?.utilization7d ?? 0;
-  const sessionUtil = live?.utilization5h ?? 0;
+  const weeklyUtil = live?.buckets?.[0]?.weekly?.utilization ?? 0;
+  const sessionUtil = live?.buckets?.[0]?.session?.utilization ?? 0;
   const resetHours = info.hoursUntilWeeklyReset ?? 24 * 365;
   const resetUrgency = resetHours > 0 ? 1 / resetHours : 10;
   const firstCapacityMinutes = info.minutesUntilFirstCapacity ?? 0;
@@ -197,8 +197,10 @@ export function accountReason(info: AccountInfo): string {
   const pieces: string[] = [];
   if (info.live?.status) pieces.push(`status=${info.live.status}`);
   if (info.hoursUntilWeeklyReset !== undefined) pieces.push(`weekly-reset=${info.hoursUntilWeeklyReset.toFixed(1)}h`);
-  if (info.live?.utilization7d !== undefined) pieces.push(`7d=${Math.round(info.live.utilization7d * 100)}%`);
-  if (info.live?.utilization5h !== undefined) pieces.push(`5h=${Math.round(info.live.utilization5h * 100)}%`);
+  const weeklyUtil = info.live?.buckets?.[0]?.weekly?.utilization;
+  const sessionUtil = info.live?.buckets?.[0]?.session?.utilization;
+  if (weeklyUtil !== undefined) pieces.push(`7d=${Math.round(weeklyUtil * 100)}%`);
+  if (sessionUtil !== undefined) pieces.push(`5h=${Math.round(sessionUtil * 100)}%`);
   if (pieces.length === 0) return 'fallback order';
   return pieces.join(', ');
 }

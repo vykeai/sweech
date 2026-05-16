@@ -51,8 +51,13 @@ struct SweechProvider: TimelineProvider {
             guard let name = dict["name"] as? String,
                   let commandName = dict["commandName"] as? String else { return nil }
             let live = dict["live"] as? [String: Any]
-            let u5h = live?["utilization5h"] as? Double ?? 0
-            let u7d = live?["utilization7d"] as? Double ?? 0
+            // T-057: read utilization from buckets[0]; deprecated top-level mirrors are gone.
+            let buckets = live?["buckets"] as? [[String: Any]]
+            let primary = buckets?.first
+            let session = primary?["session"] as? [String: Any]
+            let weekly = primary?["weekly"] as? [String: Any]
+            let u5h = session?["utilization"] as? Double ?? 0
+            let u7d = weekly?["utilization"] as? Double ?? 0
             let status = live?["status"] as? String ?? "unknown"
             let statusLabel = status == "limit_reached" ? "limit" : status == "warning" ? "warn" : "ok"
             return WidgetAccount(id: commandName, name: name, utilization5h: u5h, utilization7d: u7d, status: statusLabel, isTopPick: false)

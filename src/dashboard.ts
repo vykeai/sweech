@@ -375,8 +375,8 @@ document.getElementById('generated-at').textContent =
   var html = '<table><thead><tr><th>Account</th><th>5h usage</th><th>Weekly usage</th><th>Messages (5h/7d)</th><th>Last active</th></tr></thead><tbody>';
   accounts.forEach(function(a) {
     var live = a.live || {};
-    var u5h = live.utilization5h != null ? live.utilization5h : (live.buckets && live.buckets[0] && live.buckets[0].session ? live.buckets[0].session.utilization : null);
-    var u7d = live.utilization7d != null ? live.utilization7d : (live.buckets && live.buckets[0] && live.buckets[0].weekly ? live.buckets[0].weekly.utilization : null);
+    var u5h = live.buckets && live.buckets[0] && live.buckets[0].session ? live.buckets[0].session.utilization : null;
+    var u7d = live.buckets && live.buckets[0] && live.buckets[0].weekly ? live.buckets[0].weekly.utilization : null;
 
     html += '<tr><td><strong>' + a.commandName + '</strong></td>';
 

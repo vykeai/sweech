@@ -52,11 +52,48 @@ function makeAccountInfo(overrides: Partial<AccountInfo> = {}): AccountInfo {
   };
 }
 
-function makeLive(overrides: Partial<LiveRateLimitData> = {}): LiveRateLimitData {
+interface LiveOverrides extends Partial<LiveRateLimitData> {
+  utilization5h?: number;
+  utilization7d?: number;
+  reset5hAt?: number;
+  reset7dAt?: number;
+}
+
+function makeLive(overrides: LiveOverrides = {}): LiveRateLimitData {
+  const {
+    utilization5h,
+    utilization7d,
+    reset5hAt,
+    reset7dAt,
+    buckets,
+    ...rest
+  } = overrides;
+
+  let allBuckets = buckets;
+  if (!allBuckets) {
+    const hasWindow = utilization5h !== undefined
+      || utilization7d !== undefined
+      || reset5hAt !== undefined
+      || reset7dAt !== undefined;
+    if (hasWindow) {
+      allBuckets = [{
+        label: 'All models',
+        ...(utilization5h !== undefined || reset5hAt !== undefined
+          ? { session: { utilization: utilization5h ?? 0, resetsAt: reset5hAt } }
+          : {}),
+        ...(utilization7d !== undefined || reset7dAt !== undefined
+          ? { weekly: { utilization: utilization7d ?? 0, resetsAt: reset7dAt } }
+          : {}),
+      }];
+    } else {
+      allBuckets = [];
+    }
+  }
+
   return {
-    buckets: [],
+    buckets: allBuckets,
     capturedAt: Date.now(),
-    ...overrides,
+    ...rest,
   };
 }
 

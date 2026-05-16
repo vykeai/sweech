@@ -135,8 +135,8 @@ export function recordProjectionSamples(accounts: AccountInfo[], now?: number): 
   let mutated = false
 
   for (const a of accounts) {
-    const u5h = a.live?.utilization5h ?? a.live?.buckets?.[0]?.session?.utilization
-    const u7d = a.live?.utilization7d ?? a.live?.buckets?.[0]?.weekly?.utilization
+    const u5h = a.live?.buckets?.[0]?.session?.utilization
+    const u7d = a.live?.buckets?.[0]?.weekly?.utilization
     if (u5h === undefined && u7d === undefined) continue
 
     const sample: ProjectionSample = {

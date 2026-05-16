@@ -39,8 +39,6 @@ function makeAccount(commandName: string, u5h: number, u7d: number): AccountInfo
         },
       ],
       capturedAt: Date.now(),
-      utilization5h: u5h,
-      utilization7d: u7d,
     },
   };
 }

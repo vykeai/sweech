@@ -60,12 +60,48 @@ sweech providers quota --refresh --json   # force a fresh probe of every API-key
 
 For routing decisions in scripts: parse `sweech usage --json` for the `accounts[]` array. Each entry has:
 - `commandName`, `cliType`, `provider`, `baseUrl`, `effectiveProvider`, `displayGroup`
-- `live.utilization5h`, `live.utilization7d`, `live.status` (`allowed` | `warning` | `limit_reached` | `org_disabled`)
+- `live.buckets[0].session.utilization`, `live.buckets[0].weekly.utilization`, `live.status` (`allowed` | `warning` | `limit_reached` | `org_disabled`)
 - `smartScore`, `tier` (`use_first` | `use_next` | `normal`), `tierUrgent`
 - `activeAccount.{id,kind,email,plan}` — vault identity mounted in this workspace
 - `tokenStatus` (`valid` | `refreshed` | `expired` | `no_token`)
 
 `providerQuotas[providerKey]` contains `balanceUsd` / `rateLimit.{used,limit,units,resetsAt}` / `note` (dashboard hint) / `error` per third-party vendor.
+
+---
+
+## JSON contract — `live` shape (QuotaSnapshot)
+
+Canonical shape of the `live` field on every account in `sweech usage --json` and `sweech list --json`. Single source of truth — SwiftBar, widgets, the engine, and external scripts all consume this.
+
+```jsonc
+{
+  "live": {
+    // Per-limit buckets. buckets[0] is always the "All models" / primary limit.
+    // Additional buckets exist for per-model caps (e.g. "Sonnet only", "GPT-5.3-Codex-Spark").
+    "buckets": [
+      {
+        "label": "All models",
+        "session": { "utilization": 0.32, "resetsAt": 1714912800 },  // 5h rolling, Unix seconds
+        "weekly":  { "utilization": 0.71, "resetsAt": 1715392200 }   // 7d rolling, Unix seconds
+      }
+    ],
+    "status": "allowed",            // allowed | warning | limit_reached | org_disabled | forbidden | unauthorized
+    "planType": "max",              // codex only — pro | max | business | enterprise | edu
+    "representativeClaim": "...",   // optional, anthropic header for the dominant window
+    "isStale": false,               // true when cache was returned because fresh fetch failed
+    "tokenStatus": "valid",         // valid | refreshed | expired | no_token
+    "tokenRefreshedAt": 1714912800000,   // ms epoch, present only when refreshed
+    "tokenExpiresAt":  1714998000000,    // ms epoch, when known
+    "capturedAt":      1714912800000     // ms epoch
+  }
+}
+```
+
+Notes for consumers:
+- `buckets[0].session` and `buckets[0].weekly` are each optional; missing means that window has no data (e.g. some Codex tiers return only a weekly window).
+- `resetsAt` is Unix **seconds** (Anthropic API native unit). `capturedAt`, `tokenRefreshedAt`, and `tokenExpiresAt` are **milliseconds** (JS Date.now units).
+- `utilization` is a fraction `0.0–1.0`, not a percent.
+- The pre-T-057 mirror fields (`utilization5h`, `utilization7d`, `utilizationSonnet7d`, `reset5hAt`, `reset7dAt`) have been removed. Read from `buckets[0]` instead.
 
 ---
 

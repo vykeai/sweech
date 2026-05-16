@@ -9,7 +9,7 @@ struct LiveBucket: Codable {
 
     struct BucketWindow: Codable {
         let utilization: Double
-        let resetsAt: Double
+        let resetsAt: Double?
     }
 }
 
@@ -17,15 +17,24 @@ struct LiveData: Codable {
     let buckets: [LiveBucket]?
     let status: String?
     let planType: String?
-    let utilization5h: Double?
-    let utilization7d: Double?
-    let reset5hAt: Double?
-    let reset7dAt: Double?
     let representativeClaim: String?
     let isStale: Bool?
     let tokenStatus: String?
     let tokenRefreshedAt: Double?
     let tokenExpiresAt: Double?
+
+    /// Canonical first bucket — "All models" or whatever the API marks primary.
+    /// SwiftBar always renders from this; deprecated top-level mirrors are gone (T-057).
+    var primaryBucket: LiveBucket? { buckets?.first }
+
+    /// 5h session utilization from the canonical bucket. 0 when absent.
+    var utilization5h: Double? { primaryBucket?.session?.utilization }
+    /// 7d weekly utilization from the canonical bucket. 0 when absent.
+    var utilization7d: Double? { primaryBucket?.weekly?.utilization }
+    /// 5h session reset epoch (seconds) from the canonical bucket.
+    var reset5hAt: Double? { primaryBucket?.session?.resetsAt }
+    /// 7d weekly reset epoch (seconds) from the canonical bucket.
+    var reset7dAt: Double? { primaryBucket?.weekly?.resetsAt }
 }
 
 /// Burn-rate forecast emitted by the CLI (`projection5h` / `projection7d` on

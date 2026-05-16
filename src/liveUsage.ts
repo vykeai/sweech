@@ -54,18 +54,42 @@ export interface LiveRateLimitData {
   /** Token expiry time (ms epoch), if known */
   tokenExpiresAt?: number
 
-  // Legacy fields for backward compat with existing code
-  /** @deprecated use buckets[0].session.utilization */
-  utilization5h?: number
-  /** @deprecated use buckets[0].weekly.utilization */
-  utilization7d?: number
-  /** @deprecated */
-  utilizationSonnet7d?: number
-  /** @deprecated */
-  reset5hAt?: number
-  /** @deprecated */
-  reset7dAt?: number
+  /** Representative claim from anthropic-ratelimit-unified-representative-claim header. */
   representativeClaim?: string
+}
+
+// ── Bucket accessors ──────────────────────────────────────────────────────────
+
+/**
+ * Read the session (5h) utilization (0.0–1.0) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getSessionUtilization(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.session?.utilization
+}
+
+/**
+ * Read the weekly (7d) utilization (0.0–1.0) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getWeeklyUtilization(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.weekly?.utilization
+}
+
+/**
+ * Read the session (5h) reset time (Unix seconds) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getSessionResetsAt(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.session?.resetsAt
+}
+
+/**
+ * Read the weekly (7d) reset time (Unix seconds) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getWeeklyResetsAt(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.weekly?.resetsAt
 }
 
 // ── Shared scoring ───────────────────────────────────────────────────────────
@@ -90,15 +114,15 @@ export function computeSmartScore(account: ScorableAccount): number {
   const bucket = allModels || account.live.buckets[0]
 
   // If there's no weekly data at all, fall back to session data
-  const hasWeekly = bucket?.weekly?.utilization !== undefined || account.live.utilization7d !== undefined
+  const hasWeekly = bucket?.weekly?.utilization !== undefined
   if (!hasWeekly) {
     const session = bucket?.session
     if (session) return (1 - session.utilization)
     return 0
   }
 
-  const remaining7d = 1 - (bucket?.weekly?.utilization ?? account.live.utilization7d ?? 0)
-  const reset7dAt = bucket?.weekly?.resetsAt ?? account.live.reset7dAt
+  const remaining7d = 1 - (bucket?.weekly?.utilization ?? 0)
+  const reset7dAt = bucket?.weekly?.resetsAt
   if (!reset7dAt) return remaining7d / 7
 
   const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600)
@@ -117,8 +141,8 @@ export function computeTier(account: ScorableAccount, isTopInGroup: boolean): { 
   const score = computeSmartScore(account)
   if (score < 0) return { tier: 'normal', urgent: false }
   const allModels = account.live?.buckets.find(b => b.label === 'All models')
-  const reset7dAt = allModels?.weekly?.resetsAt ?? account.live?.reset7dAt
-  const remaining7d = 1 - (allModels?.weekly?.utilization ?? account.live?.utilization7d ?? 0)
+  const reset7dAt = allModels?.weekly?.resetsAt
+  const remaining7d = 1 - (allModels?.weekly?.utilization ?? 0)
   const urgent = !!(reset7dAt && ((reset7dAt - Date.now() / 1000) / 3600) < 72 && remaining7d >= 0.05)
   return { tier: 'use_first', urgent }
 }
@@ -361,9 +385,6 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
       buckets,
       status: get('anthropic-ratelimit-unified-status') ?? undefined,
       capturedAt: Date.now(),
-      // Legacy
-      utilization5h: u5h, utilization7d: u7d, utilizationSonnet7d: uSonnet7d,
-      reset5hAt: r5h, reset7dAt: r7d,
       representativeClaim: get('anthropic-ratelimit-unified-representative-claim') ?? undefined,
     }
   } catch {
@@ -419,8 +440,6 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
             const buckets: RateLimitBucket[] = []
             let mainStatus = 'allowed'
             let mainPlanType: string | undefined
-            // Legacy fields from the first (main) bucket
-            let u5h: number | undefined, u7d: number | undefined, r5h: number | undefined, r7d: number | undefined
 
             // Assign primary/secondary to session (5h) vs weekly (7d) by
             // their windowDurationMins, NOT by position. The free plan only
@@ -436,7 +455,7 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
               return win.usedPercent >= 100;
             };
 
-            for (const [id, limit] of Object.entries(byId) as [string, any][]) {
+            for (const [, limit] of Object.entries(byId) as [string, any][]) {
               const label = limit.limitName || 'All models'
               const bucket: RateLimitBucket = { label }
               const primaryHit = assignWindow(bucket, limit.primary);
@@ -444,14 +463,6 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
               if (primaryHit || secondaryHit) mainStatus = 'limit_reached'
               if (limit.planType) mainPlanType = limit.planType
               buckets.push(bucket)
-
-              // Legacy: use main (unnamed) limit for top-level fields
-              if (!limit.limitName) {
-                u5h = bucket.session?.utilization
-                u7d = bucket.weekly?.utilization
-                r5h = bucket.session?.resetsAt
-                r7d = bucket.weekly?.resetsAt
-              }
             }
 
             resolve({
@@ -459,8 +470,6 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
               status: mainStatus,
               planType: mainPlanType,
               capturedAt: Date.now(),
-              utilization5h: u5h, utilization7d: u7d,
-              reset5hAt: r5h, reset7dAt: r7d,
             })
           }
         } catch {}
