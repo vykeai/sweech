@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { registerTool } from '@vykeai/fed';
 import { loadOrCreateSecret } from './auth.js';
 import { startConfigWatcher, stopConfigWatcher } from '../middleware/profiles.js';
-import { LogRotator, getDaemonLogPath } from './log.js';
+import { LogRotator } from './log.js';
 import { DEFAULT_DAEMON_PORT } from '../constants.js';
 
 let PORT = DEFAULT_DAEMON_PORT;
@@ -240,17 +240,16 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
     process.stderr.write(`[engine] failed to start config watcher: ${message}\n`);
   }
 
-  // T-054: rotate the launchd-redirected stdout/stderr log so it never
-  // grows unbounded. Triggers on size (>10 MiB) or daily boundary; keeps
-  // last 5 rotations. Timer is unref'd, so it does not block shutdown.
-  try {
-    logRotator = new LogRotator({ logPath: getDaemonLogPath() });
-    logRotator.start();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[engine] failed to start log rotator: ${message}\n`);
-    logRotator = null;
-  }
+  // T-054 + codex adversarial: the engine daemon is launched with
+  // `stdio: 'ignore'` (see src/cli.ts), so it does not write to
+  // ~/Library/Logs/sweech-serve.log. The fed server (started by
+  // `sweech serve`) is the actual writer and runs its own rotator.
+  // Wiring a second rotator here against the same path produced a
+  // cross-process race on the .1…\.5 backup shift with no file lock,
+  // and rotated nothing because the engine emitted no lines into the
+  // file. The class is still imported for the future case where the
+  // engine writes to its own log path — leave that wiring for then.
+  logRotator = null;
 
   await mkdir(PID_DIR, { recursive: true });
   await writeFile(PID_FILE, String(process.pid), 'utf-8');

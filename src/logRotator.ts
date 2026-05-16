@@ -21,10 +21,25 @@
  * truncate the original to zero length. Truncation preserves the inode, so
  * the writer's fd keeps producing output into the same file.
  *
+ * ## Known limitation (codex adversarial review): the copy-truncate window
+ *
+ * Lines written by the daemon BETWEEN `copyFileSync(current, current.1)` and
+ * the subsequent `truncateSync(current, 0)` are lost — they appear briefly in
+ * the active file, then are wiped by the truncate. This is the same gap that
+ * affects newsyslog and `logrotate --copytruncate`. For sweech's log volume
+ * (the daemon emits perhaps a few KB per hour) the window is effectively
+ * unobservable. The complete fix would be SIGHUP-based logger reopen with a
+ * file-stream the daemon controls — a much larger redesign than this task
+ * scoped, tracked as a follow-up.
+ *
  * This is a CommonJS sibling of packages/engine/src/daemon/log.ts. The two
  * files implement the same algorithm; they are duplicated because the root
  * package (CommonJS) and the engine package (ESM) cannot share modules
- * across rootDir boundaries.
+ * across rootDir boundaries. Only ONE rotator should run against any given
+ * log path; cross-process rename races on the .1…\.N shift have no lock.
+ * Today only the fed server (started by `sweech serve`) writes to and
+ * rotates `~/Library/Logs/sweech-serve.log` — the engine daemon's stdio is
+ * launched with `'ignore'`, so it neither writes to nor rotates that file.
  */
 
 import * as fs from 'fs'
