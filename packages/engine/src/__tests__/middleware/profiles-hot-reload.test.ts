@@ -154,6 +154,45 @@ describe('profiles hot reload (T-040)', () => {
     expect(refreshed['beta']).toBeTruthy()
   })
 
+  it('stale in-flight load does NOT resurrect old credentials after a hot-reload', async () => {
+    // Reproduces the codex adversarial finding: an async loadProfilesConfig
+    // capturing the OLD config could overwrite a freshly-reloaded `cached`.
+    // The fix is a generation counter — when reloadProfilesConfig fires
+    // mid-load, the old load's eventual `cached = result` must be skipped.
+
+    // 1. Initial config has `legacy` (think: a credential we want to rotate out).
+    await writeFile(configPath, profileArray('legacy'), 'utf-8')
+    await loadProfilesConfig()  // primes cache
+    clearProfileCache()         // force a fresh async load on next call
+
+    startConfigWatcher()
+
+    // 2. Kick off a "slow" load (it'll actually be fast, but it captures
+    //    the legacy generation at function entry).
+    const slowLoad = loadProfilesConfig()
+
+    // 3. Atomic-rename the new config into place WHILE slowLoad is awaiting.
+    //    The watcher will fire reloadProfilesConfig with `rotated`.
+    const tmpFile = join(dir, 'config.json.next')
+    await writeFile(tmpFile, profileArray('rotated'), 'utf-8')
+    await rename(tmpFile, configPath)
+
+    // 4. Wait for the reload to land (cache shows `rotated`).
+    await waitFor(async () => {
+      const cur = await loadProfilesConfig()
+      return cur['rotated'] ? cur : null
+    })
+
+    // 5. Now resolve the slow load. WITHOUT the generation guard, this
+    //    write would clobber `cached` back to `legacy`. WITH it, the
+    //    write is skipped and the cache stays at `rotated`.
+    await slowLoad
+
+    const finalState = await loadProfilesConfig()
+    expect(finalState['rotated']).toBeTruthy()
+    expect(finalState['legacy']).toBeUndefined()
+  })
+
   it('does not crash when started before the file or directory exists', async () => {
     // Use a path inside a directory that does NOT exist yet.
     const ghostDir = join(dir, 'ghost')

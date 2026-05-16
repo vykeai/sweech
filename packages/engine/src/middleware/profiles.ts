@@ -28,6 +28,15 @@ export type ProfilesConfig = SweechLegacyRuntimeConfig;
 
 let cached: ProfilesConfig | null = null;
 let loadPromise: Promise<ProfilesConfig> | null = null;
+/// Monotonic generation: bumped whenever a reload starts OR the path changes.
+/// Any async load that captured an older generation must NOT clobber `cached`
+/// when it finishes — without this counter, the race goes:
+///   1. loadProfilesConfig() starts an async read of OLD config
+///   2. atomic-rename → watcher fires → reloadProfilesConfig() succeeds, swaps cache to NEW
+///   3. step 1's async read finishes and writes `cached = OLD-result`
+///      — resurrecting a credentials snapshot that was already replaced.
+/// Capture-then-check on every write closes that window.
+let configGeneration = 0;
 
 export function getProfilesPath(): string {
   return PROFILES_PATH;
@@ -44,6 +53,7 @@ export function _setProfilesPath(path: string): void {
   PROFILES_PATH = path;
   cached = null;
   loadPromise = null;
+  configGeneration++;
 }
 
 /**
@@ -93,19 +103,31 @@ export async function loadProfilesConfig(): Promise<ProfilesConfig> {
   if (cached) return cached;
   if (loadPromise) return loadPromise;
 
+  const gen = configGeneration;
   loadPromise = (async () => {
     try {
       const result = await parseProfilesFile(PROFILES_PATH);
-      cached = result;
-      return cached;
+      // Generation check: if a reload (or path-change) happened during our
+      // async read, `configGeneration` was bumped — abandon our write and
+      // let the caller see the fresher `cached` set by reloadProfilesConfig.
+      // Without this, an old slow-read finishing AFTER a reload would
+      // resurrect a stale snapshot.
+      if (gen === configGeneration) {
+        cached = result;
+      }
+      return cached ?? result;
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
-        cached = toLegacyRuntimeConfig(createEmptyRuntimeDocument());
-        return cached;
+        if (gen === configGeneration) {
+          cached = toLegacyRuntimeConfig(createEmptyRuntimeDocument());
+        }
+        return cached ?? toLegacyRuntimeConfig(createEmptyRuntimeDocument());
       }
       throw error;
     } finally {
-      loadPromise = null;
+      // Only clear loadPromise if it's still ours — a reload may have
+      // already nulled it to force fresh reads.
+      if (gen === configGeneration) loadPromise = null;
     }
   })();
 
@@ -175,28 +197,28 @@ let watcherStarting = false;
 const DEBOUNCE_MS = 250;
 
 async function reloadProfilesConfig(): Promise<void> {
+  // Bump generation BEFORE parsing so any in-flight loadProfilesConfig() that
+  // started before our trigger will see a mismatch when it finishes and skip
+  // its write-to-cached. Codex review (2026-05-16) caught the resurrection
+  // bug where a slow async load could overwrite the fresh hot-reload result.
+  configGeneration++;
+  const myGen = configGeneration;
   try {
     const next = await parseProfilesFile(PROFILES_PATH);
-    // Pointer-swap AFTER successful parse: in-flight requests keep
-    // reading the previous `cached` reference until this line; readers
-    // that fire after the swap see the new one. Failed parse → old
-    // cache stays, see the catch below.
-    //
-    // Also clear `loadPromise`: if `loadProfilesConfig()` is mid-flight
-    // it still has the OLD parsed result captured in its closure, so a
-    // concurrent caller awaiting that promise would clobber `cached`
-    // back to the stale value when the promise settles. Nulling the
-    // latch here means any caller arriving after this line goes through
-    // the fast `if (cached) return cached` path with the fresh data;
-    // the in-flight `loadPromise` still settles normally, but its
-    // finally block also assigns `loadPromise = null` — so the worst
-    // case is a redundant null-assignment, not a stale overwrite.
+    // Another reload may have fired during OUR async read. Skip the cache
+    // write if so — the later reload's value is fresher.
+    if (myGen !== configGeneration) {
+      process.stderr.write('[engine] config.json reload superseded\n');
+      return;
+    }
     loadPromise = null;
     cached = next;
     process.stderr.write('[engine] config.json reloaded\n');
   } catch (error) {
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
       // File was deleted — fall back to empty config, log so we notice.
+      // Same generation guard so we don't overwrite a fresher reload.
+      if (myGen !== configGeneration) return;
       cached = toLegacyRuntimeConfig(createEmptyRuntimeDocument());
       process.stderr.write('[engine] config.json reloaded (file missing, using empty config)\n');
       return;
