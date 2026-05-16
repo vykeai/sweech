@@ -12,14 +12,20 @@ struct VaultView: View {
     @State private var workingWorkspace: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            accountsSection
-            Divider()
-            workspacesSection
-            errorFooter
+        ZStack {
+            Sweech.Gradient.backgroundRadial.ignoresSafeArea()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    header
+                    accountsSection
+                    Divider().overlay(Sweech.Color.core.opacity(0.2))
+                    workspacesSection
+                    errorFooter
+                }
+                .padding(10)
+            }
         }
-        .padding(10)
         .onAppear {
             service.fetchVault()
             if service.accounts.isEmpty { service.fetch() }
@@ -157,24 +163,31 @@ struct VaultView: View {
     }
 
     private func workspaceRows() -> [SweechAccount] {
-        // First-party claude/codex workspaces only — external-provider routes
-        // are managed via `sweech profile`, not the vault.
-        service.accounts.filter { acc in
-            (acc.cliType == "claude" || acc.cliType == "codex")
-                && (acc.provider == nil || acc.provider == "anthropic" || acc.provider == "openai")
-        }
+        // ALL workspaces — first-party (anthropic/openai) get a vault-account
+        // picker; external-provider routes (kimi-coding, glm, minimax, dashscope,
+        // openrouter, etc) show their provider label and stay read-only here
+        // (manage them via `sweech profile`).
+        service.accounts
+    }
+
+    /// True for workspaces that mount a vault account (anthropic/openai).
+    /// External-provider routes don't: they auth via API key.
+    private func usesVaultAccount(_ ws: SweechAccount) -> Bool {
+        let p = ws.provider ?? (ws.cliType == "claude" ? "anthropic" : ws.cliType == "codex" ? "openai" : "")
+        return p == "anthropic" || p == "openai"
     }
 
     private func workspaceRow(_ ws: SweechAccount) -> some View {
         let cliType = ws.cliType ?? "?"
         let busy = workingWorkspace == ws.commandName
+        let isVault = usesVaultAccount(ws)
         let compatible = compatibleAccounts(for: cliType)
         let activeId = ws.activeAccount?.id
 
         return HStack(spacing: 6) {
-            Image(systemName: cliType == "claude" ? "c.circle.fill" : "circle.dotted")
+            Image(systemName: cliType == "claude" ? "c.circle.fill" : cliType == "codex" ? "circle.dotted" : "circle")
                 .font(.system(size: 12))
-                .foregroundStyle(cliType == "claude" ? .orange : .green)
+                .foregroundStyle(iconColor(for: ws))
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
@@ -205,12 +218,49 @@ struct VaultView: View {
 
             if busy {
                 ProgressView().controlSize(.small)
-            } else {
+            } else if isVault {
                 accountMenu(for: ws, compatible: compatible, activeId: activeId)
+            } else {
+                // External-provider workspace — show the provider label as
+                // read-only badge. API-key managed; not a vault assignment.
+                Text(externalProviderLabel(ws))
+                    .font(.system(size: 9, weight: .semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Sweech.Color.warm.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .foregroundStyle(Sweech.Color.warm)
             }
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
+    }
+
+    private func iconColor(for ws: SweechAccount) -> Color {
+        if usesVaultAccount(ws) {
+            return ws.cliType == "claude" ? .orange : .green
+        }
+        return Sweech.Color.warm
+    }
+
+    private func externalProviderLabel(_ ws: SweechAccount) -> String {
+        let labels: [String: String] = [
+            "kimi": "Kimi",
+            "kimi-coding": "Kimi Coding",
+            "glm": "GLM",
+            "minimax": "MiniMax",
+            "dashscope": "Alibaba",
+            "openrouter": "OpenRouter",
+            "deepseek": "DeepSeek",
+            "qwen": "Qwen",
+            "ollama": "Ollama",
+            "ollama-cloud": "Ollama Cloud",
+            "nvidia": "NVIDIA",
+            "gemini": "Gemini",
+            "groq": "Groq",
+        ]
+        if let p = ws.provider, let label = labels[p] { return label }
+        return ws.provider ?? "external"
     }
 
     /// Inline picker: tap shows compatible accounts; selecting one calls

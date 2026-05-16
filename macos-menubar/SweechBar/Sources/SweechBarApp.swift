@@ -55,9 +55,11 @@ class SweechBarController: OnlyBarController {
     private var vaultRefreshTimer: Timer?
 
     init() {
-        // Use NSStatusItem.variableLength for dynamic text labels
+        // Use NSStatusItem.variableLength for dynamic text labels.
+        // Width: 480 gives a near-square popover when stacked with 20+ rows;
+        // the vault view scrolls vertically inside.
         super.init(
-            width: 360,
+            width: 480,
             height: nil,
             icon: "lollipop",
             statusItemLength: NSStatusItem.variableLength
