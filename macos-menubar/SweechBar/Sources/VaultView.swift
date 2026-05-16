@@ -16,15 +16,9 @@ struct VaultView: View {
 
             VStack(spacing: 0) {
                 header
-
-                Picker("", selection: $tab) {
-                    Text("Accounts (\(service.vaultAccounts.count))").tag("accounts")
-                    Text("Workspaces (\(service.accounts.count))").tag("workspaces")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                tabBar
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
 
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -50,6 +44,65 @@ struct VaultView: View {
             service.fetchVault()
             if service.accounts.isEmpty { service.fetch() }
         }
+    }
+
+    // MARK: - Tab bar
+
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            tabButton(
+                id: "accounts",
+                icon: "person.crop.circle.fill",
+                title: "Accounts",
+                count: service.vaultAccounts.count
+            )
+            tabButton(
+                id: "workspaces",
+                icon: "rectangle.stack.fill",
+                title: "Workspaces",
+                count: service.accounts.count
+            )
+        }
+        .padding(3)
+        .background(Sweech.Color.surface.opacity(0.6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Sweech.Color.core.opacity(0.15), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func tabButton(id: String, icon: String, title: String, count: Int) -> some View {
+        let isSelected = tab == id
+        return Button(action: { withAnimation(.easeInOut(duration: 0.15)) { tab = id } }) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                Text("\(count)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(isSelected ? Sweech.Color.textPrimary.opacity(0.75) : Sweech.Color.textMuted)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background((isSelected ? Sweech.Color.core : Sweech.Color.textMuted).opacity(0.18))
+                    .clipShape(Capsule())
+            }
+            .foregroundStyle(isSelected ? Sweech.Color.textPrimary : Sweech.Color.textMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(
+                ZStack {
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Sweech.Color.core.opacity(0.22))
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Sweech.Color.core.opacity(0.4), lineWidth: 1)
+                    }
+                }
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Header
