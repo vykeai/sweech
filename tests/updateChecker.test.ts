@@ -207,6 +207,13 @@ describe('updateChecker', () => {
       expect(shouldSkipUpdateCheck(argv, {})).toBe(true);
     });
 
+    test('does NOT skip when `update` appears as a non-subcommand positional', () => {
+      // A workspace named `update` (sweech launch update) must not suppress
+      // the banner — only the subcommand position (argv[2]) should match.
+      const argv = [nodeBin, cli, 'launch', 'update'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(false);
+    });
+
     test('does NOT skip for sweech --some-long-flag that contains json substring', () => {
       // Defensive: only exact match for --json triggers, not substring
       const argv = [nodeBin, cli, 'list', '--json-pretty'];
@@ -263,15 +270,20 @@ describe('updateChecker', () => {
   // ── writeCache ─────────────────────────────────────────────────────────────
 
   describe('writeCache', () => {
-    test('writes cache file with timestamp and latest version', () => {
+    test('writes cache file atomically with timestamp and latest version', () => {
       mockFs.existsSync.mockReturnValue(true);
       const now = 1700000000000;
       writeCache('0.3.0', now);
-      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        CACHE_FILE,
-        JSON.stringify({ timestamp: now, latest: '0.3.0' }, null, 2),
-        'utf-8',
+      // atomicWriteFileSync writes via a tmp path then rename — assert on the
+      // tmp-path write (target file appears once renamed) and the rename to
+      // the canonical CACHE_FILE.
+      const tmpCall = mockFs.writeFileSync.mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].startsWith(CACHE_FILE + '.tmp.'),
       );
+      expect(tmpCall).toBeDefined();
+      expect(tmpCall![1]).toBe(JSON.stringify({ timestamp: now, latest: '0.3.0' }, null, 2));
+      expect(mockFs.renameSync).toHaveBeenCalledWith(expect.stringContaining(CACHE_FILE), CACHE_FILE);
+      expect(mockFs.chmodSync).toHaveBeenCalledWith(CACHE_FILE, 0o600);
     });
 
     test('creates cache directory if missing', () => {

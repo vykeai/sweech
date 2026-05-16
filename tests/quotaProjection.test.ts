@@ -115,6 +115,38 @@ describe('recordProjectionSamples', () => {
     const file = readSamples();
     expect(file.accounts['claude']).toHaveLength(1);
   });
+
+  it('discards poisoned samples (NaN/Infinity/out-of-range) on read', () => {
+    const poisoned = {
+      version: 1,
+      accounts: {
+        claude: [
+          { ts: 1, u5h: 0.5, u7d: 0.5 },         // valid
+          { ts: 'oops', u5h: 0.5, u7d: 0.5 },     // ts NaN
+          { ts: 2, u5h: NaN, u7d: 0.5 },          // NaN
+          { ts: 3, u5h: Infinity, u7d: 0.5 },     // Infinity
+          { ts: 4, u5h: 1.5, u7d: 0.5 },          // out of range
+          { ts: 5, u5h: -0.1, u7d: 0.5 },         // negative
+          { ts: 6, u5h: 0.3, u7d: 0.3 },          // valid
+        ],
+      },
+    };
+    fs.writeFileSync(samplesFile, JSON.stringify(poisoned));
+    recordProjectionSamples([makeAccount('claude', 0.4, 0.4)], 7);
+    const file = readSamples();
+    // Only the two valid pre-existing samples + new one = 3
+    expect(file.accounts['claude']).toHaveLength(3);
+    expect(file.accounts['claude'].every((s: ProjectionSample) =>
+      Number.isFinite(s.ts) && s.u5h >= 0 && s.u5h <= 1
+    )).toBe(true);
+  });
+
+  it('chmods 0o600 on write (POSIX only — skip on win32)', () => {
+    if (process.platform === 'win32') return;
+    recordProjectionSamples([makeAccount('claude', 0.2, 0.5)], 1_000_000);
+    const mode = fs.statSync(samplesFile).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
 });
 
 describe('computeProjection', () => {
@@ -180,7 +212,7 @@ describe('computeProjection', () => {
     expect(p.etaToFullMinutes).toBeNull();
   });
 
-  it('already saturated ⇒ etaToFullMinutes is 0', () => {
+  it('already saturated ⇒ etaToFullMinutes is null (canonical "no projection")', () => {
     const now = 10_000_000;
     const samples: ProjectionSample[] = [
       { ts: now - 20 * 60_000, u5h: 0.9, u7d: 0.9 },
@@ -188,7 +220,8 @@ describe('computeProjection', () => {
       { ts: now,               u5h: 1.0, u7d: 1.0 },
     ];
     const p = computeProjection(samples, 'u7d', now)!;
-    expect(p.etaToFullMinutes).toBe(0);
+    expect(p.etaToFullMinutes).toBeNull();
+    expect(p.rateUtilPerMinute).toBeGreaterThan(0);
   });
 
   it('drops samples outside the 60-minute window when counting', () => {
@@ -249,12 +282,22 @@ describe('formatEta', () => {
     expect(formatEta(47)).toBe('47m');
     expect(formatEta(1)).toBe('1m');
   });
+  it('clamps 59.6m to "59m" (no "60m" boundary glitch)', () => {
+    expect(formatEta(59.6)).toBe('59m');
+  });
   it('<24 hours → "Nh"', () => {
     expect(formatEta(60)).toBe('1h');
     expect(formatEta(180)).toBe('3h');
   });
+  it('clamps 23.6h to "23h" (no "24h" boundary glitch)', () => {
+    expect(formatEta(60 * 23 + 36)).toBe('23h');
+  });
   it('≥24 hours → "Nd"', () => {
     expect(formatEta(60 * 24)).toBe('1d');
     expect(formatEta(60 * 24 * 3)).toBe('3d');
+  });
+  it('non-finite (NaN/Infinity) → empty string', () => {
+    expect(formatEta(NaN)).toBe('');
+    expect(formatEta(Infinity)).toBe('');
   });
 });

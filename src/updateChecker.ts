@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as https from 'https';
+import { atomicWriteFileSync } from './atomicWrite';
 
 export interface UpdateCheckResult {
   current: string;
@@ -46,21 +47,24 @@ export function shouldSkipUpdateCheck(argv: string[], env: NodeJS.ProcessEnv): b
   const envFlag = env.SWEECH_NO_UPDATE_NOTIFIER;
   if (envFlag === '1' || envFlag === 'true') return true;
 
-  // Flag-based opt-out
+  // Bare invocation (no args): skip — matches prior `process.argv.length > 2`
+  // guard in cli.ts.
+  if (argv.length <= 2) return true;
+
+  // Flag-based opt-out (anywhere in argv).
   const hasSkipFlag = argv.some(a =>
     a === '--help' ||
     a === '-h' ||
     a === '--version' ||
     a === '-v' ||
-    a === 'update' ||
     a === '--complete' ||
     a === '--json'
   );
   if (hasSkipFlag) return true;
 
-  // Bare invocation (no args): skip — matches prior `process.argv.length > 2`
-  // guard in cli.ts.
-  if (argv.length <= 2) return true;
+  // Subcommand: `sweech update` is argv[2] only — don't suppress for a
+  // workspace named `update` passed as a positional anywhere else.
+  if (argv[2] === 'update') return true;
 
   return false;
 }
@@ -107,7 +111,12 @@ export function writeCache(latest: string, now?: number): void {
       fs.mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
     }
     const cache: UpdateCheckCache = { timestamp: now ?? Date.now(), latest };
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
+    // Atomic write so concurrent readers never observe a half-written file
+    // (previous non-atomic fs.writeFileSync could be caught mid-write by
+    // readCache; the catch swallowed the partial-JSON error but the cache
+    // was briefly invalid).
+    atomicWriteFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
+    try { fs.chmodSync(CACHE_FILE, 0o600); } catch {}
   } catch {
     // Silently fail — cache write is best-effort
   }

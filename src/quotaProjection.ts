@@ -76,23 +76,50 @@ export function _resetSamplesFilePath(): void {
 
 // ── I/O ───────────────────────────────────────────────────────────────────────
 
+/// Schema-validate samples on every read. A locally-corrupt or manually-edited
+/// file could otherwise feed NaN/Infinity into computeProjection, which then
+/// propagates into the JSON contract emitted to SweechBar (formatEta(NaN)
+/// renders "NaN m"). We also cap the per-account series length on read so a
+/// poisoned file with a million entries can't DoS the render loop.
+function isValidSample(s: unknown): s is ProjectionSample {
+  if (!s || typeof s !== 'object') return false
+  const o = s as Record<string, unknown>
+  return (
+    Number.isFinite(o.ts) &&
+    Number.isFinite(o.u5h) &&
+    Number.isFinite(o.u7d) &&
+    (o.u5h as number) >= 0 && (o.u5h as number) <= 1 &&
+    (o.u7d as number) >= 0 && (o.u7d as number) <= 1
+  )
+}
+
 function readSamplesFile(): ProjectionSamplesFile {
   try {
     const raw = fs.readFileSync(_samplesFilePath, 'utf-8')
     const data = JSON.parse(raw)
-    if (data && data.version === 1 && data.accounts && typeof data.accounts === 'object') {
-      return data as ProjectionSamplesFile
+    if (!data || data.version !== 1 || !data.accounts || typeof data.accounts !== 'object') {
+      return { version: 1, accounts: {} }
     }
+    const accounts: Record<string, ProjectionSample[]> = {}
+    for (const [name, series] of Object.entries(data.accounts)) {
+      if (!Array.isArray(series)) continue
+      const clean = series.filter(isValidSample).slice(-MAX_SAMPLES_PER_ACCOUNT)
+      accounts[name] = clean
+    }
+    return { version: 1, accounts }
   } catch {
-    // missing / corrupt — return empty
+    return { version: 1, accounts: {} }
   }
-  return { version: 1, accounts: {} }
 }
 
 function writeSamplesFile(file: ProjectionSamplesFile): void {
   const dir = path.dirname(_samplesFilePath)
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   atomicWriteFileSync(_samplesFilePath, JSON.stringify(file, null, 2))
+  // Match the project's existing pattern (vaultAssign.ts:218/260/270) — the
+  // file holds per-workspace utilization patterns; not credentials, but worth
+  // 0o600 so a co-resident user can't infer activity windows.
+  try { fs.chmodSync(_samplesFilePath, 0o600) } catch {}
 }
 
 // ── Recording ─────────────────────────────────────────────────────────────────
@@ -156,13 +183,11 @@ export function computeProjection(
 
   const rateUtilPerMinute = (last[field] - first[field]) / deltaMin
 
-  // Already saturated → no ETA (we're at the cap, no projection meaningful)
-  if (last[field] >= 1) {
-    return { rateUtilPerMinute, etaToFullMinutes: 0, sampleCount: recent.length }
-  }
-
-  // Rate non-positive → utilization flat or falling → no ETA
-  if (rateUtilPerMinute <= 0) {
+  // Already saturated OR rate non-positive → no forward-looking ETA. Both
+  // states return null so JSON consumers have one canonical "no projection"
+  // shape; the rate field still tells callers WHY (positive = at cap, zero
+  // = flat, negative = falling).
+  if (last[field] >= 1 || rateUtilPerMinute <= 0) {
     return { rateUtilPerMinute, etaToFullMinutes: null, sampleCount: recent.length }
   }
 
@@ -187,11 +212,21 @@ export function getAccountProjection(accountName: string, now?: number): Account
   }
 }
 
-/** Format minutes as a compact label: "47m", "2h", "3d", "expired" (0). */
+/**
+ * Format minutes as a compact label: "47m", "2h", "3d", "full" (0).
+ * Clamps boundary rounding so 59.6 doesn't render "60m" — same defence the
+ * sibling expiryFormat module uses.
+ */
 export function formatEta(minutes: number | null): string {
-  if (minutes === null) return ''
+  if (minutes === null || !Number.isFinite(minutes)) return ''
   if (minutes <= 0) return 'full'
-  if (minutes < 60) return `${Math.round(minutes)}m`
-  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h`
+  if (minutes < 60) {
+    const m = Math.round(minutes)
+    return `${m >= 60 ? 59 : m}m`
+  }
+  if (minutes < 60 * 24) {
+    const h = Math.round(minutes / 60)
+    return `${h >= 24 ? 23 : h}h`
+  }
   return `${Math.round(minutes / (60 * 24))}d`
 }

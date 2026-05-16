@@ -181,6 +181,17 @@ async function reloadProfilesConfig(): Promise<void> {
     // reading the previous `cached` reference until this line; readers
     // that fire after the swap see the new one. Failed parse → old
     // cache stays, see the catch below.
+    //
+    // Also clear `loadPromise`: if `loadProfilesConfig()` is mid-flight
+    // it still has the OLD parsed result captured in its closure, so a
+    // concurrent caller awaiting that promise would clobber `cached`
+    // back to the stale value when the promise settles. Nulling the
+    // latch here means any caller arriving after this line goes through
+    // the fast `if (cached) return cached` path with the fresh data;
+    // the in-flight `loadPromise` still settles normally, but its
+    // finally block also assigns `loadPromise = null` — so the worst
+    // case is a redundant null-assignment, not a stale overwrite.
+    loadPromise = null;
     cached = next;
     process.stderr.write('[engine] config.json reloaded\n');
   } catch (error) {
