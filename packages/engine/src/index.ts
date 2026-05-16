@@ -113,6 +113,8 @@ export {
   setDefaultProfile,
   getFailoverOrder,
   setFailoverOrder,
+  startConfigWatcher,
+  stopConfigWatcher,
 } from './middleware/index.js';
 export type {
   Middleware,

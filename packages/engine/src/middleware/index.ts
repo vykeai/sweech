@@ -9,7 +9,7 @@ export { hooksMiddleware } from './hooks.js';
 export { mcpMiddleware } from './mcp.js';
 export { classifyRetryEvent, resolveRetryClassPolicies, resolveRetryDecision } from './retry-policy.js';
 export { classifyToolIntent, evaluateToolPolicy, applyToolPolicyToOptions } from './tool-policy.js';
-export { resolveProfile, resolveDefaultForEngine, loadProfiles, loadProfilesConfig, saveProfiles, saveProfilesConfig, clearProfileCache, importSweechProfiles, getProfilesPath, getDefaultProfile, setDefaultProfile, getFailoverOrder, setFailoverOrder } from './profiles.js';
+export { resolveProfile, resolveDefaultForEngine, loadProfiles, loadProfilesConfig, saveProfiles, saveProfilesConfig, clearProfileCache, importSweechProfiles, getProfilesPath, getDefaultProfile, setDefaultProfile, getFailoverOrder, setFailoverOrder, startConfigWatcher, stopConfigWatcher } from './profiles.js';
 export type { ProfilesConfig } from './profiles.js';
 export { selectByBudget, budgetMiddleware } from './budget.js';
 export type { Middleware, CostAccumulator, RetryPolicy, RetryClassPolicy, RetryOperationClass, RetryDecisionAudit, Profile, OAuthToken, CredentialProfile, BudgetGuard, ToolIntent, ToolDecision, ToolPolicy, ToolPolicyAuditRecord } from './types.js';

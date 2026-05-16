@@ -11,6 +11,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { registerTool } from '@vykeai/fed';
 import { loadOrCreateSecret } from './auth.js';
+import { startConfigWatcher, stopConfigWatcher } from '../middleware/profiles.js';
 
 let PORT = 7801;
 const PID_DIR = join(homedir(), '.sweech');
@@ -141,6 +142,7 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
       cancelAllRunSessions();
       stopProvidersWatch?.();
       stopProvidersWatch = null;
+      stopConfigWatcher();
       fedCleanup?.();
       fedCleanup = null;
 
@@ -221,6 +223,16 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
     stopProvidersWatch = (await watchProviders(undefined, (config) => {
       preloadProviders(config);
     }).catch(() => null)) ?? null;
+  }
+
+  // Hot-reload ~/.sweech/config.json on change so `sweech profile add`
+  // from another terminal is visible to the running daemon without a
+  // restart (T-040).
+  try {
+    startConfigWatcher();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[engine] failed to start config watcher: ${message}\n`);
   }
 
   await mkdir(PID_DIR, { recursive: true });
