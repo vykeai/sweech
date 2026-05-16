@@ -425,6 +425,18 @@ private struct AccountTile: View {
                 .background(tint.opacity(0.15))
                 .clipShape(Capsule())
                 .foregroundStyle(tint)
+            // Unassigned chip — a vault identity that isn't mounted in
+            // any workspace is dead weight unless the user assigns it.
+            // Visible chip makes the state scannable without reading
+            // the "not assigned" sub-row below.
+            if !isMounted && liveProblemStatus == nil {
+                Text("Unassigned")
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Sweech.Color.warning.opacity(0.18))
+                    .clipShape(Capsule())
+                    .foregroundStyle(Sweech.Color.warning)
+            }
             Spacer(minLength: 0)
         }
     }
@@ -722,6 +734,29 @@ private struct WorkspaceTile: View {
     private var glyph: String { TileStyle.glyph(kind: kind) }
     private var activeId: String? { ws.activeAccount?.id }
 
+    /// Workspace status problems we want loud in the badge row.
+    /// Order matters — first match wins so we don't stack three red capsules.
+    private var problemBadge: (label: String, color: Color)? {
+        // OAuth-style workspace with nothing in `.sweech-account`.
+        if !ws.isExternal && ws.activeAccount == nil {
+            return ("No account", Sweech.Color.danger)
+        }
+        if ws.needsReauth == true {
+            return ("Re-auth", Sweech.Color.danger)
+        }
+        // External (API-key) workspace with no key in keychain.
+        if ws.isExternal && ws.live?.status == "no_api_key" {
+            return ("No API key", Sweech.Color.danger)
+        }
+        switch ws.live?.status {
+        case "org_disabled":  return ("OAuth disabled", Sweech.Color.danger)
+        case "unauthorized":  return ("Re-login",       Sweech.Color.danger)
+        case "forbidden":     return ("Forbidden",      Sweech.Color.danger)
+        case "limit_reached": return ("Limit reached",  Sweech.Color.danger)
+        default: return nil
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Top: glyph + name + warning
@@ -734,15 +769,11 @@ private struct WorkspaceTile: View {
                     .foregroundStyle(Sweech.Color.textPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                if ws.needsReauth == true {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Sweech.Color.warning)
-                        .help("Re-auth needed")
-                }
             }
 
-            // Badges
+            // Badges. A live problem (no account / re-auth / OAuth disabled
+            // …) replaces the plan capsule so the warning is visually
+            // dominant instead of crowded next to a stale "Max 20x".
             HStack(spacing: 4) {
                 Text(TileStyle.label(kind: kind))
                     .font(.system(size: 9, weight: .bold))
@@ -750,7 +781,14 @@ private struct WorkspaceTile: View {
                     .background(tint.opacity(0.15))
                     .clipShape(Capsule())
                     .foregroundStyle(tint)
-                if let plan = ws.planType {
+                if let problem = problemBadge {
+                    Text(problem.label)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(problem.color.opacity(0.18))
+                        .clipShape(Capsule())
+                        .foregroundStyle(problem.color)
+                } else if let plan = ws.planType {
                     Text(plan)
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1)
@@ -761,10 +799,15 @@ private struct WorkspaceTile: View {
                 Spacer(minLength: 0)
             }
 
-            // Usage bars / external label
+            // Usage bars / external label. When we know *why* there's no
+            // live data, say so instead of a generic "no live data".
             if ws.live != nil {
                 UsageBar(label: "5h", pct: ws.utilization5h, resetsIn: ws.reset5hRelative)
                 UsageBar(label: "7d", pct: ws.utilization7d, resetsIn: ws.reset7dRelative)
+            } else if !ws.isExternal && ws.activeAccount == nil {
+                Text("assign an account to use this workspace")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Sweech.Color.danger.opacity(0.85))
             } else if ws.isExternal {
                 Text("API key · no quota info")
                     .font(.system(size: 9))
@@ -795,7 +838,13 @@ private struct WorkspaceTile: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Sweech.Color.surface.opacity(0.85))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.25), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(
+                    problemBadge != nil ? Sweech.Color.danger.opacity(0.45) : tint.opacity(0.25),
+                    lineWidth: 1
+                )
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 

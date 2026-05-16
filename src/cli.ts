@@ -362,7 +362,31 @@ program
           const dot = accountInfoMap ? statusDot(info?.live, info?.needsReauth) : chalk.gray('●');
           const eff = effectiveProvider(row.provider, row.baseUrl);
           const providerLabel = PROVIDER_LABEL[eff] ?? eff;
-          const planStr = info?.meta?.plan ? chalk.cyan(` [${info.meta.plan}]`) : '';
+          // Surface workspace-level problems as a loud red tag so a list
+          // scan immediately tells the user which workspaces are unsafe
+          // to launch. Order matters: a missing account beats every
+          // other status because nothing else can succeed without it.
+          const isOauthWs = group === 'claude' || group === 'codex';
+          let problemTag = '';
+          if (isOauthWs && !info?.activeAccount) {
+            problemTag = chalk.red(' [no account]');
+          } else if (info?.needsReauth) {
+            problemTag = chalk.red(' [re-auth]');
+          } else if (info?.live?.status === 'org_disabled') {
+            problemTag = chalk.red(' [OAuth disabled]');
+          } else if (info?.live?.status === 'unauthorized') {
+            problemTag = chalk.red(' [re-login]');
+          } else if (info?.live?.status === 'forbidden') {
+            problemTag = chalk.red(' [forbidden]');
+          } else if (info?.live?.status === 'limit_reached') {
+            problemTag = chalk.red(' [limit reached]');
+          } else if (group === '__providers__' && info?.live?.status === 'no_api_key') {
+            problemTag = chalk.red(' [no API key]');
+          }
+          // Plan capsule suppressed when a problem tag is shown — a
+          // stale "Max 20x" next to "OAuth disabled" reads as a
+          // contradiction.
+          const planStr = (!problemTag && info?.meta?.plan) ? chalk.cyan(` [${info.meta.plan}]`) : '';
           const emailStr = (info?.emailAddress || info?.activeAccount?.email)
             ? chalk.dim(` · ${info?.emailAddress ?? info?.activeAccount?.email}`)
             : '';
@@ -382,7 +406,7 @@ program
             : '';
           const lastStr = info ? relativeTime(info.lastActive) : '';
           const defTag = row.isDefault ? chalk.gray(' [default]') : '';
-          console.log(`  ${dot} ${chalk.bold(row.commandName)}${defTag}${planStr}${emailStr}${providerStr}${modelStr}${sharedTag}${usageStr}  ${lastStr}${reverseTag}`);
+          console.log(`  ${dot} ${chalk.bold(row.commandName)}${defTag}${problemTag}${planStr}${emailStr}${providerStr}${modelStr}${sharedTag}${usageStr}  ${lastStr}${reverseTag}`);
           lines++;
         }
         console.log();
@@ -4052,10 +4076,13 @@ program
           const showStatus = a.status && a.status !== 'ok' && a.status !== 'expired' && !liveOverride;
           const statusStr = showStatus ? chalk.red(` · ${a.status}`) : '';
           const mountedWs = wsByActive.get(a.id) ?? [];
+          const unassignedStr = (mountedWs.length === 0 && !liveOverride)
+            ? chalk.yellow(' [unassigned]')
+            : '';
           const mountedStr = mountedWs.length > 0
             ? chalk.dim(`  📦 ${mountedWs.map(w => w.commandName).join(', ')}`)
-            : chalk.dim('  📦 not mounted');
-          console.log(`  ${chalk.bold(a.email)}${planStr}${expiryStr}${statusStr}${mountedStr}`);
+            : chalk.yellow('  📦 not in any workspace');
+          console.log(`  ${chalk.bold(a.email)}${unassignedStr}${planStr}${expiryStr}${statusStr}${mountedStr}`);
         }
         console.log();
       }
