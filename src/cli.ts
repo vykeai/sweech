@@ -38,7 +38,7 @@ import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { recordProjectionSamples, getAccountProjection, formatEta } from './quotaProjection';
 import { startSweechFedServerWithShutdown } from './fedServer';
 import { scrubSecrets } from './scrubSecrets';
-import { checkForUpdate, fetchChangelog } from './updateChecker';
+import { checkForUpdate, fetchChangelog, shouldSkipUpdateCheck } from './updateChecker';
 import { asciiBar, barColor } from './charts';
 import { installPlugin, uninstallPlugin, listPlugins } from './plugins';
 import { getAllTemplates, findTemplate, saveCustomTemplate, loadCustomTemplates, deleteCustomTemplate, BUILT_IN_TEMPLATES, ProfileTemplate } from './templates';
@@ -3160,11 +3160,10 @@ program
 
 // ── Startup update check (non-blocking) ────────────────────────────────────────
 // Fire-and-forget: if the check completes before parse finishes, print a notice.
-// Skip for --help, --version, --complete, and the update command itself.
-const skipUpdateCheck = process.argv.some(a =>
-  a === '--help' || a === '-h' || a === '--version' || a === '-v' || a === 'update' || a === '--complete'
-);
-if (!skipUpdateCheck && process.argv.length > 2) {
+// Skip decision lives in shouldSkipUpdateCheck() (src/updateChecker.ts) so it
+// can be unit-tested. Suppressed for --help / --version / --complete / update
+// command, --json (clean stderr for piping), and SWEECH_NO_UPDATE_NOTIFIER=1.
+if (!shouldSkipUpdateCheck(process.argv, process.env)) {
   checkForUpdate(version).then(result => {
     if (result && result.updateAvailable) {
       process.stderr.write(

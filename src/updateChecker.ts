@@ -24,6 +24,48 @@ const CACHE_DIR = path.join(os.homedir(), '.sweech');
 const CACHE_FILE = path.join(CACHE_DIR, 'update-check.json');
 
 /**
+ * Decide whether the startup update-check banner should be suppressed.
+ *
+ * Suppression rules (any one is sufficient):
+ *   1. argv contains --help / -h / --version / -v / --complete (these run
+ *      without side effects, so a network call would violate that contract)
+ *   2. argv contains the literal command `update` (the user is already
+ *      updating — banner is noise)
+ *   3. argv contains `--json` (JSON output is consumed by scripts that
+ *      pipe stderr; banner pollutes that stream and breaks the contract)
+ *   4. env.SWEECH_NO_UPDATE_NOTIFIER === '1' or === 'true' (CI /
+ *      non-interactive opt-out)
+ *   5. argv has no arguments beyond `node` + script path (bare invocation
+ *      prints help; we skip in that case too — matches prior behaviour)
+ *
+ * Pure function: extracted from cli.ts so it can be unit-tested in
+ * isolation without spawning the CLI.
+ */
+export function shouldSkipUpdateCheck(argv: string[], env: NodeJS.ProcessEnv): boolean {
+  // Env-var opt-out (CI / non-interactive)
+  const envFlag = env.SWEECH_NO_UPDATE_NOTIFIER;
+  if (envFlag === '1' || envFlag === 'true') return true;
+
+  // Flag-based opt-out
+  const hasSkipFlag = argv.some(a =>
+    a === '--help' ||
+    a === '-h' ||
+    a === '--version' ||
+    a === '-v' ||
+    a === 'update' ||
+    a === '--complete' ||
+    a === '--json'
+  );
+  if (hasSkipFlag) return true;
+
+  // Bare invocation (no args): skip — matches prior `process.argv.length > 2`
+  // guard in cli.ts.
+  if (argv.length <= 2) return true;
+
+  return false;
+}
+
+/**
  * Compare two semver strings: returns true if latest > current.
  */
 export function isNewerVersion(current: string, latest: string): boolean {

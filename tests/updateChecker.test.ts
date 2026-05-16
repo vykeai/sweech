@@ -13,6 +13,7 @@ import {
   checkForUpdate,
   fetchLatestVersion,
   fetchChangelog,
+  shouldSkipUpdateCheck,
 } from '../src/updateChecker';
 
 jest.mock('fs');
@@ -110,6 +111,106 @@ describe('updateChecker', () => {
     test('handles large version numbers', () => {
       expect(isNewerVersion('10.20.30', '10.20.31')).toBe(true);
       expect(isNewerVersion('10.20.30', '10.21.0')).toBe(true);
+    });
+  });
+
+  // ── shouldSkipUpdateCheck ──────────────────────────────────────────────────
+
+  describe('shouldSkipUpdateCheck', () => {
+    // Reusable mocks
+    const nodeBin = '/usr/bin/node';
+    const cli = '/path/to/sweech/cli.js';
+
+    test('skips when argv contains --json (T-042 regression)', () => {
+      const argv = [nodeBin, cli, 'usage', '--json'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(true);
+    });
+
+    test('skips when --json appears with other flags', () => {
+      const argv = [nodeBin, cli, 'list', '--json', '--profile', 'foo'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(true);
+    });
+
+    test('skips when SWEECH_NO_UPDATE_NOTIFIER=1', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '1' })).toBe(true);
+    });
+
+    test('skips when SWEECH_NO_UPDATE_NOTIFIER=true', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: 'true' })).toBe(true);
+    });
+
+    test('does NOT skip when SWEECH_NO_UPDATE_NOTIFIER=0', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '0' })).toBe(false);
+    });
+
+    test('does NOT skip when SWEECH_NO_UPDATE_NOTIFIER=""', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '' })).toBe(false);
+    });
+
+    test('skips for --help / -h', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '--help'], {})).toBe(true);
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '-h'], {})).toBe(true);
+    });
+
+    test('skips for --version / -v', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '--version'], {})).toBe(true);
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '-v'], {})).toBe(true);
+    });
+
+    test('skips for update command itself', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, 'update'], {})).toBe(true);
+    });
+
+    test('skips for --complete (shell completion)', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '--complete'], {})).toBe(true);
+    });
+
+    test('does NOT skip for sweech list', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, 'list'], {})).toBe(false);
+    });
+
+    test('does NOT skip for sweech profile add', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, 'profile', 'add'], {})).toBe(false);
+    });
+
+    test('does NOT skip when --json is not present and no env opt-out', () => {
+      const argv = [nodeBin, cli, 'usage'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(false);
+    });
+
+    test('skips bare invocation (argv.length <= 2) — preserves prior behaviour', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli], {})).toBe(true);
+      expect(shouldSkipUpdateCheck([nodeBin], {})).toBe(true);
+    });
+
+    test('--json suppression wins over absence of env var', () => {
+      const argv = [nodeBin, cli, 'usage', '--json'];
+      expect(shouldSkipUpdateCheck(argv, { OTHER: 'value' })).toBe(true);
+    });
+
+    test('env opt-out wins regardless of argv', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '1' })).toBe(true);
+    });
+
+    test('does NOT skip for arbitrary other env vars', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { CI: 'true', NODE_ENV: 'production' })).toBe(false);
+    });
+
+    test('skips when argv has a positional `update` even with extra args', () => {
+      const argv = [nodeBin, cli, 'update', '--check'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(true);
+    });
+
+    test('does NOT skip for sweech --some-long-flag that contains json substring', () => {
+      // Defensive: only exact match for --json triggers, not substring
+      const argv = [nodeBin, cli, 'list', '--json-pretty'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(false);
     });
   });
 
