@@ -123,15 +123,17 @@ describe('daemon auth — middleware over Hono', () => {
     expect(res.status).toBe(200);
   });
 
-  it('lets /check and /check/all through without a signature', async () => {
+  it('rejects /check and /check/all without a signature (401)', async () => {
+    // Security MED-1 from Phase 2 review: these routes enumerate every
+    // configured profile + reachability + suggestedFallback, which is
+    // useful intel for any local process the user didn't authorise.
+    // Loopback ≠ security boundary on multi-user macOS.
     const app = createApp({ auth: { enabled: true, getSecret: async () => TEST_SECRET } });
-    // /check needs a profile param — without it the daemon returns 400.
-    // Either way it isn't 401, which is what we care about here.
     const res = await app.request('/check?profile=nope');
-    expect(res.status).not.toBe(401);
+    expect(res.status).toBe(401);
 
     const resAll = await app.request('/check/all');
-    expect(resAll.status).not.toBe(401);
+    expect(resAll.status).toBe(401);
   });
 
   it('rejects /run without auth headers (401)', async () => {

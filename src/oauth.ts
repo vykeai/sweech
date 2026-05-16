@@ -49,7 +49,7 @@ export async function getOAuthToken(
  * Anthropic OAuth flow using PKCE (manual code paste)
  */
 async function getAnthropicOAuthToken(): Promise<OAuthToken> {
-  const clientId = process.env.ANTHROPIC_CLIENT_ID || 'sweech-cli';
+  const clientId = getAnthropicClientId();
   const redirectUri = 'urn:ietf:wg:oauth:2.0:oob'; // Out-of-band (manual)
 
   // Create PKCE challenge

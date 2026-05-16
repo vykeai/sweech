@@ -388,10 +388,10 @@ export function generateFishCompletion(): string {
 
   // `alias <action> [name]`
   lines.push('# alias <action>');
-  lines.push("complete -c sweech -n '__fish_seen_subcommand_from alias; and not __fish_seen_argument_from list remove' -a list -d 'List aliases'");
-  lines.push("complete -c sweech -n '__fish_seen_subcommand_from alias; and not __fish_seen_argument_from list remove' -a remove -d 'Remove an alias'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from alias; and not __fish_seen_subcommand_from list remove' -a list -d 'List aliases'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from alias; and not __fish_seen_subcommand_from list remove' -a remove -d 'Remove an alias'");
   if (aliasNames.length > 0) {
-    lines.push(`complete -c sweech -n '__fish_seen_subcommand_from alias; and __fish_seen_argument_from remove' -a '${aliasNames.join(' ')}' -d Alias`);
+    lines.push(`complete -c sweech -n '__fish_seen_subcommand_from alias; and __fish_seen_subcommand_from remove' -a '${aliasNames.join(' ')}' -d Alias`);
   }
   lines.push('');
 

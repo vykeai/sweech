@@ -3,13 +3,13 @@
   "title": "SweechBar no-vault empty state with onboarding copy",
   "wave": "wave-5",
   "space": "space-menubar",
-  "status": "ready",
+  "status": "done",
   "priority": "medium",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "If a user opens SweechBar before running sweech init, they see two empty grids with no guidance.",
   "createdAt": "2026-05-16T18:00:00Z",
-  "updatedAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T19:17:40.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,16 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-16T18:57:16.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-16T19:17:40.000Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "M",

@@ -3,13 +3,13 @@
   "title": "Add HMAC auth to sweech daemon HTTP API",
   "wave": "wave-5",
   "space": "space-api",
-  "status": "ready",
+  "status": "done",
   "priority": "critical",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "Daemon binds to 127.0.0.1:7801 with zero auth. /run executes model requests against the user keys — any local process (Docker, browser extension, sibling CLI) can drain quota. Loopback is not a security boundary on multi-user macOS.",
   "createdAt": "2026-05-16T18:00:00Z",
-  "updatedAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T19:17:39.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,16 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-16T18:52:55.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-16T19:17:39.000Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "L",

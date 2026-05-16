@@ -27,8 +27,9 @@ import {
   resolveAccountForImport,
   saveAccount,
 } from './vault'
+import { getAnthropicClientId } from './anthropicAuth'
 
-const ANTHROPIC_CLIENT_ID = process.env.ANTHROPIC_CLIENT_ID || '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+
 const ANTHROPIC_AUTHORIZE_URL = 'https://claude.ai/oauth/authorize'
 const ANTHROPIC_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 const ANTHROPIC_REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback'
@@ -51,7 +52,7 @@ export async function addAnthropicAccount(): Promise<AddAccountResult | AddAccou
   const state = crypto.randomBytes(16).toString('hex')
 
   const authUrl = new url.URL(ANTHROPIC_AUTHORIZE_URL)
-  authUrl.searchParams.set('client_id', ANTHROPIC_CLIENT_ID)
+  authUrl.searchParams.set('client_id', getAnthropicClientId())
   authUrl.searchParams.set('redirect_uri', ANTHROPIC_REDIRECT_URI)
   authUrl.searchParams.set('response_type', 'code')
   authUrl.searchParams.set('scope', 'org:create_api_key user:profile user:inference')
@@ -77,7 +78,7 @@ export async function addAnthropicAccount(): Promise<AddAccountResult | AddAccou
 
   const params = new URLSearchParams({
     grant_type: 'authorization_code',
-    client_id: ANTHROPIC_CLIENT_ID,
+    client_id: getAnthropicClientId(),
     code: rawCode,
     redirect_uri: ANTHROPIC_REDIRECT_URI,
     code_verifier: codeVerifier,

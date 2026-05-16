@@ -239,7 +239,6 @@ export function resolveAccountForImport(
   email: string,
   orgId: string | undefined,
 ): ImportResolution {
-  const normalizedEmail = email.toLowerCase().trim()
   const candidates = findAccountsByEmail(kind, email)
 
   if (!orgId) {

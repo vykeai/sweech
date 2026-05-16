@@ -3,13 +3,13 @@
   "title": "Launcher fails fast in non-TTY stdin",
   "wave": "wave-5",
   "space": "space-cli",
-  "status": "ready",
+  "status": "done",
   "priority": "critical",
   "platform": null,
-  "assignee": null,
+  "assignee": "claude",
   "description": "src/launcher.ts:649 hangs forever in non-TTY stdin (piped invocation, CI). Hard to detect; only manifests when sweech is scripted.",
   "createdAt": "2026-05-16T18:00:00Z",
-  "updatedAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T19:17:40.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,16 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-16T18:52:56.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-16T19:17:40.000Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "S",

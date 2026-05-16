@@ -22,8 +22,13 @@ import { readFile, writeFile, mkdir, chmod, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
-export const SWEECH_AUTH_HEADER = 'x-sweech-auth';
-export const SWEECH_TS_HEADER = 'x-sweech-ts';
+// Canonical mixed-case headers. Hono/HTTP normalises incoming names to
+// lowercase, but the constants stay mixed-case so that the CLI side
+// (`src/daemonAuth.ts`) and any future raw-HTTP transport see the same
+// names. Reading via `c.req.header(SWEECH_AUTH_HEADER)` works because
+// Hono's header lookup is case-insensitive.
+export const SWEECH_AUTH_HEADER = 'X-Sweech-Auth';
+export const SWEECH_TS_HEADER = 'X-Sweech-Ts';
 /// Replay window — requests whose `X-Sweech-Ts` falls outside this many
 /// milliseconds of the server's clock are rejected. 60s mirrors what most
 /// signed-request APIs use; large enough to absorb modest clock skew, tight
@@ -59,7 +64,10 @@ async function readSecretFile(path: string): Promise<string | null> {
 /// Created with `wx` so we never overwrite an existing secret — concurrent
 /// daemons race for the file, the loser reads what the winner wrote.
 async function writeSecretFile(path: string): Promise<string> {
-  await mkdir(dirname(path), { recursive: true });
+  // 0o700 so other local users can't even list the directory and learn
+  // that daemon.secret exists or read its mtime. The file itself is
+  // 0o600, but a 0o755 parent leaks the secret's existence.
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const secret = randomBytes(32).toString('hex');
   try {
     await writeFile(path, secret + '\n', { mode: 0o600, flag: 'wx' });
@@ -152,17 +160,15 @@ function safeEqualHex(a: string, b: string): boolean {
 
 /// Routes that remain reachable without a valid signature.
 ///
-/// - /healthz and /health: orchestrator probes; need to work before the
-///   CLI has even resolved the secret.
-/// - /check, /check/all: profile readiness probes; surfaced in dashboards
-///   that may not hold the host secret. Returns whether a profile's
-///   binary / credentials are present, no secret material.
-/// - /favicon.ico: a browser hitting the daemon URL out of curiosity.
+/// /check and /check/all USED to be here, but they enumerate every
+/// configured profile name + provider family + reachability — that's
+/// useful intel for any local process the user didn't authorise.
+/// Loopback is not a security boundary on multi-user macOS, which is
+/// the entire premise of HMAC auth here. /healthz and /health alone
+/// are enough for orchestrator liveness probes.
 const PUBLIC_PATHS = new Set<string>([
   '/healthz',
   '/health',
-  '/check',
-  '/check/all',
   '/favicon.ico',
 ]);
 

@@ -1153,7 +1153,10 @@ program
     if (!opts.force && profile) {
       const daemonPort = parseInt(process.env.SWEECH_PORT ?? '') || 7801;
       try {
-        const res = await fetch(`http://127.0.0.1:${daemonPort}/check?profile=${encodeURIComponent(profile.commandName)}`, {
+        const checkPath = `/check?profile=${encodeURIComponent(profile.commandName)}`;
+        const headers = await buildAuthedHeaders('GET', checkPath, '');
+        const res = await fetch(`http://127.0.0.1:${daemonPort}${checkPath}`, {
+          headers,
           signal: AbortSignal.timeout(15_000),
         });
         if (res.ok) {
@@ -1164,7 +1167,8 @@ program
 
             // Find reachable alternatives
             try {
-              const allRes = await fetch(`http://127.0.0.1:${daemonPort}/check/all`, { signal: AbortSignal.timeout(10_000) });
+              const allHeaders = await buildAuthedHeaders('GET', '/check/all', '');
+              const allRes = await fetch(`http://127.0.0.1:${daemonPort}/check/all`, { headers: allHeaders, signal: AbortSignal.timeout(10_000) });
               if (allRes.ok) {
                 const allResults = await allRes.json() as Array<{ profile: string; reachable: boolean }>;
                 const reachable = allResults.filter(r => r.reachable).map(r => r.profile);
@@ -1263,7 +1267,8 @@ program
 
     if (opts.all || !profileName) {
       try {
-        const res = await fetch(`${baseUrl}/check/all`, { signal: AbortSignal.timeout(30_000) });
+        const allHeaders = await buildAuthedHeaders('GET', '/check/all', '');
+        const res = await fetch(`${baseUrl}/check/all`, { headers: allHeaders, signal: AbortSignal.timeout(30_000) });
         if (!res.ok) throw new Error(`Daemon returned ${res.status}`);
         const results = await res.json() as Array<{ profile: string; model: string | null; reachable: boolean; reason: string; suggestedFallback: string | null; latencyMs: number }>;
         if (opts.json) {
@@ -1285,7 +1290,9 @@ program
     }
 
     try {
-      const res = await fetch(`${baseUrl}/check?profile=${encodeURIComponent(profileName)}`, { signal: AbortSignal.timeout(15_000) });
+      const checkPath = `/check?profile=${encodeURIComponent(profileName)}`;
+      const headers = await buildAuthedHeaders('GET', checkPath, '');
+      const res = await fetch(`${baseUrl}${checkPath}`, { headers, signal: AbortSignal.timeout(15_000) });
       if (!res.ok) throw new Error(`Daemon returned ${res.status}`);
       const result = await res.json() as { profile: string; model: string | null; reachable: boolean; reason: string; suggestedFallback: string | null; latencyMs: number };
       if (opts.json) {
