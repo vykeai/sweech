@@ -669,11 +669,11 @@ export async function runEdit(commandName: string): Promise<void> {
     (profile as any)[field] = newValue;
   }
 
-  // Save to config.json
+  // Save to config.json (round-trips the bumped object shape if present)
   const allProfiles = profiles.map(p =>
     p.commandName === commandName ? profile : p
   );
-  fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+  config.writeProfiles(allProfiles);
 
   // Update settings.json (pass model override if model was changed)
   if (provider) {

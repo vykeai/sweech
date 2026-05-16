@@ -1594,7 +1594,7 @@ program
       if (modelId) {
         profile.model = modelId;
         const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
-        fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+        config.writeProfiles(allProfiles);
         if (provider) {
           const apiKey = await resolveApiKey(profile);
           config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, modelId, profile.baseUrl, profile.envOverrides);
@@ -1645,7 +1645,7 @@ program
 
         profile.model = finalModel;
         const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
-        fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+        config.writeProfiles(allProfiles);
         if (provider) {
           const apiKey = await resolveApiKey(profile);
           config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, finalModel, profile.baseUrl, profile.envOverrides);
