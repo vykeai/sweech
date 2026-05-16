@@ -43,6 +43,7 @@ import { asciiBar, barColor } from './charts';
 import { installPlugin, uninstallPlugin, listPlugins } from './plugins';
 import { getAllTemplates, findTemplate, saveCustomTemplate, loadCustomTemplates, deleteCustomTemplate, BUILT_IN_TEMPLATES, ProfileTemplate } from './templates';
 import { buildAuthedHeaders } from './daemonAuth';
+import { formatExpiry } from './expiryFormat';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -1355,7 +1356,8 @@ program
 
       console.log(chalk.green(`\n  ✓ Successfully re-authenticated ${resolvedName}\n`));
       if (token.expiresAt) {
-        console.log(chalk.gray(`  Token expires: ${new Date(token.expiresAt).toLocaleString()}\n`));
+        const exp = formatExpiry(token.expiresAt);
+        if (exp.text) console.log(chalk.gray(`  Token ${exp.text}\n`));
       }
     } catch (error: unknown) {
       const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
@@ -2148,13 +2150,11 @@ const usageCmd = program
           for (const a of list.sort((x: any, y: any) => x.email.localeCompare(y.email))) {
             const email = a.email.endsWith('@unknown.local') ? chalk.dim('(no email)') : chalk.bold(a.email);
             const planStr = a.plan ? chalk.cyan(` [${a.plan}]`) : '';
+            const exp = formatExpiry(a.expiresAt);
             let expiryStr = '';
-            if (a.expiresAt) {
-              const hrs = (a.expiresAt - Date.now()) / 3600000;
-              if (hrs < 0) expiryStr = chalk.red(` 🔑 expired`);
-              else if (hrs < 1) expiryStr = chalk.yellow(` 🔑 ${Math.round(hrs * 60)}m`);
-              else if (hrs < 24) expiryStr = chalk.dim(` 🔑 ${Math.round(hrs)}h`);
-              else expiryStr = chalk.dim(` 🔑 ${Math.round(hrs / 24)}d`);
+            if (exp.short) {
+              const tinted = exp.color === 'red' ? chalk.red : exp.color === 'yellow' ? chalk.yellow : chalk.dim;
+              expiryStr = tinted(` 🔑 ${exp.short}`);
             }
             // Avoid showing the redundant "· expired" when the 🔑 badge
             // already says expired. Only surface non-ok status that the
@@ -2227,11 +2227,14 @@ const usageCmd = program
         } else if (a.tokenStatus === 'expired') {
           tokenStr = chalk.red(' 🔑 token expired');
         } else if (a.tokenStatus === 'valid' && a.tokenExpiresAt) {
-          const hoursLeft = Math.max(0, (a.tokenExpiresAt - Date.now()) / 3600000);
-          if (hoursLeft < 1) {
-            tokenStr = chalk.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
-          } else if (hoursLeft < 24) {
-            tokenStr = chalk.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+          const exp = formatExpiry(a.tokenExpiresAt);
+          // Only render minutes/hours buckets here — preserves prior behavior
+          // where the day-bucket workspace line stayed silent (the token is
+          // healthy and unsurprising; no need to clutter).
+          if (exp.color === 'yellow') {
+            tokenStr = chalk.yellow(` 🔑 ${exp.text}`);
+          } else if (exp.color === 'dim' && /h$/.test(exp.short)) {
+            tokenStr = chalk.dim(` 🔑 ${exp.text}`);
           }
         } else if (a.tokenStatus === 'no_token' && a.cliType === 'claude') {
           tokenStr = chalk.dim(' 🔑 no token');
@@ -4109,14 +4112,9 @@ program
           const planStr = liveOverride
             ? chalk.red(` [${liveOverride}]`)
             : (a.plan ? chalk.cyan(` [${a.plan}]`) : '');
-          const expiryStr = a.expiresAt
-            ? (() => {
-                const hrs = (a.expiresAt - Date.now()) / 3600000;
-                if (hrs < 0) return chalk.red(` 🔑 expired`);
-                if (hrs < 1) return chalk.yellow(` 🔑 ${Math.round(hrs * 60)}m`);
-                if (hrs < 24) return chalk.dim(` 🔑 ${Math.round(hrs)}h`);
-                return chalk.dim(` 🔑 ${Math.round(hrs / 24)}d`);
-              })()
+          const exp = formatExpiry(a.expiresAt);
+          const expiryStr = exp.short
+            ? (exp.color === 'red' ? chalk.red : exp.color === 'yellow' ? chalk.yellow : chalk.dim)(` 🔑 ${exp.short}`)
             : '';
           const showStatus = a.status && a.status !== 'ok' && a.status !== 'expired' && !liveOverride;
           const statusStr = showStatus ? chalk.red(` · ${a.status}`) : '';
