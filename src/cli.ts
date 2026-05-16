@@ -65,7 +65,19 @@ const program = new Command();
 
 program
   .name('sweech')
-  .description('🍭 Switch between Claude accounts and external AI providers')
+  .description(`🍭 Switch between Claude / Codex accounts and 10+ AI providers.
+
+Common workflows:
+  sweech                       interactive launcher TUI
+  sweech list                  every workspace + status
+  sweech use <workspace>       spawn the CLI for that workspace
+  sweech check <workspace>     reachability probe (model + latency)
+  sweech accounts list         OAuth identities in the vault
+  sweech assign <ws> [email]   mount a vault account into a workspace
+  sweech providers quota       third-party balance / rate-limit table
+  sweech code-review           pick the best codex profile for review work
+
+Agents: read SWEECH_GUIDE.md for the 60-second model + JSON contracts.`)
   .version(version, '-v, --version', 'Output the current version');
 
 // Interactive onboarding
@@ -3646,6 +3658,30 @@ program
       console.error(chalk.red('Error:'), (err as Error).message);
       process.exit(1);
     }
+  });
+
+// ── sweech guide ───────────────────────────────────────────────────────────
+// Prints the 60-second guide to stdout. Agents typically pipe this into
+// their context window when they land in a sweech-routed repo.
+program
+  .command('guide')
+  .description('Print the 60-second guide (SWEECH_GUIDE.md) for humans + agents')
+  .action(() => {
+    // Resolve relative to dist/cli.js → repo root.
+    const candidates = [
+      path.resolve(__dirname, '..', 'SWEECH_GUIDE.md'),
+      path.resolve(__dirname, '..', '..', 'SWEECH_GUIDE.md'),
+    ];
+    for (const p of candidates) {
+      try {
+        const text = fs.readFileSync(p, 'utf-8');
+        process.stdout.write(text);
+        return;
+      } catch {}
+    }
+    console.error(chalk.red('SWEECH_GUIDE.md not found alongside the install. See:'));
+    console.error(chalk.gray('  https://github.com/vykeai/sweech/blob/main/SWEECH_GUIDE.md'));
+    process.exit(1);
   });
 
 // ── sweech providers quota ─────────────────────────────────────────────────
