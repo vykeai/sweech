@@ -596,6 +596,15 @@ function buildStaticEntry(
 }
 
 export async function runLauncher(): Promise<void> {
+  // Fail-fast when stdin is not a TTY (piped input, CI, subprocess chains).
+  // Without this guard, readline.setRawMode() below would hang forever waiting
+  // for keypress events that can never arrive on a non-interactive stream.
+  if (!process.stdin.isTTY) {
+    console.error('Error: sweech launcher requires an interactive terminal.');
+    console.error('Use `sweech list` for non-interactive listings.');
+    process.exit(1);
+  }
+
   const config = new ConfigManager();
   const profiles = config.getProfiles();
   const { execFileSync } = require('child_process');
@@ -645,11 +654,6 @@ export async function runLauncher(): Promise<void> {
 
   const state = loadLastState();
   if (state.selectedIndex >= entries.length) state.selectedIndex = 0;
-
-  if (!process.stdin.isTTY) {
-    console.error(chalk.red('Error: sweech launcher requires a TTY'));
-    process.exit(1);
-  }
 
   // Wrap stdin in a passthrough that strips mouse escape sequences
   // so readline doesn't misinterpret scroll wheel as arrow keys
