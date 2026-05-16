@@ -29,6 +29,7 @@ import { runParallel, type ParallelStrategy } from '../parallel.js';
 import { registerConfigRoutes } from './config-routes.js';
 import { publishFedEvent } from '../fed.js';
 import { checkProfile, checkAllProfiles } from '../check.js';
+import { createAuthMiddleware } from './auth.js';
 
 let cachedEstate: Estate | null = null;
 let cachedQuotaTracker: QuotaTracker | null = null;
@@ -1181,11 +1182,29 @@ async function resolveRunTarget(options: {
   });
 }
 
-export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker; providers?: ProvidersConfig }) {
+export interface CreateAppAuthOptions {
+  /// Enable HMAC verification on non-public routes. Defaults to false so
+  /// existing tests (and any in-process consumer that creates the app
+  /// directly) keep working without changes. The daemon entrypoint
+  /// (`startDaemon` in ./index.ts) sets this to true with a real secret
+  /// loader.
+  enabled: boolean;
+  getSecret: () => Promise<string>;
+}
+
+export function createApp(opts?: { estate?: Estate; quotaTracker?: QuotaTracker; providers?: ProvidersConfig; auth?: CreateAppAuthOptions }) {
   if (opts?.estate) cachedEstate = opts.estate;
   if (opts?.quotaTracker) cachedQuotaTracker = opts.quotaTracker;
   if (opts?.providers) cachedProviders = opts.providers;
   const app = new Hono();
+
+  // T-039: HMAC middleware sits before any route handlers so /run, /select,
+  // /api/config/* etc. are gated before they ever execute. The middleware
+  // itself short-circuits the public probes (/healthz, /health) so this
+  // doesn't interfere with orchestrator liveness checks.
+  if (opts?.auth?.enabled) {
+    app.use('*', createAuthMiddleware({ getSecret: opts.auth.getSecret }));
+  }
 
   // Mount config API routes
   registerConfigRoutes(app);

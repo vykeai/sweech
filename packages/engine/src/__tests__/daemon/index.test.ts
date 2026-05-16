@@ -17,7 +17,13 @@ const mocks = vi.hoisted(() => ({
   writeFile: vi.fn().mockResolvedValue(undefined),
   unlink: vi.fn().mockResolvedValue(undefined),
   readFile: vi.fn().mockRejectedValue(new Error('missing')),
+  chmod: vi.fn().mockResolvedValue(undefined),
+  stat: vi.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })),
   registerTool: vi.fn().mockResolvedValue(undefined),
+  // T-039: the daemon entry loads (or lazily generates) the HMAC secret
+  // before binding. Stub the loader so this test doesn't depend on the
+  // real `node:fs/promises` mock having ENOENT-coded errors.
+  loadOrCreateSecret: vi.fn().mockResolvedValue('a'.repeat(64)),
 }));
 
 vi.mock('@hono/node-server', () => ({
@@ -54,6 +60,12 @@ vi.mock('node:fs/promises', () => ({
   writeFile: mocks.writeFile,
   unlink: mocks.unlink,
   readFile: mocks.readFile,
+  chmod: mocks.chmod,
+  stat: mocks.stat,
+}));
+
+vi.mock('../../daemon/auth.js', () => ({
+  loadOrCreateSecret: mocks.loadOrCreateSecret,
 }));
 
 vi.mock('@vykeai/fed', () => ({
