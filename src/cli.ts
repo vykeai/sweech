@@ -3653,6 +3653,30 @@ program
       return;
     }
 
+    if (act === 'refresh') {
+      const { refreshExpiringAccounts } = require('./vaultRefresh');
+      const results = await refreshExpiringAccounts({ force: !!opts.email });
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ results }, null, 2) + '\n');
+        return;
+      }
+      if (results.length === 0) {
+        console.log(chalk.dim('\n  No accounts to refresh.\n'));
+        return;
+      }
+      console.log(chalk.bold('\n  sweech · vault refresh\n'));
+      for (const r of results) {
+        const tag = r.outcome === 'refreshed' ? chalk.green('✓ refreshed')
+          : r.outcome === 'still-valid' ? chalk.dim('· still valid')
+          : r.outcome === 'remounted' ? chalk.cyan('↻ remounted')
+          : r.outcome === 'no-refresh-token' ? chalk.yellow('⚠ no refresh token')
+          : chalk.red(`✗ ${r.error || 'failed'}`);
+        console.log(`  ${r.email.padEnd(28)} [${r.kind}]  ${tag}`);
+      }
+      console.log();
+      return;
+    }
+
     if (act === 'remove') {
       if (!opts.email) {
         console.error(chalk.red('--email <email> required'));

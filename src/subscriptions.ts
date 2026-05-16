@@ -75,6 +75,14 @@ export interface AccountInfo {
   tokenRefreshedAt?: number
   /** Token expiry time (ms epoch), if known */
   tokenExpiresAt?: number
+
+  /** Vault account currently mounted in this workspace (from .sweech-account marker) */
+  activeAccount?: {
+    id: string
+    kind: 'anthropic' | 'openai'
+    email: string
+    plan?: string
+  }
 }
 
 export interface AccountRef {
@@ -446,6 +454,17 @@ export async function getAccountInfo(
     const derivedPlan = livePlanOverride ?? derivePlanLabel(sub?.rateLimitTier, sub?.billingType, cliType)
     const enrichedMeta = meta.plan ? meta : (derivedPlan ? { ...meta, plan: derivedPlan } : meta)
 
+    // Vault: which account is currently mounted in this workspace?
+    let activeAccount: AccountInfo['activeAccount']
+    try {
+      const { getActiveAccountId, getAccount } = require('./vault')
+      const activeId = getActiveAccountId(p.commandName)
+      if (activeId) {
+        const acct = getAccount(activeId)
+        if (acct) activeAccount = { id: acct.id, kind: acct.kind, email: acct.email, plan: acct.plan }
+      }
+    } catch {}
+
     return {
       name: p.name,
       commandName: p.commandName,
@@ -455,7 +474,16 @@ export async function getAccountInfo(
       sharedWith: p.sharedWith,
       provider: p.provider,
       displayName: sub?.displayName,
-      emailAddress: sub?.emailAddress,
+      // Prefer the vault's known email over whatever oauthAccount happens to
+      // hold — vault is the single source of truth once a workspace has been
+      // assigned. Hide the `<name>@unknown.local` placeholder used when import
+      // couldn't recover an email; that string is internal to id derivation
+      // and should never appear in the UI.
+      emailAddress: (() => {
+        const v = activeAccount?.email
+        if (v && !v.endsWith('@unknown.local')) return v
+        return sub?.emailAddress
+      })(),
       billingType: sub?.billingType,
       rateLimitTier: sub?.rateLimitTier,
       subscriptionCreatedAt: sub?.subscriptionCreatedAt,
@@ -467,6 +495,7 @@ export async function getAccountInfo(
       tokenStatus,
       tokenRefreshedAt: live?.tokenRefreshedAt,
       tokenExpiresAt: live?.tokenExpiresAt,
+      activeAccount,
     }
   }))
 }
