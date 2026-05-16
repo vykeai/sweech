@@ -12,10 +12,16 @@ struct VaultView: View {
     @State private var workingWorkspace: String?
 
     var body: some View {
+        // NSPopover hosts this view with `popoverHeight: nil`, so it sizes
+        // from SwiftUI's intrinsic content. ScrollView has no intrinsic
+        // vertical size — it must be bounded explicitly or the popover
+        // collapses to its initial 10pt height (= "doesn't open"). Setting
+        // a generous frame ceiling lets the popover grow up to ~720pt and
+        // scrolls if there are more rows than that.
         ZStack {
-            Sweech.Gradient.backgroundRadial.ignoresSafeArea()
+            Sweech.Gradient.backgroundRadial
 
-            ScrollView {
+            ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 10) {
                     header
                     accountsSection
@@ -24,8 +30,10 @@ struct VaultView: View {
                     errorFooter
                 }
                 .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .frame(width: 480, height: 720)
         .onAppear {
             service.fetchVault()
             if service.accounts.isEmpty { service.fetch() }
