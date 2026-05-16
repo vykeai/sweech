@@ -1684,7 +1684,12 @@ program
     } catch (error: unknown) {
       const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
-      process.exit(1);
+      // T-053 + code-review: doctor uses 0/1/2 severity exit codes. An
+      // uncaught throw is an error (severity 2), not a warning — preserve
+      // any exitCode runDoctor managed to set before throwing, otherwise
+      // fall through to 2.
+      const prior = typeof process.exitCode === 'number' ? process.exitCode : 0;
+      process.exitCode = prior >= 2 ? prior : 2;
     }
   });
 
