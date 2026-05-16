@@ -18,6 +18,7 @@ import { sweechEvents } from './events';
 import { runHook } from './plugins';
 import { isTmuxAvailable, launchInTmux } from './tmux';
 import { scrubSecrets } from './scrubSecrets';
+import { formatExpiry } from './expiryFormat';
 
 interface UsageBar {
   label: string;
@@ -406,13 +407,11 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
         for (const a of list.sort((x, y) => x.email.localeCompare(y.email))) {
           const email = a.email.endsWith('@unknown.local') ? chalk.dim('(no email)') : a.email;
           const planStr = a.plan ? chalk.cyan(` [${a.plan}]`) : '';
+          const exp = formatExpiry(a.expiresAt);
           let expiryStr = '';
-          if (a.expiresAt) {
-            const hrs = (a.expiresAt - Date.now()) / 3600000;
-            if (hrs < 0) expiryStr = chalk.red(' 🔑 expired');
-            else if (hrs < 1) expiryStr = chalk.yellow(` 🔑 ${Math.round(hrs * 60)}m`);
-            else if (hrs < 24) expiryStr = chalk.dim(` 🔑 ${Math.round(hrs)}h`);
-            else expiryStr = chalk.dim(` 🔑 ${Math.round(hrs / 24)}d`);
+          if (exp.short) {
+            const tinted = exp.color === 'red' ? chalk.red : exp.color === 'yellow' ? chalk.yellow : chalk.dim;
+            expiryStr = tinted(` 🔑 ${exp.short}`);
           }
           const showStatus = a.status && a.status !== 'ok' && a.status !== 'expired';
           const statusStr = showStatus ? chalk.red(` · ${a.status}`) : '';
@@ -467,12 +466,14 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
     } else if (entry.tokenStatus === 'expired') {
       tokenStr = chalk.red(' 🔑 expired');
     } else if (entry.tokenStatus === 'valid' && entry.tokenExpiresAt) {
-      const hoursLeft = Math.max(0, (entry.tokenExpiresAt - Date.now()) / 3600000);
-      if (hoursLeft < 1) {
-        tokenStr = chalk.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
-      } else if (hoursLeft < 24) {
-        tokenStr = chalk.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+      const exp = formatExpiry(entry.tokenExpiresAt);
+      if (exp.color === 'yellow') {
+        tokenStr = chalk.yellow(` 🔑 ${exp.text}`);
+      } else if (exp.color === 'dim' && /h$/.test(exp.short)) {
+        tokenStr = chalk.dim(` 🔑 ${exp.text}`);
       } else {
+        // Day-bucket (or expired — shouldn't reach here when status === 'valid'):
+        // surface a healthy "token ok" rather than a noisy "expires in 14d".
         tokenStr = chalk.dim(' 🔑 token ok');
       }
     } else if (entry.tokenStatus === 'no_token' && entry.command !== 'codex') {
