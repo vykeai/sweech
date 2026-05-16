@@ -256,7 +256,7 @@ export async function renameManagedProfile(
     return existing;
   });
 
-  fs.writeFileSync(config.getConfigFile(), JSON.stringify(updatedProfiles, null, 2));
+  config.writeProfiles(updatedProfiles);
 
   const oldProfileDir = config.getProfileDir(oldName);
   const newProfileDir = config.getProfileDir(trimmedNewName);

@@ -16,6 +16,7 @@ import * as os from 'os'
 import { execSync, execFileSync } from 'child_process'
 import { isMacOS } from './platform'
 import { readCredential, computeKeychainServiceName } from './credentialStore'
+import { getAnthropicClientId } from './anthropicAuth'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -242,7 +243,7 @@ async function readOAuthToken(configDir: string): Promise<OAuthReadResult> {
       try {
         const params = new URLSearchParams({
           grant_type: 'refresh_token',
-          client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+          client_id: getAnthropicClientId(),
           refresh_token: token.refreshToken,
         })
         const res = await fetch('https://platform.claude.com/v1/oauth/token', {

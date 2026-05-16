@@ -21,6 +21,7 @@ import {
 } from './vault'
 import { discoverWorkspaces } from './vaultImport'
 import { assignAccountToWorkspace } from './vaultAssign'
+import { getAnthropicClientId } from './anthropicAuth'
 
 const REFRESH_WINDOW_MS = 30 * 60 * 1000  // refresh within 30 min of expiry
 
@@ -92,7 +93,7 @@ async function refreshAnthropic(meta: AccountMeta, secret: AnthropicSecret): Pro
     return { email: meta.email, kind: 'anthropic', outcome: 'no-refresh-token' }
   }
 
-  const clientId = process.env.ANTHROPIC_CLIENT_ID || '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+  const clientId = getAnthropicClientId()
   const params = new URLSearchParams({
     grant_type: 'refresh_token',
     client_id: clientId,

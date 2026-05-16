@@ -157,7 +157,7 @@ export async function runShare(
   // Update sharedWith in config
   profile.sharedWith = source;
   const allProfiles = profiles.map(p => p.commandName === profileName ? profile : p);
-  fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+  config.writeProfiles(allProfiles);
 
   console.log(chalk.green(`\n✓ Shared ${linked} item(s) from ${chalk.cyan(source)} → ${chalk.bold(profileName)}\n`));
   for (const item of selected) {
@@ -243,7 +243,7 @@ export async function runUnshare(
   if (remaining.length === 0 && profile.sharedWith) {
     delete profile.sharedWith;
     const allProfiles = profiles.map(p => p.commandName === profileName ? profile : p);
-    fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+    config.writeProfiles(allProfiles);
   }
 
   console.log(chalk.green(`\n✓ Unshared ${unlinked} item(s) from ${chalk.bold(profileName)}`));
