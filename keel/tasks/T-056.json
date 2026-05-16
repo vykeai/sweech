@@ -1,0 +1,37 @@
+{
+  "id": "T-056",
+  "title": "Centralise DEFAULT_DAEMON_PORT constant",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "7801 appears in src/cli.ts:1154 and :1260. DRY violation.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"Centralise port constant (7801 appears twice in cli.ts)\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Single DEFAULT_DAEMON_PORT constant exported from one module",
+    "All callers (cli.ts, packages/engine, SwiftUI) import or reference it",
+    "SWEECH_PORT env override still honored"
+  ]
+}

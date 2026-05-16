@@ -10,8 +10,12 @@ import os from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { registerTool } from '@vykeai/fed';
+import { loadOrCreateSecret } from './auth.js';
+import { startConfigWatcher, stopConfigWatcher } from '../middleware/profiles.js';
+import { LogRotator, getDaemonLogPath } from './log.js';
+import { DEFAULT_DAEMON_PORT } from '../constants.js';
 
-let PORT = 7801;
+let PORT = DEFAULT_DAEMON_PORT;
 const PID_DIR = join(homedir(), '.sweech');
 const PID_FILE = join(PID_DIR, 'daemon.pid');
 const FED_CONFIG_FILE = join(homedir(), '.fed', 'config.json');
@@ -51,6 +55,7 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   let stopProvidersWatch: (() => void) | null = null;
   let server: ReturnType<typeof serve> | null = null;
   let fedCleanup: (() => void) | null = null;
+  let logRotator: LogRotator | null = null;
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | null = null;
   let closeServerPromise: Promise<void> | null = null;
@@ -74,7 +79,20 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
     // providers.yaml may not exist or be invalid — continue without it
   }
 
-  const app = createApp({ quotaTracker });
+  // T-039: load (or lazily create) the per-host HMAC secret before the
+  // server binds — if we can't read or write ~/.sweech/daemon.secret the
+  // daemon must fail fast rather than come up unauthenticated. The CLI
+  // signs every outbound request with this secret; another local process
+  // without read access to the file cannot hit /run, /select, or any
+  // config-mutation route.
+  const daemonSecret = await loadOrCreateSecret();
+  const app = createApp({
+    quotaTracker,
+    auth: {
+      enabled: true,
+      getSecret: async () => daemonSecret,
+    },
+  });
 
   const closeServer = async () => {
     if (!server) return;
@@ -127,8 +145,11 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
       cancelAllRunSessions();
       stopProvidersWatch?.();
       stopProvidersWatch = null;
+      stopConfigWatcher();
       fedCleanup?.();
       fedCleanup = null;
+      logRotator?.stop();
+      logRotator = null;
 
       const shutdownResult = await Promise.race([
         closeServer().then(() => 'closed' as const).catch(() => 'close-error' as const),
@@ -207,6 +228,28 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
     stopProvidersWatch = (await watchProviders(undefined, (config) => {
       preloadProviders(config);
     }).catch(() => null)) ?? null;
+  }
+
+  // Hot-reload ~/.sweech/config.json on change so `sweech profile add`
+  // from another terminal is visible to the running daemon without a
+  // restart (T-040).
+  try {
+    startConfigWatcher();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[engine] failed to start config watcher: ${message}\n`);
+  }
+
+  // T-054: rotate the launchd-redirected stdout/stderr log so it never
+  // grows unbounded. Triggers on size (>10 MiB) or daily boundary; keeps
+  // last 5 rotations. Timer is unref'd, so it does not block shutdown.
+  try {
+    logRotator = new LogRotator({ logPath: getDaemonLogPath() });
+    logRotator.start();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[engine] failed to start log rotator: ${message}\n`);
+    logRotator = null;
   }
 
   await mkdir(PID_DIR, { recursive: true });

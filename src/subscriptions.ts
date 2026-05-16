@@ -35,6 +35,10 @@ export interface AccountInfo {
 
   /** Provider key from sweech config (e.g. 'anthropic', 'dashscope', 'minimax') */
   provider?: string
+  /** Optional custom base URL from sweech config; presence usually means
+   *  the workspace routes through a proxy (local litellm, openrouter, …)
+   *  even when provider key is 'anthropic' or 'openai'. */
+  baseUrl?: string
 
   // From .claude.json or .credentials.json
   displayName?: string
@@ -75,6 +79,14 @@ export interface AccountInfo {
   tokenRefreshedAt?: number
   /** Token expiry time (ms epoch), if known */
   tokenExpiresAt?: number
+
+  /** Vault account currently mounted in this workspace (from .sweech-account marker) */
+  activeAccount?: {
+    id: string
+    kind: 'anthropic' | 'openai'
+    email: string
+    plan?: string
+  }
 }
 
 export interface AccountRef {
@@ -82,6 +94,7 @@ export interface AccountRef {
   commandName: string
   cliType?: string
   provider?: string
+  baseUrl?: string
   isDefault?: boolean
   sharedWith?: string
 }
@@ -316,7 +329,7 @@ function computeWeeklyReset(subscriptionCreatedAt: string): { weeklyResetAt: str
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function getKnownAccounts(
-  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; sharedWith?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; baseUrl?: string; sharedWith?: string }>,
 ): AccountRef[] {
   const seen = new Set<string>()
   const accounts: AccountRef[] = []
@@ -328,7 +341,7 @@ export function getKnownAccounts(
       name: cli.command,
       commandName: cli.name,
       cliType: cli.name,
-      provider: cli.name === 'claude' ? 'anthropic' : 'openai',
+      provider: cli.name === 'claude' ? 'anthropic' : cli.name === 'kimi' ? 'kimi' : 'openai',
       isDefault: true,
     })
   }
@@ -341,6 +354,7 @@ export function getKnownAccounts(
       commandName: profile.commandName,
       cliType: profile.cliType,
       provider: profile.provider,
+      baseUrl: profile.baseUrl,
       isDefault: false,
       sharedWith: profile.sharedWith,
     })
@@ -350,7 +364,7 @@ export function getKnownAccounts(
 }
 
 export async function getAccountInfo(
-  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; isDefault?: boolean; sharedWith?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; baseUrl?: string; isDefault?: boolean; sharedWith?: string }>,
   options: { refresh?: boolean; timeoutMs?: number; cacheOnly?: boolean } = {},
 ): Promise<AccountInfo[]> {
   const allMeta = readMeta()
@@ -434,8 +448,36 @@ export async function getAccountInfo(
     // Derive human-readable plan label from rateLimitTier / billingType when not
     // explicitly set in subscriptions.json. Keeps the UI consistent for the
     // default claude profile (which has no user-set meta.plan).
-    const derivedPlan = derivePlanLabel(sub?.rateLimitTier, sub?.billingType, cliType)
-    const enrichedMeta = meta.plan ? meta : (derivedPlan ? { ...meta, plan: derivedPlan } : meta)
+    // Live status and tokenStatus override stale keychain claims. If the
+    // API returned a permission error, or the token is gone/unrenewable,
+    // the keychain's rateLimitTier ("max_20x") is a lie. Demote.
+    const liveStatus = live?.status
+    const tokStatus = live?.tokenStatus
+    let livePlanOverride: string | undefined
+    if (liveStatus === 'org_disabled') livePlanOverride = 'OAuth disabled'
+    else if (liveStatus === 'forbidden') livePlanOverride = 'Forbidden'
+    else if (liveStatus === 'unauthorized' || tokStatus === 'expired' || tokStatus === 'no_token') livePlanOverride = 'Re-login needed'
+    const derivedPlan = livePlanOverride ?? derivePlanLabel(sub?.rateLimitTier, sub?.billingType, cliType)
+    // Plan precedence:
+    //   1. derivedPlan when it's a livePlanOverride (org_disabled etc.)
+    //      — those are status-truths the user can't override.
+    //   2. derivedPlan from live rateLimitTier — the keychain is the
+    //      authoritative tier; a stale "Max 5x" manual override left in
+    //      subscriptions.json must not displace it.
+    //   3. user's manual meta.plan as a final fallback (used when live
+    //      data is unreachable or the profile has no OAuth at all).
+    const enrichedMeta = derivedPlan ? { ...meta, plan: derivedPlan } : meta
+
+    // Vault: which account is currently mounted in this workspace?
+    let activeAccount: AccountInfo['activeAccount']
+    try {
+      const { getActiveAccountId, getAccount } = require('./vault')
+      const activeId = getActiveAccountId(p.commandName)
+      if (activeId) {
+        const acct = getAccount(activeId)
+        if (acct) activeAccount = { id: acct.id, kind: acct.kind, email: acct.email, plan: acct.plan }
+      }
+    } catch {}
 
     return {
       name: p.name,
@@ -445,8 +487,18 @@ export async function getAccountInfo(
       isDefault: p.isDefault,
       sharedWith: p.sharedWith,
       provider: p.provider,
+      baseUrl: p.baseUrl,
       displayName: sub?.displayName,
-      emailAddress: sub?.emailAddress,
+      // Prefer the vault's known email over whatever oauthAccount happens to
+      // hold — vault is the single source of truth once a workspace has been
+      // assigned. Hide the `<name>@unknown.local` placeholder used when import
+      // couldn't recover an email; that string is internal to id derivation
+      // and should never appear in the UI.
+      emailAddress: (() => {
+        const v = activeAccount?.email
+        if (v && !v.endsWith('@unknown.local')) return v
+        return sub?.emailAddress
+      })(),
       billingType: sub?.billingType,
       rateLimitTier: sub?.rateLimitTier,
       subscriptionCreatedAt: sub?.subscriptionCreatedAt,
@@ -458,6 +510,7 @@ export async function getAccountInfo(
       tokenStatus,
       tokenRefreshedAt: live?.tokenRefreshedAt,
       tokenExpiresAt: live?.tokenExpiresAt,
+      activeAccount,
     }
   }))
 }

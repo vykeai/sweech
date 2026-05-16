@@ -199,9 +199,10 @@ describe('Init / Onboarding', () => {
       });
       // The function prompts multiple times — mock sequence
       mockPrompt
-        .mockResolvedValueOnce({ addToPath: false } as any)   // PATH prompt
-        .mockResolvedValueOnce({ installLater: true } as any)  // if no CLIs
-        .mockResolvedValueOnce({ runDoctorCheck: false } as any); // doctor prompt
+        .mockResolvedValueOnce({ addToPath: false } as any)        // PATH prompt
+        .mockResolvedValueOnce({ installLater: true } as any)       // if no CLIs
+        .mockResolvedValueOnce({ addAnother: false } as any)        // add another?
+        .mockResolvedValueOnce({ runDoctorCheck: false } as any);   // doctor prompt
 
       await runInit();
 
@@ -218,6 +219,7 @@ describe('Init / Onboarding', () => {
       });
       mockPrompt
         .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: false } as any)
         .mockResolvedValueOnce({ runDoctorCheck: true } as any);
 
       await runInit();
@@ -235,6 +237,7 @@ describe('Init / Onboarding', () => {
       });
       mockPrompt
         .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: false } as any)
         .mockResolvedValueOnce({ runDoctorCheck: false } as any);
 
       await runInit();
@@ -252,6 +255,7 @@ describe('Init / Onboarding', () => {
       });
       mockPrompt
         .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: false } as any)
         .mockResolvedValueOnce({ runDoctorCheck: false } as any);
 
       const logSpy = jest.spyOn(console, 'log');
@@ -272,6 +276,7 @@ describe('Init / Onboarding', () => {
       });
       mockPrompt
         .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: false } as any)
         .mockResolvedValueOnce({ runDoctorCheck: false } as any);
 
       const logSpy = jest.spyOn(console, 'log');
@@ -281,6 +286,101 @@ describe('Init / Onboarding', () => {
       const allOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
       expect(allOutput).toContain('sweech add');
       expect(allOutput).toContain('sweech doctor');
+    });
+
+    test('prints "run `sweech` anytime" launch hint after first profile is saved', async () => {
+      mockInteractiveAdd.mockResolvedValue({
+        cliType: 'claude',
+        provider: 'anthropic',
+        commandName: 'claude-work',
+        authMethod: 'api-key',
+        apiKey: 'sk-test'
+      });
+      mockPrompt
+        .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: false } as any)
+        .mockResolvedValueOnce({ runDoctorCheck: false } as any);
+
+      const logSpy = jest.spyOn(console, 'log');
+
+      await runInit();
+
+      const allOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(allOutput).toMatch(/run `?sweech`? anytime to launch a workspace/i);
+    });
+
+    test('exits cleanly when user answers N to "Add another profile?"', async () => {
+      mockInteractiveAdd.mockResolvedValue({
+        cliType: 'claude',
+        provider: 'anthropic',
+        commandName: 'claude-work',
+        authMethod: 'api-key',
+        apiKey: 'sk-test'
+      });
+      mockPrompt
+        .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: false } as any)
+        .mockResolvedValueOnce({ runDoctorCheck: false } as any);
+
+      const { createProfile } = require('../src/profileCreation');
+
+      await runInit();
+
+      // Provider-add prompt called exactly once when the user declines to add another.
+      expect(mockInteractiveAdd).toHaveBeenCalledTimes(1);
+      expect(createProfile).toHaveBeenCalledTimes(1);
+    });
+
+    test('loops back when user answers Y to "Add another profile?"', async () => {
+      mockInteractiveAdd
+        .mockResolvedValueOnce({
+          cliType: 'claude',
+          provider: 'anthropic',
+          commandName: 'claude-work',
+          authMethod: 'api-key',
+          apiKey: 'sk-test'
+        })
+        .mockResolvedValueOnce({
+          cliType: 'claude',
+          provider: 'anthropic',
+          commandName: 'claude-personal',
+          authMethod: 'api-key',
+          apiKey: 'sk-test2'
+        });
+      mockPrompt
+        .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: true } as any)    // Y → loop
+        .mockResolvedValueOnce({ addAnother: false } as any)   // N → exit loop
+        .mockResolvedValueOnce({ runDoctorCheck: false } as any);
+
+      const { createProfile } = require('../src/profileCreation');
+
+      await runInit();
+
+      expect(mockInteractiveAdd).toHaveBeenCalledTimes(2);
+      expect(createProfile).toHaveBeenCalledTimes(2);
+    });
+
+    test('treats prompt rejection (Ctrl+C / non-TTY) as "no" and exits cleanly', async () => {
+      mockInteractiveAdd.mockResolvedValue({
+        cliType: 'claude',
+        provider: 'anthropic',
+        commandName: 'claude-work',
+        authMethod: 'api-key',
+        apiKey: 'sk-test'
+      });
+      mockPrompt
+        .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockRejectedValueOnce(new Error('User aborted'))      // Ctrl+C on addAnother
+        .mockResolvedValueOnce({ runDoctorCheck: false } as any);
+
+      const { createProfile } = require('../src/profileCreation');
+
+      await runInit();
+
+      // Should have saved exactly one profile and continued past the loop.
+      expect(createProfile).toHaveBeenCalledTimes(1);
+      expect(mockRunDoctor).not.toHaveBeenCalled(); // declined doctor too
     });
   });
 
@@ -331,6 +431,7 @@ describe('Init / Onboarding', () => {
       mockPrompt
         .mockResolvedValueOnce({ continueAnyway: true } as any)   // continue
         .mockResolvedValueOnce({ addToPath: false } as any)        // PATH
+        .mockResolvedValueOnce({ addAnother: false } as any)       // add another? — no
         .mockResolvedValueOnce({ runDoctorCheck: false } as any);  // doctor
 
       mockInteractiveAdd.mockResolvedValue({
@@ -376,6 +477,7 @@ describe('Init / Onboarding', () => {
       });
       mockPrompt
         .mockResolvedValueOnce({ addToPath: false } as any)
+        .mockResolvedValueOnce({ addAnother: false } as any)
         .mockResolvedValueOnce({ runDoctorCheck: false } as any);
 
       const logSpy = jest.spyOn(console, 'log');
@@ -471,7 +573,9 @@ describe('Init / Onboarding', () => {
         authMethod: 'api-key',
         apiKey: 'sk-test'
       });
-      mockPrompt.mockResolvedValueOnce({ runDoctorCheck: false } as any);
+      mockPrompt
+        .mockResolvedValueOnce({ addAnother: false } as any)
+        .mockResolvedValueOnce({ runDoctorCheck: false } as any);
 
       const logSpy = jest.spyOn(console, 'log');
 

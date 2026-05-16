@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import OnlyMenuBarKit
 
 // MARK: - App Entry Point
 
@@ -49,15 +48,35 @@ class SweechBarController: OnlyBarController {
 
     @AppStorage("sweechBarLabelMode") private var labelMode: String = "capacity"
 
+    /// Fires `sweech accounts refresh` on a 10-minute cadence so vault tokens
+    /// never expire while SweechBar is running. Detached process — does not
+    /// block the menu bar.
+    private var vaultRefreshTimer: Timer?
+
     init() {
-        // Use NSStatusItem.variableLength for dynamic text labels
+        // Use NSStatusItem.variableLength for dynamic text labels.
+        // Width: 480 gives a near-square popover when stacked with 20+ rows;
+        // the vault view scrolls vertically inside.
         super.init(
-            width: 360,
+            width: 480,
             height: nil,
             icon: "lollipop",
             statusItemLength: NSStatusItem.variableLength
         )
         setupObserver()
+        startVaultRefreshTimer()
+    }
+
+    private func startVaultRefreshTimer() {
+        // Kick once on launch (after a 5s grace so the menubar appears first).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.service.refreshVaultTokens()
+            self?.service.refreshProviderQuotas()
+        }
+        vaultRefreshTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
+            self?.service.refreshVaultTokens()
+            self?.service.refreshProviderQuotas()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -163,8 +182,6 @@ class SweechBarController: OnlyBarController {
     }
 
     override func makeBody() -> AnyView {
-        AnyView(
-            AccountsView(service: service)
-        )
+        AnyView(VaultView(service: service))
     }
 }

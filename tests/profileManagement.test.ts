@@ -169,6 +169,7 @@ describe('profileManagement', () => {
       getBinDir: () => '/mock/home/.sweech/bin',
       createWrapperScript: jest.fn(),
       setupSharedDirs: jest.fn(),
+      writeProfiles: jest.fn(),
     };
 
     mockFs.existsSync.mockImplementation((value: fs.PathLike) => (
@@ -177,9 +178,10 @@ describe('profileManagement', () => {
 
     const result = await renameManagedProfile('claude-work', 'claude-renamed', config as any);
 
-    expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-      '/mock/home/.sweech/config.json',
-      expect.stringContaining('"sharedWith": "claude-renamed"')
+    expect(config.writeProfiles).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ commandName: 'claude-pair', sharedWith: 'claude-renamed' }),
+      ])
     );
     expect(mockFs.renameSync).toHaveBeenCalledWith('/mock/home/.claude-work', '/mock/home/.claude-renamed');
     expect(config.createWrapperScript).toHaveBeenCalledWith('claude-renamed', expect.objectContaining({ name: 'claude' }));

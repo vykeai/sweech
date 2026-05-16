@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as https from 'https';
+import { atomicWriteFileSync } from './atomicWrite';
 
 export interface UpdateCheckResult {
   current: string;
@@ -22,6 +23,51 @@ interface UpdateCheckCache {
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CACHE_DIR = path.join(os.homedir(), '.sweech');
 const CACHE_FILE = path.join(CACHE_DIR, 'update-check.json');
+
+/**
+ * Decide whether the startup update-check banner should be suppressed.
+ *
+ * Suppression rules (any one is sufficient):
+ *   1. argv contains --help / -h / --version / -v / --complete (these run
+ *      without side effects, so a network call would violate that contract)
+ *   2. argv contains the literal command `update` (the user is already
+ *      updating — banner is noise)
+ *   3. argv contains `--json` (JSON output is consumed by scripts that
+ *      pipe stderr; banner pollutes that stream and breaks the contract)
+ *   4. env.SWEECH_NO_UPDATE_NOTIFIER === '1' or === 'true' (CI /
+ *      non-interactive opt-out)
+ *   5. argv has no arguments beyond `node` + script path (bare invocation
+ *      prints help; we skip in that case too — matches prior behaviour)
+ *
+ * Pure function: extracted from cli.ts so it can be unit-tested in
+ * isolation without spawning the CLI.
+ */
+export function shouldSkipUpdateCheck(argv: string[], env: NodeJS.ProcessEnv): boolean {
+  // Env-var opt-out (CI / non-interactive)
+  const envFlag = env.SWEECH_NO_UPDATE_NOTIFIER;
+  if (envFlag === '1' || envFlag === 'true') return true;
+
+  // Bare invocation (no args): skip — matches prior `process.argv.length > 2`
+  // guard in cli.ts.
+  if (argv.length <= 2) return true;
+
+  // Flag-based opt-out (anywhere in argv).
+  const hasSkipFlag = argv.some(a =>
+    a === '--help' ||
+    a === '-h' ||
+    a === '--version' ||
+    a === '-v' ||
+    a === '--complete' ||
+    a === '--json'
+  );
+  if (hasSkipFlag) return true;
+
+  // Subcommand: `sweech update` is argv[2] only — don't suppress for a
+  // workspace named `update` passed as a positional anywhere else.
+  if (argv[2] === 'update') return true;
+
+  return false;
+}
 
 /**
  * Compare two semver strings: returns true if latest > current.
@@ -65,7 +111,12 @@ export function writeCache(latest: string, now?: number): void {
       fs.mkdirSync(CACHE_DIR, { recursive: true, mode: 0o700 });
     }
     const cache: UpdateCheckCache = { timestamp: now ?? Date.now(), latest };
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
+    // Atomic write so concurrent readers never observe a half-written file
+    // (previous non-atomic fs.writeFileSync could be caught mid-write by
+    // readCache; the catch swallowed the partial-JSON error but the cache
+    // was briefly invalid).
+    atomicWriteFileSync(CACHE_FILE, JSON.stringify(cache, null, 2));
+    try { fs.chmodSync(CACHE_FILE, 0o600); } catch {}
   } catch {
     // Silently fail — cache write is best-effort
   }

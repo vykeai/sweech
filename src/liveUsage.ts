@@ -16,6 +16,7 @@ import * as os from 'os'
 import { execSync, execFileSync } from 'child_process'
 import { isMacOS } from './platform'
 import { readCredential, computeKeychainServiceName } from './credentialStore'
+import { getAnthropicClientId } from './anthropicAuth'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -35,8 +36,10 @@ export interface RateLimitBucket {
 
 export interface LiveRateLimitData {
   buckets: RateLimitBucket[]
-  /** "allowed" | "allowed_warning" | "rejected" | "limit_reached" */
+  /** "allowed" | "allowed_warning" | "rejected" | "limit_reached" | "org_disabled" | "forbidden" | "unauthorized" */
   status?: string
+  /** Human-readable reason from the API when status is forbidden/org_disabled. */
+  forbiddenReason?: string
   /** Plan type — "pro", "max", etc. */
   planType?: string
   /** When this snapshot was captured (ms) */
@@ -51,26 +54,42 @@ export interface LiveRateLimitData {
   /** Token expiry time (ms epoch), if known */
   tokenExpiresAt?: number
 
-  /** Promotion info — detected from API headers or manual config */
-  promotion?: {
-    label: string         // e.g. "2x Tokens", "Double Usage"
-    multiplier?: number   // e.g. 2
-    expiresAt?: number    // epoch ms, if known
-    source?: 'manual' | 'provider' | 'inferred'
-  }
-
-  // Legacy fields for backward compat with existing code
-  /** @deprecated use buckets[0].session.utilization */
-  utilization5h?: number
-  /** @deprecated use buckets[0].weekly.utilization */
-  utilization7d?: number
-  /** @deprecated */
-  utilizationSonnet7d?: number
-  /** @deprecated */
-  reset5hAt?: number
-  /** @deprecated */
-  reset7dAt?: number
+  /** Representative claim from anthropic-ratelimit-unified-representative-claim header. */
   representativeClaim?: string
+}
+
+// ── Bucket accessors ──────────────────────────────────────────────────────────
+
+/**
+ * Read the session (5h) utilization (0.0–1.0) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getSessionUtilization(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.session?.utilization
+}
+
+/**
+ * Read the weekly (7d) utilization (0.0–1.0) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getWeeklyUtilization(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.weekly?.utilization
+}
+
+/**
+ * Read the session (5h) reset time (Unix seconds) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getSessionResetsAt(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.session?.resetsAt
+}
+
+/**
+ * Read the weekly (7d) reset time (Unix seconds) from the canonical first bucket.
+ * Returns undefined when the bucket or window is absent.
+ */
+export function getWeeklyResetsAt(live: LiveRateLimitData | null | undefined): number | undefined {
+  return live?.buckets?.[0]?.weekly?.resetsAt
 }
 
 // ── Shared scoring ───────────────────────────────────────────────────────────
@@ -95,15 +114,15 @@ export function computeSmartScore(account: ScorableAccount): number {
   const bucket = allModels || account.live.buckets[0]
 
   // If there's no weekly data at all, fall back to session data
-  const hasWeekly = bucket?.weekly?.utilization !== undefined || account.live.utilization7d !== undefined
+  const hasWeekly = bucket?.weekly?.utilization !== undefined
   if (!hasWeekly) {
     const session = bucket?.session
     if (session) return (1 - session.utilization)
     return 0
   }
 
-  const remaining7d = 1 - (bucket?.weekly?.utilization ?? account.live.utilization7d ?? 0)
-  const reset7dAt = bucket?.weekly?.resetsAt ?? account.live.reset7dAt
+  const remaining7d = 1 - (bucket?.weekly?.utilization ?? 0)
+  const reset7dAt = bucket?.weekly?.resetsAt
   if (!reset7dAt) return remaining7d / 7
 
   const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600)
@@ -122,8 +141,8 @@ export function computeTier(account: ScorableAccount, isTopInGroup: boolean): { 
   const score = computeSmartScore(account)
   if (score < 0) return { tier: 'normal', urgent: false }
   const allModels = account.live?.buckets.find(b => b.label === 'All models')
-  const reset7dAt = allModels?.weekly?.resetsAt ?? account.live?.reset7dAt
-  const remaining7d = 1 - (allModels?.weekly?.utilization ?? account.live?.utilization7d ?? 0)
+  const reset7dAt = allModels?.weekly?.resetsAt
+  const remaining7d = 1 - (allModels?.weekly?.utilization ?? 0)
   const urgent = !!(reset7dAt && ((reset7dAt - Date.now() / 1000) / 3600) < 72 && remaining7d >= 0.05)
   return { tier: 'use_first', urgent }
 }
@@ -248,7 +267,7 @@ async function readOAuthToken(configDir: string): Promise<OAuthReadResult> {
       try {
         const params = new URLSearchParams({
           grant_type: 'refresh_token',
-          client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+          client_id: getAnthropicClientId(),
           refresh_token: token.refreshToken,
         })
         const res = await fetch('https://platform.claude.com/v1/oauth/token', {
@@ -323,6 +342,22 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
       signal: AbortSignal.timeout(5000),
     })
 
+    // Permission/org-level errors return a stable error body and no rate-limit
+    // headers. Surface them as authoritative status so display code can stop
+    // trusting the stale keychain `rateLimitTier` for these accounts.
+    if (res.status === 401 || res.status === 403) {
+      let errMsg = ''
+      try { const body = await res.json() as any; errMsg = body?.error?.message ?? '' } catch {}
+      const isOrgDisabled = /oauth.*not allowed for this organization/i.test(errMsg)
+      return {
+        buckets: [],
+        capturedAt: Date.now(),
+        status: isOrgDisabled ? 'org_disabled' : (res.status === 401 ? 'unauthorized' : 'forbidden'),
+        tokenStatus: res.status === 401 ? 'expired' : 'valid',
+        forbiddenReason: errMsg || undefined,
+      }
+    }
+
     const get = (k: string) => res.headers.get(k)
     const num = (k: string) => { const v = get(k); return v !== null ? Number(v) : undefined }
 
@@ -346,29 +381,10 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
       })
     }
 
-    // Detect promotions from fallback/overage headers
-    const fallback = get('anthropic-ratelimit-unified-fallback')
-    const fallbackPct = num('anthropic-ratelimit-unified-fallback-percentage')
-    const overageStatus = get('anthropic-ratelimit-unified-overage-status')
-    let promotion: LiveRateLimitData['promotion'] | undefined
-    // If fallback percentage > 0, that's bonus capacity (the "available" header may or may not be present)
-    if (fallbackPct && fallbackPct > 0) {
-      const multiplier = 1 + fallbackPct  // 0.5 fallback = 1.5x, 1.0 fallback = 2x
-      const label = multiplier >= 2 ? `${multiplier}x Tokens` : `+${Math.round(fallbackPct * 100)}% Bonus`
-      promotion = { label, multiplier, source: 'provider' }
-    }
-    if (overageStatus === 'allowed') {
-      promotion = promotion || { label: 'Overage Active', multiplier: undefined, source: 'provider' }
-    }
-
     return {
       buckets,
       status: get('anthropic-ratelimit-unified-status') ?? undefined,
       capturedAt: Date.now(),
-      promotion,
-      // Legacy
-      utilization5h: u5h, utilization7d: u7d, utilizationSonnet7d: uSonnet7d,
-      reset5hAt: r5h, reset7dAt: r7d,
       representativeClaim: get('anthropic-ratelimit-unified-representative-claim') ?? undefined,
     }
   } catch {
@@ -379,6 +395,15 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
 // ── Codex app-server rate limits ──────────────────────────────────────────────
 
 async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitData | null> {
+  // Only profiles with a real codex auth (under ~/.codex* dirs) have a
+  // meaningful rateLimits endpoint. Claude-named profiles routed through
+  // the codex CLI for third-party providers (groq, gemini, openrouter, etc.)
+  // have no openai auth, so the app-server returns an empty byId after
+  // ~5s — wasting a slot and contending with real codex profiles.
+  const path = require('path')
+  const dirName = path.basename(configDir)
+  if (!/^\.codex(-.*)?$/.test(dirName)) return null
+
   const { spawn } = require('child_process')
 
   return new Promise<LiveRateLimitData | null>((resolve) => {
@@ -415,39 +440,29 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
             const buckets: RateLimitBucket[] = []
             let mainStatus = 'allowed'
             let mainPlanType: string | undefined
-            // Legacy fields from the first (main) bucket
-            let u5h: number | undefined, u7d: number | undefined, r5h: number | undefined, r7d: number | undefined
 
-            for (const [id, limit] of Object.entries(byId) as [string, any][]) {
+            // Assign primary/secondary to session (5h) vs weekly (7d) by
+            // their windowDurationMins, NOT by position. The free plan only
+            // returns a single weekly window in `primary` — assuming
+            // primary=session previously surfaced a 100% 5h bar with a 6-day
+            // reset, which is the weekly limit mislabeled.
+            const isWeeklyWindow = (m: number | undefined) => m !== undefined && m >= 24 * 60; // >=1 day
+            const assignWindow = (bucket: RateLimitBucket, win: any) => {
+              if (!win) return false;
+              const data = { utilization: win.usedPercent / 100, resetsAt: win.resetsAt };
+              if (isWeeklyWindow(win.windowDurationMins)) bucket.weekly = data;
+              else bucket.session = data;
+              return win.usedPercent >= 100;
+            };
+
+            for (const [, limit] of Object.entries(byId) as [string, any][]) {
               const label = limit.limitName || 'All models'
               const bucket: RateLimitBucket = { label }
-              if (limit.primary) {
-                bucket.session = { utilization: limit.primary.usedPercent / 100, resetsAt: limit.primary.resetsAt }
-              }
-              if (limit.secondary) {
-                bucket.weekly = { utilization: limit.secondary.usedPercent / 100, resetsAt: limit.secondary.resetsAt }
-                if (limit.secondary.usedPercent >= 100) mainStatus = 'limit_reached'
-              }
+              const primaryHit = assignWindow(bucket, limit.primary);
+              const secondaryHit = assignWindow(bucket, limit.secondary);
+              if (primaryHit || secondaryHit) mainStatus = 'limit_reached'
               if (limit.planType) mainPlanType = limit.planType
               buckets.push(bucket)
-
-              // Legacy: use main (unnamed) limit for top-level fields
-              if (!limit.limitName) {
-                u5h = bucket.session?.utilization
-                u7d = bucket.weekly?.utilization
-                r5h = limit.primary?.resetsAt
-                r7d = limit.secondary?.resetsAt
-              }
-            }
-
-            // Detect codex promotions from credits or unlimited fields
-            let codexPromo: LiveRateLimitData['promotion'] | undefined
-            for (const [, limit] of Object.entries(byId) as [string, any][]) {
-              if (limit.credits?.unlimited) {
-                codexPromo = { label: 'Unlimited', multiplier: undefined, source: 'provider' }
-              } else if (limit.credits?.hasCredits && Number(limit.credits.balance) > 0) {
-                codexPromo = { label: `+${limit.credits.balance} Credits`, multiplier: undefined, source: 'provider' }
-              }
             }
 
             resolve({
@@ -455,9 +470,6 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
               status: mainStatus,
               planType: mainPlanType,
               capturedAt: Date.now(),
-              promotion: codexPromo,
-              utilization5h: u5h, utilization7d: u7d,
-              reset5hAt: r5h, reset7dAt: r7d,
             })
           }
         } catch {}
@@ -472,80 +484,6 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
   })
 }
 
-// ── Promotions ───────────────────────────────────────────────────────────────
-
-interface PromotionConfig {
-  /** Which CLI type this applies to: "claude", "codex", or "*" */
-  cliType: string
-  /** Display label, e.g. "2x Tokens" */
-  label: string
-  /** Multiplier, e.g. 2 */
-  multiplier?: number
-  /** ISO date when promotion expires */
-  expiresAt?: string
-}
-
-const PROMOTIONS_FILE = path.join(os.homedir(), '.sweech', 'promotions.json')
-
-function loadPromotions(): PromotionConfig[] {
-  try {
-    const data = JSON.parse(fs.readFileSync(PROMOTIONS_FILE, 'utf-8'))
-    return Array.isArray(data) ? data : []
-  } catch {
-    return []
-  }
-}
-
-function getActivePromotion(cliType: string): LiveRateLimitData['promotion'] | undefined {
-  const promos = loadPromotions()
-  const now = Date.now()
-  for (const p of promos) {
-    if (p.cliType !== '*' && p.cliType !== cliType) continue
-    if (p.expiresAt && new Date(p.expiresAt).getTime() < now) continue
-    return {
-      label: p.label,
-      multiplier: p.multiplier,
-      expiresAt: p.expiresAt ? new Date(p.expiresAt).getTime() : undefined,
-      source: 'manual',
-    }
-  }
-  return undefined
-}
-
-function inferPromotion(data: LiveRateLimitData, cliType: string): LiveRateLimitData['promotion'] | undefined {
-  if (cliType !== 'codex') return undefined
-
-  const planType = data.planType?.toLowerCase()
-  if (!planType) return undefined
-
-  // Verified April 10, 2026 from OpenAI Help:
-  // Plus, Pro, Business, Enterprise, and Edu currently receive 2x Codex rate limits.
-  const eligiblePlans = new Set(['plus', 'pro', 'business', 'enterprise', 'edu', 'education'])
-  if (!eligiblePlans.has(planType)) return undefined
-
-  return {
-    label: '2x Limits',
-    multiplier: 2,
-    source: 'inferred',
-  }
-}
-
-function applyPromotion(data: LiveRateLimitData, cliType: string): LiveRateLimitData {
-  // Manual config overrides API-detected; API-detected is the fallback
-  const manual = getActivePromotion(cliType)
-  if (manual) {
-    data.promotion = manual
-    return data
-  }
-
-  // data.promotion may already be set from provider responses
-  if (!data.promotion) {
-    data.promotion = inferPromotion(data, cliType)
-  }
-
-  return data
-}
-
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -556,21 +494,20 @@ function applyPromotion(data: LiveRateLimitData, cliType: string): LiveRateLimit
  */
 export async function getLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
   const cached = getCached(configDir)
-  if (cached) return applyPromotion(cached, cliType || 'claude')
+  if (cached) return cached
 
   // Codex: use app-server JSON-RPC
   if (cliType === 'codex') {
     const data = await fetchCodexRateLimits(configDir)
-    if (data) { setCached(configDir, data); return applyPromotion(data, 'codex') }
-    const stale = getStaleCache(configDir)
-    return stale ? applyPromotion(stale, 'codex') : null
+    if (data) { setCached(configDir, data); return data }
+    return getStaleCache(configDir)
   }
 
   // Claude: use OAuth token + Anthropic API headers
   const result = await readOAuthToken(configDir)
   if (!result.token) {
     const stale = getStaleCache(configDir)
-    if (stale) { stale.tokenStatus = result.tokenStatus; return applyPromotion(stale, 'claude') }
+    if (stale) { stale.tokenStatus = result.tokenStatus; return stale }
     return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus }
   }
 
@@ -580,11 +517,10 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
     data.tokenRefreshedAt = result.tokenRefreshedAt
     data.tokenExpiresAt = result.tokenExpiresAt
     setCached(configDir, data)
-    return applyPromotion(data, 'claude')
+    return data
   }
 
-  const stale = getStaleCache(configDir)
-  return stale ? applyPromotion(stale, 'claude') : null
+  return getStaleCache(configDir)
 }
 
 /**

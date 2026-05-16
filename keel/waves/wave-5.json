@@ -1,0 +1,7 @@
+{
+  "id": "wave-5",
+  "name": "Audit Follow-up",
+  "description": "Critical bugs, security, strategic features, and paper cuts surfaced by the deep audit on 2026-05-16. 25 tasks: 7 critical (vault collision, daemon auth, config-watch, silent catches, update banner, hardcoded OAuth client, launcher non-TTY), 5 strategic (sweech proxy, predictive quota, usage history, auto-backup, SweechBar→daemon HTTP), 10 paper cuts, 3 distribution/long-tail.",
+  "status": "active",
+  "createdAt": "2026-05-16T18:00:00Z"
+}

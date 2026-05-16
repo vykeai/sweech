@@ -206,19 +206,64 @@ export class ConfigManager {
       }
     }
 
-    atomicWriteFileSync(this.configFile, JSON.stringify(migrated, null, 2));
+    this.writeProfiles(migrated);
+  }
+
+  /**
+   * Read and parse the raw config.json, supporting both shapes:
+   *   - Legacy: `[ profile, profile, ... ]`
+   *   - Current: `{ profiles: [...], oauth?: {...}, ... }`
+   * Returns `null` if the file is missing or unparseable. Used internally
+   * by `getProfiles()` and the persist path so non-profile top-level keys
+   * (e.g. `oauth.anthropic.clientId`) are preserved on write.
+   */
+  private readRawConfig(): { profiles: any[]; extras: Record<string, unknown> } | null {
+    if (!fs.existsSync(this.configFile)) return null;
+    try {
+      const data = fs.readFileSync(this.configFile, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        return { profiles: parsed, extras: {} };
+      }
+      if (parsed && typeof parsed === 'object') {
+        const { profiles, ...extras } = parsed as { profiles?: unknown } & Record<string, unknown>;
+        return {
+          profiles: Array.isArray(profiles) ? profiles : [],
+          extras,
+        };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Persist a list of profiles to config.json, preserving any non-profile
+   * top-level keys that already exist (e.g. `oauth`). When the on-disk
+   * config has any extras, the bumped object shape is written; otherwise
+   * the legacy bare-array shape is kept untouched for round-trip
+   * compatibility with older sweech versions.
+   */
+  public writeProfiles(profiles: ProfileConfig[]): void {
+    const raw = this.readRawConfig();
+    const extras = raw?.extras ?? {};
+    if (Object.keys(extras).length > 0) {
+      atomicWriteFileSync(
+        this.configFile,
+        JSON.stringify({ ...extras, profiles }, null, 2),
+      );
+    } else {
+      atomicWriteFileSync(this.configFile, JSON.stringify(profiles, null, 2));
+    }
   }
 
   public getProfiles(): ProfileConfig[] {
-    if (!fs.existsSync(this.configFile)) {
-      return [];
-    }
-
-    const data = fs.readFileSync(this.configFile, 'utf-8');
-    const profiles = JSON.parse(data);
+    const raw = this.readRawConfig();
+    if (!raw) return [];
 
     // Backward compatibility: add cliType if missing
-    return profiles.map((p: any) => ({
+    return raw.profiles.map((p: any) => ({
       ...p,
       cliType: p.cliType || 'claude'
     }));
@@ -259,12 +304,12 @@ export class ConfigManager {
     }
 
     profiles.push(storableProfile);
-    atomicWriteFileSync(this.configFile, JSON.stringify(profiles, null, 2));
+    this.writeProfiles(profiles);
   }
 
   public removeProfile(commandName: string): void {
     const profiles = this.getProfiles().filter(p => p.commandName !== commandName);
-    atomicWriteFileSync(this.configFile, JSON.stringify(profiles, null, 2));
+    this.writeProfiles(profiles);
 
     // Remove wrapper script
     const wrapperPath = path.join(this.binDir, commandName);

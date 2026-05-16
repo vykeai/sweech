@@ -5,9 +5,10 @@ import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
+import { DEFAULT_DAEMON_PORT } from '../constants.js';
 
 const PID_FILE = join(homedir(), '.sweech', 'daemon.pid');
-const DEFAULT_PORT = 7801;
+const DEFAULT_PORT = DEFAULT_DAEMON_PORT;
 
 async function resolvePort(): Promise<number> {
   const envPort = parseInt(process.env.SWEECH_PORT ?? '');

@@ -1,0 +1,46 @@
+{
+  "id": "T-055",
+  "title": "Fish shell completions",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "medium",
+  "platform": null,
+  "assignee": "claude",
+  "description": "Only bash/zsh completions are generated. Fish is the third major shell.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T19:17:40.000Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-16T18:52:56.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-16T19:17:40.000Z"
+    }
+  ],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"Fish shell completions\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "sweech completion fish emits valid complete -c sweech … fish script",
+    "Completes commands, top-level flags, and workspace names where applicable",
+    "Documented in sweech --help and README"
+  ]
+}

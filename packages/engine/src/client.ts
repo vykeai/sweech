@@ -8,7 +8,9 @@ import {
 } from './stream-contract.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { DEFAULT_DAEMON_PORT } from './constants.js';
 import { homedir } from 'node:os';
+import { signRequest, getDefaultSecretPath } from './daemon/auth.js';
 
 type DaemonSSEFrame = AgentEvent | SweechDaemonStreamEnvelope | SweechUnsupportedStreamEvent;
 
@@ -49,7 +51,7 @@ function parseDaemonEventFrame(raw: string): AgentEvent | null {
 }
 
 const FED_CONFIG_FILE = join(homedir(), '.fed', 'config.json');
-const DEFAULT_PORT = 7801;
+const DEFAULT_PORT = DEFAULT_DAEMON_PORT;
 
 async function resolvePort(): Promise<number> {
   const envPort = parseInt(process.env.SWEECH_PORT ?? '', 10);
@@ -63,22 +65,62 @@ async function resolvePort(): Promise<number> {
   return DEFAULT_PORT;
 }
 
+/// Lazy reader for ~/.sweech/daemon.secret. Cached after first hit so we
+/// don't re-read the file for every request; the daemon doesn't rotate
+/// secrets during its lifetime.
+let cachedClientSecret: string | null = null;
+
+async function loadClientSecret(secretPath: string = getDefaultSecretPath()): Promise<string | null> {
+  if (cachedClientSecret !== null) return cachedClientSecret;
+  try {
+    const raw = await readFile(secretPath, 'utf-8');
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    cachedClientSecret = trimmed;
+    return trimmed;
+  } catch {
+    return null;
+  }
+}
+
+/// Reset cached secret. Test-only — production callers never need this.
+export function resetClientSecretCacheForTesting(): void {
+  cachedClientSecret = null;
+}
+
 export class SweechClient {
   private baseUrl: string;
+  private secretPath: string;
 
-  constructor(opts?: { port?: number; host?: string }) {
+  constructor(opts?: { port?: number; host?: string; secretPath?: string }) {
     const port = opts?.port ?? DEFAULT_PORT;
     const host = opts?.host ?? '127.0.0.1';
     this.baseUrl = `http://${host}:${port}`;
+    this.secretPath = opts?.secretPath ?? getDefaultSecretPath();
   }
 
-  static async discover(opts?: { host?: string }): Promise<SweechClient> {
+  static async discover(opts?: { host?: string; secretPath?: string }): Promise<SweechClient> {
     const port = await resolvePort();
     return new SweechClient({ port, ...opts });
   }
 
+  /// Build the headers needed to authenticate a request. Returns the
+  /// Content-Type and (if a secret is available) the HMAC signing headers.
+  /// Public routes (/healthz, /health) skip the signature; protected routes
+  /// require it. When the secret cannot be read, the request is sent
+  /// unsigned and the daemon will respond 401.
+  private async authedHeaders(method: string, pathWithQuery: string, body: string): Promise<Record<string, string>> {
+    const base: Record<string, string> = {};
+    if (body) base['Content-Type'] = 'application/json';
+    const secret = await loadClientSecret(this.secretPath);
+    if (!secret) return base;
+    const { headers } = signRequest(secret, method, pathWithQuery, body);
+    return { ...base, ...headers };
+  }
+
   async ping(): Promise<boolean> {
     try {
+      // /health is public — no signature required.
       const res = await fetch(`${this.baseUrl}/health`, { signal: AbortSignal.timeout(2000) });
       return res.ok;
     } catch {
@@ -87,20 +129,24 @@ export class SweechClient {
   }
 
   async select(opts: { provider?: string; engine?: string; budgetTier?: string; taskType?: string; account?: string; fallbackAccounts?: string[]; accountStrategy?: string }): Promise<{ engine: string; account?: string }> {
+    const body = JSON.stringify(opts);
+    const headers = await this.authedHeaders('POST', '/select', body);
     const res = await fetch(`${this.baseUrl}/select`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(opts),
+      headers,
+      body,
     });
     if (!res.ok) throw new Error(`Daemon select failed: ${res.status} ${await res.text()}`);
     return res.json();
   }
 
   async *run(prompt: string, opts?: Record<string, unknown>): AsyncGenerator<AgentEvent> {
+    const body = JSON.stringify({ prompt, ...opts });
+    const headers = await this.authedHeaders('POST', '/run', body);
     const res = await fetch(`${this.baseUrl}/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, ...opts }),
+      headers,
+      body,
     });
     if (!res.ok) throw new Error(`Daemon run failed: ${res.status}`);
     if (!res.body) throw new Error('No response body');
@@ -132,19 +178,22 @@ export class SweechClient {
   }
 
   async getEngines(): Promise<EngineStatus[]> {
-    const res = await fetch(`${this.baseUrl}/engines`);
+    const headers = await this.authedHeaders('GET', '/engines', '');
+    const res = await fetch(`${this.baseUrl}/engines`, { headers });
     if (!res.ok) throw new Error(`Daemon engines failed: ${res.status}`);
     return res.json();
   }
 
   async getEstate(): Promise<Estate> {
-    const res = await fetch(`${this.baseUrl}/estate`);
+    const headers = await this.authedHeaders('GET', '/estate', '');
+    const res = await fetch(`${this.baseUrl}/estate`, { headers });
     if (!res.ok) throw new Error(`Daemon estate failed: ${res.status}`);
     return res.json();
   }
 
   async getQuota(): Promise<Record<string, unknown>> {
-    const res = await fetch(`${this.baseUrl}/quota`);
+    const headers = await this.authedHeaders('GET', '/quota', '');
+    const res = await fetch(`${this.baseUrl}/quota`, { headers });
     if (!res.ok) throw new Error(`Daemon quota failed: ${res.status}`);
     return res.json();
   }

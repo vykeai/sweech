@@ -1,0 +1,46 @@
+{
+  "id": "T-043",
+  "title": "Move hardcoded ANTHROPIC_CLIENT_ID to env/config",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "critical",
+  "platform": null,
+  "assignee": "claude",
+  "description": "src/vaultRefresh.ts:95 hardcodes the Anthropic OAuth client ID. Single point of breakage if Anthropic rotates it; should be env-overridable.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T19:17:40.000Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-16T18:52:55.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-16T19:17:40.000Z"
+    }
+  ],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 1: \"Hardcoded Anthropic OAuth client ID. Single point of breakage if Anthropic rotates it\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Default value retained but SWEECH_ANTHROPIC_CLIENT_ID env var overrides",
+    "Optional oauth.anthropic.clientId in ~/.sweech/config.json overrides env",
+    "No regression in standard OAuth flow"
+  ]
+}

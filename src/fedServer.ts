@@ -20,6 +20,7 @@ import { getAccountInfo, getKnownAccounts } from './subscriptions'
 import { recommendRoute, suggestBestAccount, type RouteRecommendationRequest } from './accountSelector'
 import { summarizeAccountsForTelemetry } from './usage'
 import { readAuditLog } from './auditLog'
+import { LogRotator, getServeLogPath } from './logRotator'
 
 const packageJsonPath = path.join(__dirname, '../package.json')
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { version: string }
@@ -219,13 +220,14 @@ export function createSweechFedServer(port: number): http.Server {
         if (a.live?.status === 'limit_reached') {
           alerts.push({ type: 'limit', severity: 'warning', account: a.name, message: '5h rate limit reached' })
         }
-        if (a.live?.utilization7d !== undefined && a.live.utilization7d >= 0.9) {
-          alerts.push({ type: 'usage', severity: 'warning', account: a.name, message: `Weekly usage at ${Math.round(a.live.utilization7d * 100)}%` })
+        const weekly = a.live?.buckets?.[0]?.weekly
+        if (weekly?.utilization !== undefined && weekly.utilization >= 0.9) {
+          alerts.push({ type: 'usage', severity: 'warning', account: a.name, message: `Weekly usage at ${Math.round(weekly.utilization * 100)}%` })
         }
         // Expiry alert
-        if (a.live?.reset7dAt) {
-          const hoursLeft = (a.live.reset7dAt - Date.now() / 1000) / 3600
-          const remaining = 1 - (a.live.utilization7d ?? 0)
+        if (weekly?.resetsAt) {
+          const hoursLeft = (weekly.resetsAt - Date.now() / 1000) / 3600
+          const remaining = 1 - (weekly.utilization ?? 0)
           if (hoursLeft > 0 && hoursLeft < 24 && remaining > 0.2) {
             alerts.push({ type: 'expiry', severity: 'info', account: a.name, message: `${Math.round(remaining * 100)}% expiring in ${Math.round(hoursLeft)}h` })
           }
@@ -284,12 +286,30 @@ export async function startSweechFedServer(port: number): Promise<http.Server> {
 /**
  * Start server with graceful shutdown on SIGTERM/SIGINT.
  * Used by `sweech serve`.
+ *
+ * T-054: also starts a LogRotator against ~/Library/Logs/sweech-serve.log
+ * (or whatever SWEECH_LOG_PATH points to). The launchd plist redirects
+ * stdout/stderr to that file; without rotation it grows unbounded. The
+ * rotator runs immediately on start, then hourly, capped at 5 historical
+ * files. Timer is unref'd, so it never blocks shutdown.
  */
 export async function startSweechFedServerWithShutdown(port: number): Promise<http.Server> {
   const server = await startSweechFedServer(port)
 
+  let logRotator: LogRotator | null = null
+  try {
+    logRotator = new LogRotator({ logPath: getServeLogPath() })
+    logRotator.start()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`[sweech serve] failed to start log rotator: ${message}\n`)
+    logRotator = null
+  }
+
   const shutdown = () => {
     console.error('[sweech serve] shutting down...')
+    logRotator?.stop()
+    logRotator = null
     server.close(() => {
       process.exit(0)
     })

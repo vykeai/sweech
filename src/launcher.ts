@@ -12,11 +12,14 @@ import { ConfigManager } from './config';
 import { getProvider, isExternalProvider, type ModelInfo } from './providers';
 import { getCLI, SUPPORTED_CLIS } from './clis';
 import { getAccountInfo, type AccountInfo } from './subscriptions';
+import { logLaunch } from './launchLog';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
+import { recordProjectionSamples, getAccountProjection, formatEta } from './quotaProjection';
 import { sweechEvents } from './events';
 import { runHook } from './plugins';
 import { isTmuxAvailable, launchInTmux } from './tmux';
 import { scrubSecrets } from './scrubSecrets';
+import { formatExpiry } from './expiryFormat';
 
 interface UsageBar {
   label: string;
@@ -49,8 +52,6 @@ export interface LaunchEntry {
   tokenStatus?: string;
   /** Token expiry time (ms epoch) */
   tokenExpiresAt?: number;
-  /** Active promotion info */
-  promotion?: { label: string; multiplier?: number; expiresAt?: number };
   envOverrides?: Record<string, string>;
 }
 
@@ -186,8 +187,16 @@ function timeAgo(iso: string): string {
 }
 
 export function resolveAuthType(account: AccountInfo, command: string): string {
-  // Claude accounts — check rateLimitTier (from Keychain or .credentials.json)
+  // Claude accounts — prefer LIVE status over stale keychain rateLimitTier.
+  // The keychain tier is whatever the token was issued with and never updates
+  // until OAuth re-issuance, so a cancelled Max sub still says "max_20x"
+  // there. The live API tells us the org's actual entitlement *now*.
   if (command !== 'codex') {
+    const liveStatus = account.live?.status;
+    const tokStatus = account.live?.tokenStatus;
+    if (liveStatus === 'org_disabled') return 'OAuth disabled';
+    if (liveStatus === 'forbidden') return 'Forbidden';
+    if (liveStatus === 'unauthorized' || tokStatus === 'expired' || tokStatus === 'no_token') return 'Re-login needed';
     if (account.rateLimitTier) {
       const tier = account.rateLimitTier;
       if (tier.includes('max_20x')) return 'Max 20x';
@@ -267,7 +276,6 @@ export function buildEntry(
     bars,
     tokenStatus: account.tokenStatus,
     tokenExpiresAt: account.tokenExpiresAt,
-    promotion: account.live?.promotion,
   };
 }
 
@@ -380,6 +388,42 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
   }
   header.push(chalk.dim('  ─────────────────────────────────────────────────'));
 
+  // ── ACCOUNTS (vault) ──
+  // Compact top-of-screen view of every identity in the vault. Not
+  // keyboard-selectable here (use `sweech accounts` to manage); shown so
+  // users can see at a glance which identities are available and their
+  // token health, decoupled from any specific workspace.
+  try {
+    const { listAccounts } = require('./vault');
+    const vault = listAccounts() as Array<{ kind: string; email: string; plan?: string; expiresAt?: number; status?: string }>;
+    if (vault.length > 0) {
+      header.push('');
+      header.push(chalk.bold.cyan('  ── ACCOUNTS (vault) ──'));
+      const byKind: Record<string, typeof vault> = {};
+      for (const a of vault) (byKind[a.kind] ||= []).push(a);
+      for (const kind of ['anthropic', 'openai']) {
+        const list = byKind[kind];
+        if (!list || list.length === 0) continue;
+        header.push(chalk.dim(`  ${kind === 'anthropic' ? 'Anthropic' : 'OpenAI'}`));
+        for (const a of list.sort((x, y) => x.email.localeCompare(y.email))) {
+          const email = a.email.endsWith('@unknown.local') ? chalk.dim('(no email)') : a.email;
+          const planStr = a.plan ? chalk.cyan(` [${a.plan}]`) : '';
+          const exp = formatExpiry(a.expiresAt);
+          let expiryStr = '';
+          if (exp.short) {
+            const tinted = exp.color === 'red' ? chalk.red : exp.color === 'yellow' ? chalk.yellow : chalk.dim;
+            expiryStr = tinted(` 🔑 ${exp.short}`);
+          }
+          const showStatus = a.status && a.status !== 'ok' && a.status !== 'expired';
+          const statusStr = showStatus ? chalk.red(` · ${a.status}`) : '';
+          header.push(`    ● ${email}${planStr}${expiryStr}${statusStr}`);
+        }
+      }
+      header.push('');
+      header.push(chalk.bold.cyan('  ── WORKSPACES ──'));
+    }
+  } catch {}
+
   // "use first" badge: only meaningful in smart sort (in other modes rank-0 is arbitrary)
   const useFirstSet = new Set<LaunchEntry>();
   if (state.sortMode === 'smart') {
@@ -401,9 +445,8 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
     entryStartLines.push(body.length);
     const cliType = entry.command;
     if (state.grouped && cliType !== lastCliType) {
-      const cliLabel = cliType === 'codex' ? 'Codex (OpenAI)' : cliType === 'kimi' ? 'Kimi (Moonshot)' : 'Claude (Anthropic)';
-      body.push(chalk.dim(`  ── ${cliLabel} ${'─'.repeat(Math.max(0, 42 - cliLabel.length))}`));
-      body.push('');
+      const cliLabel = cliType === 'codex' ? 'Codex' : cliType === 'kimi' ? 'Kimi' : 'Claude';
+      body.push(chalk.bold.dim(`  ${cliLabel}`));
       lastCliType = cliType;
     }
     const selected = i === state.selectedIndex;
@@ -424,26 +467,18 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
     } else if (entry.tokenStatus === 'expired') {
       tokenStr = chalk.red(' 🔑 expired');
     } else if (entry.tokenStatus === 'valid' && entry.tokenExpiresAt) {
-      const hoursLeft = Math.max(0, (entry.tokenExpiresAt - Date.now()) / 3600000);
-      if (hoursLeft < 1) {
-        tokenStr = chalk.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
-      } else if (hoursLeft < 24) {
-        tokenStr = chalk.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+      const exp = formatExpiry(entry.tokenExpiresAt);
+      if (exp.color === 'yellow') {
+        tokenStr = chalk.yellow(` 🔑 ${exp.text}`);
+      } else if (exp.color === 'dim' && /h$/.test(exp.short)) {
+        tokenStr = chalk.dim(` 🔑 ${exp.text}`);
       } else {
+        // Day-bucket (or expired — shouldn't reach here when status === 'valid'):
+        // surface a healthy "token ok" rather than a noisy "expires in 14d".
         tokenStr = chalk.dim(' 🔑 token ok');
       }
     } else if (entry.tokenStatus === 'no_token' && entry.command !== 'codex') {
       tokenStr = chalk.dim(' 🔑 no token');
-    }
-
-    // Promotion badge
-    let promoStr = '';
-    const promo = entry.bars.length > 0 ? (entry as any).promotion : undefined;
-    if (promo) {
-      const expiryLabel = promo.expiresAt
-        ? (() => { const h = Math.max(0, (promo.expiresAt - Date.now()) / 3600000); return h < 24 ? ` · ${Math.round(h)}h left` : ` · ${Math.floor(h/24)}d left`; })()
-        : '';
-      promoStr = chalk.bgCyan.black(` ${promo.label} `) + chalk.cyan(expiryLabel);
     }
 
     // Provider line
@@ -490,11 +525,27 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
           body.push(prefix + chalk.dim('24h trend   ') + chalk.cyan(spark));
         }
       }
+      // Predictive ETA — only shown when we have ≥3 samples and a positive
+      // burn rate. Red <60min, yellow <4h, dim otherwise. 7d window first
+      // (the one quotas usually exhaust against); falls back to 5h.
+      const proj = getAccountProjection(entry.name);
+      const best = proj.projection7d?.etaToFullMinutes != null
+        ? { etaMin: proj.projection7d.etaToFullMinutes, window: '7d' }
+        : proj.projection5h?.etaToFullMinutes != null
+          ? { etaMin: proj.projection5h.etaToFullMinutes, window: '5h' }
+          : null;
+      if (best && best.etaMin > 0) {
+        const label = `ETA ${formatEta(best.etaMin)} (${best.window})`;
+        const colored = best.etaMin < 60 ? chalk.red(label)
+                       : best.etaMin < 240 ? chalk.yellow(label)
+                       : chalk.dim(label);
+        body.push(prefix + chalk.dim('forecast    ') + colored);
+      }
     };
 
     if (selected) {
       body.push(chalk.yellowBright(`  ┏${'━'.repeat(W)}┓`));
-      body.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr + (promoStr ? ' ' + promoStr : ''));
+      body.push(chalk.yellowBright('  ┃ ') + chalk.yellowBright.bold(entry.name) + chalk.yellowBright(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
       body.push(chalk.yellowBright('  ┃ ') + chalk.gray(infoLine) + (hasData ? tokenStr : ''));
 
       if (state.usage) {
@@ -503,7 +554,7 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
 
       body.push(chalk.yellowBright(`  ┗${'━'.repeat(W)}┛`));
     } else {
-      body.push(chalk.dim('  │ ') + chalk.bold.white(entry.name) + chalk.dim(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr + (promoStr ? ' ' + promoStr : ''));
+      body.push(chalk.dim('  │ ') + chalk.bold.white(entry.name) + chalk.dim(authBadge) + (sharedBadge ? chalk.magenta(sharedBadge) : '') + (reauthBadge ? chalk.red(reauthBadge) : '') + useFirstBadge + expiryStr);
       body.push(chalk.dim('  │ ') + chalk.gray(infoLine) + (hasData ? tokenStr : ''));
 
       if (state.usage) {
@@ -563,6 +614,15 @@ function buildStaticEntry(
 }
 
 export async function runLauncher(): Promise<void> {
+  // Fail-fast when stdin is not a TTY (piped input, CI, subprocess chains).
+  // Without this guard, readline.setRawMode() below would hang forever waiting
+  // for keypress events that can never arrive on a non-interactive stream.
+  if (!process.stdin.isTTY) {
+    console.error('Error: sweech launcher requires an interactive terminal.');
+    console.error('Use `sweech list` for non-interactive listings.');
+    process.exit(1);
+  }
+
   const config = new ConfigManager();
   const profiles = config.getProfiles();
   const { execFileSync } = require('child_process');
@@ -612,11 +672,6 @@ export async function runLauncher(): Promise<void> {
 
   const state = loadLastState();
   if (state.selectedIndex >= entries.length) state.selectedIndex = 0;
-
-  if (!process.stdin.isTTY) {
-    console.error(chalk.red('Error: sweech launcher requires a TTY'));
-    process.exit(1);
-  }
 
   // Wrap stdin in a passthrough that strips mouse escape sequences
   // so readline doesn't misinterpret scroll wheel as arrow keys
@@ -727,6 +782,7 @@ export async function runLauncher(): Promise<void> {
       .then(accounts => {
         patchEntries(accounts);
         try { appendSnapshot(accounts); } catch {}
+        try { recordProjectionSamples(accounts); } catch {}
         usageLoad = 'loaded';
         draw();
       })
@@ -765,6 +821,7 @@ export async function runLauncher(): Promise<void> {
       if (usageLoad !== 'loading') {
         patchEntries(accounts);
         try { appendSnapshot(accounts); } catch {}
+        try { recordProjectionSamples(accounts); } catch {}
         state.usage = true;
         usageLoad = 'loaded';
         draw();
@@ -942,7 +999,20 @@ export async function runLauncher(): Promise<void> {
 
       const cli = getCLI(entry.command);
 
-      if (isTmuxAvailable() && state.useTmux) {
+      const useTmuxNow = isTmuxAvailable() && state.useTmux;
+      logLaunch({
+        source: useTmuxNow ? 'tmux' : 'tui',
+        profile: entry.name,
+        cliCommand: entry.command,
+        cliArgs: launchArgs,
+        configDir: entry.configDir,
+        cwd: process.cwd(),
+        resume: state.resume,
+        yolo: state.yolo,
+        tmux: useTmuxNow,
+      });
+
+      if (useTmuxNow) {
         const status = launchInTmux({
           command: entry.command,
           args: launchArgs,

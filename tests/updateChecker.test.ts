@@ -13,6 +13,7 @@ import {
   checkForUpdate,
   fetchLatestVersion,
   fetchChangelog,
+  shouldSkipUpdateCheck,
 } from '../src/updateChecker';
 
 jest.mock('fs');
@@ -113,6 +114,113 @@ describe('updateChecker', () => {
     });
   });
 
+  // ── shouldSkipUpdateCheck ──────────────────────────────────────────────────
+
+  describe('shouldSkipUpdateCheck', () => {
+    // Reusable mocks
+    const nodeBin = '/usr/bin/node';
+    const cli = '/path/to/sweech/cli.js';
+
+    test('skips when argv contains --json (T-042 regression)', () => {
+      const argv = [nodeBin, cli, 'usage', '--json'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(true);
+    });
+
+    test('skips when --json appears with other flags', () => {
+      const argv = [nodeBin, cli, 'list', '--json', '--profile', 'foo'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(true);
+    });
+
+    test('skips when SWEECH_NO_UPDATE_NOTIFIER=1', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '1' })).toBe(true);
+    });
+
+    test('skips when SWEECH_NO_UPDATE_NOTIFIER=true', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: 'true' })).toBe(true);
+    });
+
+    test('does NOT skip when SWEECH_NO_UPDATE_NOTIFIER=0', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '0' })).toBe(false);
+    });
+
+    test('does NOT skip when SWEECH_NO_UPDATE_NOTIFIER=""', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '' })).toBe(false);
+    });
+
+    test('skips for --help / -h', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '--help'], {})).toBe(true);
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '-h'], {})).toBe(true);
+    });
+
+    test('skips for --version / -v', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '--version'], {})).toBe(true);
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '-v'], {})).toBe(true);
+    });
+
+    test('skips for update command itself', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, 'update'], {})).toBe(true);
+    });
+
+    test('skips for --complete (shell completion)', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, '--complete'], {})).toBe(true);
+    });
+
+    test('does NOT skip for sweech list', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, 'list'], {})).toBe(false);
+    });
+
+    test('does NOT skip for sweech profile add', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli, 'profile', 'add'], {})).toBe(false);
+    });
+
+    test('does NOT skip when --json is not present and no env opt-out', () => {
+      const argv = [nodeBin, cli, 'usage'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(false);
+    });
+
+    test('skips bare invocation (argv.length <= 2) — preserves prior behaviour', () => {
+      expect(shouldSkipUpdateCheck([nodeBin, cli], {})).toBe(true);
+      expect(shouldSkipUpdateCheck([nodeBin], {})).toBe(true);
+    });
+
+    test('--json suppression wins over absence of env var', () => {
+      const argv = [nodeBin, cli, 'usage', '--json'];
+      expect(shouldSkipUpdateCheck(argv, { OTHER: 'value' })).toBe(true);
+    });
+
+    test('env opt-out wins regardless of argv', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { SWEECH_NO_UPDATE_NOTIFIER: '1' })).toBe(true);
+    });
+
+    test('does NOT skip for arbitrary other env vars', () => {
+      const argv = [nodeBin, cli, 'list'];
+      expect(shouldSkipUpdateCheck(argv, { CI: 'true', NODE_ENV: 'production' })).toBe(false);
+    });
+
+    test('skips when argv has a positional `update` even with extra args', () => {
+      const argv = [nodeBin, cli, 'update', '--check'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(true);
+    });
+
+    test('does NOT skip when `update` appears as a non-subcommand positional', () => {
+      // A workspace named `update` (sweech launch update) must not suppress
+      // the banner — only the subcommand position (argv[2]) should match.
+      const argv = [nodeBin, cli, 'launch', 'update'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(false);
+    });
+
+    test('does NOT skip for sweech --some-long-flag that contains json substring', () => {
+      // Defensive: only exact match for --json triggers, not substring
+      const argv = [nodeBin, cli, 'list', '--json-pretty'];
+      expect(shouldSkipUpdateCheck(argv, {})).toBe(false);
+    });
+  });
+
   // ── readCache ──────────────────────────────────────────────────────────────
 
   describe('readCache', () => {
@@ -162,15 +270,20 @@ describe('updateChecker', () => {
   // ── writeCache ─────────────────────────────────────────────────────────────
 
   describe('writeCache', () => {
-    test('writes cache file with timestamp and latest version', () => {
+    test('writes cache file atomically with timestamp and latest version', () => {
       mockFs.existsSync.mockReturnValue(true);
       const now = 1700000000000;
       writeCache('0.3.0', now);
-      expect(mockFs.writeFileSync).toHaveBeenCalledWith(
-        CACHE_FILE,
-        JSON.stringify({ timestamp: now, latest: '0.3.0' }, null, 2),
-        'utf-8',
+      // atomicWriteFileSync writes via a tmp path then rename — assert on the
+      // tmp-path write (target file appears once renamed) and the rename to
+      // the canonical CACHE_FILE.
+      const tmpCall = mockFs.writeFileSync.mock.calls.find(
+        (c: any[]) => typeof c[0] === 'string' && c[0].startsWith(CACHE_FILE + '.tmp.'),
       );
+      expect(tmpCall).toBeDefined();
+      expect(tmpCall![1]).toBe(JSON.stringify({ timestamp: now, latest: '0.3.0' }, null, 2));
+      expect(mockFs.renameSync).toHaveBeenCalledWith(expect.stringContaining(CACHE_FILE), CACHE_FILE);
+      expect(mockFs.chmodSync).toHaveBeenCalledWith(CACHE_FILE, 0o600);
     });
 
     test('creates cache directory if missing', () => {

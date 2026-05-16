@@ -340,6 +340,8 @@ export function displayGroup(providerKey?: string): string {
   if (!providerKey || providerKey === 'anthropic') return 'claude';
   if (providerKey === 'openai') return 'codex';
   if (providerKey === 'kimi' || providerKey === 'kimi-coding') return 'kimi';
+  if (providerKey === 'local-proxy') return 'Local Proxy';
+  if (providerKey === 'local-ollama') return 'Ollama (Local)';
   const p = PROVIDERS[providerKey];
   return p?.displayName || providerKey;
 }
@@ -349,6 +351,54 @@ export function displayGroup(providerKey?: string): string {
  */
 export function isExternalProvider(providerKey?: string): boolean {
   return !!providerKey && providerKey !== 'anthropic' && providerKey !== 'openai';
+}
+
+/**
+ * Resolve the *real* upstream provider for a workspace, even when the
+ * sweech config's `provider` field stores the API format ('anthropic' /
+ * 'openai') rather than the actual vendor.
+ *
+ * Anthropic/OpenAI with a non-empty baseUrl is by definition a proxy —
+ * the real endpoints have hardcoded hosts and reject custom baseUrls,
+ * so a baseUrl override means somebody is routing through litellm,
+ * z.ai's anthropic-compat endpoint, openrouter, etc. Derive the actual
+ * vendor from the host.
+ */
+export function effectiveProvider(provider?: string, baseUrl?: string): string {
+  if (!baseUrl || !baseUrl.trim()) return provider ?? '';
+
+  let host = '';
+  try { host = new URL(baseUrl).hostname.toLowerCase(); } catch { host = baseUrl.toLowerCase(); }
+
+  // Local addresses split into two buckets:
+  //   - `local-ollama`: the canonical Ollama daemon (port 11434) or any
+  //     local URL the user has tagged as provider=ollama. These are
+  //     real Ollama instances, not gateways, and deserve their own
+  //     identity in the UI so users can tell at a glance whether the
+  //     workspace runs through actual local models vs a litellm-style
+  //     compatibility shim sitting on 4000/8000/etc.
+  //   - `local-proxy`: anything else on localhost (litellm, openrouter
+  //     bridges, vLLM, etc).
+  const isLocal = host === '127.0.0.1' || host === 'localhost' || host.endsWith('.local');
+  if (isLocal) {
+    let port = '';
+    try { port = new URL(baseUrl).port; } catch {}
+    if (port === '11434' || provider === 'ollama') return 'local-ollama';
+    return 'local-proxy';
+  }
+  if (host.endsWith('z.ai'))                                                    return 'glm';
+  if (host.endsWith('kimi.com') || host.endsWith('moonshot.ai'))                return 'kimi-coding';
+  if (host.endsWith('minimax.io'))                                              return 'minimax';
+  if (host.endsWith('dashscope.aliyuncs.com'))                                  return 'dashscope';
+  if (host.endsWith('openrouter.ai'))                                           return 'openrouter';
+  if (host.endsWith('googleapis.com'))                                          return 'gemini';
+  if (host.endsWith('groq.com'))                                                return 'groq';
+  if (host.endsWith('nvidia.com'))                                              return 'nvidia';
+  if (host.endsWith('ollama.com'))                                              return 'ollama-cloud';
+  if (host.endsWith('deepseek.com'))                                            return 'deepseek';
+
+  // Falls back to whatever the config stored — the host is unknown to us.
+  return provider ?? '';
 }
 
 /**

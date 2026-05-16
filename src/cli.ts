@@ -10,15 +10,17 @@ process.title = 'sweech'
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { DEFAULT_DAEMON_PORT, envOrDefaultDaemonPort } from './constants';
 import { ConfigManager, resolveApiKey } from './config';
 import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider } from './providers';
 import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
+import { logLaunch } from './launchLog';
 import { backupSweetch, restoreSweetch, backupClaude } from './backup';
 import { UsageTracker } from './usage';
 import { summarizeAccountsForTelemetry } from './usage';
 import { AliasManager } from './aliases';
-import { generateBashCompletion, generateZshCompletion, handleComplete } from './completion';
+import { generateBashCompletion, generateZshCompletion, generateFishCompletion, handleComplete } from './completion';
 import { confirmChatBackupBeforeRemoval, backupChatHistory } from './chatBackup';
 import { isDefaultCLIDirectory } from './reset';
 import { runDoctor, runPath, runTest, runEdit, runClone } from './utilityCommands';
@@ -31,14 +33,18 @@ import { runLauncher } from './launcher';
 import { isTmuxAvailable, launchInTmux } from './tmux';
 import { buildLaunchArgs, shouldUseTmux, SWEECH_LAUNCH_FLAGS } from './launchCommand';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
+import { kickBackgroundRefresh } from './backgroundRefresh';
 import { recommendRoute } from './accountSelector';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
+import { recordProjectionSamples, getAccountProjection, formatEta } from './quotaProjection';
 import { startSweechFedServerWithShutdown } from './fedServer';
 import { scrubSecrets } from './scrubSecrets';
-import { checkForUpdate, fetchChangelog } from './updateChecker';
+import { checkForUpdate, fetchChangelog, shouldSkipUpdateCheck } from './updateChecker';
 import { asciiBar, barColor } from './charts';
 import { installPlugin, uninstallPlugin, listPlugins } from './plugins';
 import { getAllTemplates, findTemplate, saveCustomTemplate, loadCustomTemplates, deleteCustomTemplate, BUILT_IN_TEMPLATES, ProfileTemplate } from './templates';
+import { buildAuthedHeaders } from './daemonAuth';
+import { formatExpiry } from './expiryFormat';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -63,7 +69,19 @@ const program = new Command();
 
 program
   .name('sweech')
-  .description('🍭 Switch between Claude accounts and external AI providers')
+  .description(`🍭 Switch between Claude / Codex accounts and 10+ AI providers.
+
+Common workflows:
+  sweech                       interactive launcher TUI
+  sweech list                  every workspace + status
+  sweech use <workspace>       spawn the CLI for that workspace
+  sweech check <workspace>     reachability probe (model + latency)
+  sweech accounts list         OAuth identities in the vault
+  sweech assign <ws> [email]   mount a vault account into a workspace
+  sweech providers quota       third-party balance / rate-limit table
+  sweech code-review           pick the best codex profile for review work
+
+Agents: read SWEECH_GUIDE.md for the 60-second model + JSON contracts.`)
   .version(version, '-v, --version', 'Output the current version');
 
 // Interactive onboarding
@@ -192,9 +210,10 @@ program
 program
   .command('list')
   .alias('ls')
-  .description('List all configured providers')
+  .description('List all configured workspaces (grouped by upstream provider)')
   .option('--refresh', 'Force a live quota fetch (up to 5s). Default is cache-only.')
-  .action(async (opts: { refresh?: boolean }) => {
+  .option('--json', 'Output as JSON (mirrors SweechBar Workspaces shape)')
+  .action(async (opts: { refresh?: boolean; json?: boolean }) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     const { execFileSync } = require('child_process');
@@ -256,54 +275,196 @@ program
     // ── Phase 1: Render immediately from config (no network) ───────────────────
     const isTTY = process.stdout.isTTY;
 
+    const { effectiveProvider, displayGroup } = require('./providers');
+    const PROVIDER_LABEL: Record<string, string> = {
+      anthropic: 'Anthropic', openai: 'OpenAI', kimi: 'Kimi', 'kimi-coding': 'Kimi Coding',
+      glm: 'GLM (z.ai)', minimax: 'MiniMax', dashscope: 'Alibaba', openrouter: 'OpenRouter',
+      gemini: 'Gemini', groq: 'Groq', nvidia: 'NVIDIA', ollama: 'Ollama',
+      'ollama-cloud': 'Ollama Cloud', deepseek: 'DeepSeek', qwen: 'Qwen', 'local-proxy': 'Local Proxy',
+      'local-ollama': 'Ollama (Local)',
+    };
+
     const renderProfiles = (accountInfoMap?: Map<string, Awaited<ReturnType<typeof getAccountInfo>>[number]>): number => {
       let lines = 0;
-
-      // Header: blank line + title + blank line = 3 lines
-      process.stdout.write('\n  sweech · profiles\n\n');
+      process.stdout.write('\n  sweech · workspaces\n\n');
       lines += 3;
+
+      // Collect every row, then group by displayGroup so the layout
+      // mirrors SweechBar's Workspaces tab: Claude → Codex → Providers.
+      type Row = {
+        name: string;
+        commandName: string;
+        isDefault: boolean;
+        cliType: string;
+        provider?: string;
+        baseUrl?: string;
+        sharedWith?: string;
+        model?: string;
+        sharingProfiles: string[];
+        info?: ReturnType<NonNullable<typeof accountInfoMap>['get']>;
+      };
+      const rows: Row[] = [];
 
       for (const cli of installedDefaults) {
         const configDir = path.join(os.homedir(), `.${cli.name}`);
-        const hasConfig = fs.existsSync(configDir);
-        const sharingProfiles = profiles.filter(p => p.sharedWith === cli.command);
-        const reverseTag = sharingProfiles.length > 0
-          ? chalk.dim(` (shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
-          : '';
-        const info = accountInfoMap?.get(cli.name);
-        const dot = accountInfoMap ? statusDot(info?.live, info?.needsReauth) : chalk.gray('●');
-        const planStr = info?.meta?.plan ? chalk.cyan(` [${info.meta.plan}]`) : '';
-        const lastStr = info ? relativeTime(info.lastActive) : chalk.dim('loading...');
-        const configTag = hasConfig ? '' : chalk.yellow(' (not configured)');
-        console.log(`  ${dot} ${chalk.bold(cli.command)}${chalk.gray(' [default]')}${planStr}${configTag}  ${lastStr}${reverseTag}`);
-        lines++;
+        if (!fs.existsSync(configDir)) continue;
+        rows.push({
+          name: cli.command,
+          commandName: cli.name,
+          isDefault: true,
+          cliType: cli.name,
+          provider: cli.name === 'claude' ? 'anthropic' : cli.name === 'kimi' ? 'kimi' : 'openai',
+          sharedWith: undefined,
+          sharingProfiles: profiles.filter(p => p.sharedWith === cli.command).map(p => p.commandName),
+          info: accountInfoMap?.get(cli.name),
+        });
+      }
+      for (const profile of profiles) {
+        rows.push({
+          name: profile.name,
+          commandName: profile.commandName,
+          isDefault: false,
+          cliType: profile.cliType,
+          provider: profile.provider,
+          baseUrl: profile.baseUrl,
+          sharedWith: profile.sharedWith,
+          model: profile.model,
+          sharingProfiles: profiles.filter(p => p.sharedWith === profile.commandName).map(p => p.commandName),
+          info: accountInfoMap?.get(profile.commandName),
+        });
       }
 
-      for (const profile of profiles) {
-        const provider = getProvider(profile.provider);
-        const info = accountInfoMap?.get(profile.commandName);
-        const dot = accountInfoMap ? statusDot(info?.live, info?.needsReauth) : chalk.gray('●');
-        const sharedTag = profile.sharedWith ? chalk.magenta(` [shared -> ${profile.sharedWith}]`) : '';
-        const sharingProfiles = profiles.filter(p => p.sharedWith === profile.commandName);
-        const reverseTag = sharingProfiles.length > 0
-          ? chalk.dim(` (shared by: ${sharingProfiles.map(p => p.commandName).join(', ')})`)
-          : '';
-        const providerStr = chalk.dim(` ${provider?.displayName || profile.provider}`);
-        const modelStr = profile.model ? chalk.dim(` · ${profile.model}`) : '';
-        const planStr = info?.meta?.plan ? chalk.cyan(` [${info.meta.plan}]`) : '';
-        const lastStr = info ? relativeTime(info.lastActive) : '';
-        console.log(`  ${dot} ${chalk.bold(profile.commandName)}${planStr}${providerStr}${modelStr}${sharedTag}  ${lastStr}${reverseTag}`);
+      // Group rows by displayGroup of effectiveProvider. Mirrors
+      // SweechBar Workspaces tab: only Claude and Codex get their own
+      // sections; every other workspace (external providers, local
+      // proxies, Kimi, …) is collapsed into a single "Providers"
+      // section so a single-workspace vendor doesn't waste a full
+      // section header.
+      const grouped = new Map<string, Row[]>();
+      for (const row of rows) {
+        const eff = effectiveProvider(row.provider, row.baseUrl);
+        const group = displayGroup(eff);
+        const bucket = (group === 'claude' || group === 'codex') ? group : '__providers__';
+        if (!grouped.has(bucket)) grouped.set(bucket, []);
+        grouped.get(bucket)!.push(row);
+      }
+
+      const groupOrder = ['claude', 'codex', '__providers__'];
+      const groupHeader = (g: string): string => {
+        if (g === 'claude') return 'Claude';
+        if (g === 'codex')  return 'Codex';
+        if (g === '__providers__') return 'Providers';
+        return g;
+      };
+
+      for (const group of groupOrder) {
+        const groupRows = grouped.get(group);
+        if (!groupRows || groupRows.length === 0) continue;
+        console.log(chalk.bold.cyan(`  ── ${groupHeader(group)} (${groupRows.length}) ──`));
+        lines++;
+        for (const row of groupRows) {
+          const info = row.info;
+          const dot = accountInfoMap ? statusDot(info?.live, info?.needsReauth) : chalk.gray('●');
+          const eff = effectiveProvider(row.provider, row.baseUrl);
+          const providerLabel = PROVIDER_LABEL[eff] ?? eff;
+          // Surface workspace-level problems as a loud red tag so a list
+          // scan immediately tells the user which workspaces are unsafe
+          // to launch. Order matters: a missing account beats every
+          // other status because nothing else can succeed without it.
+          const isOauthWs = group === 'claude' || group === 'codex';
+          let problemTag = '';
+          if (isOauthWs && !info?.activeAccount) {
+            problemTag = chalk.red(' [no account]');
+          } else if (info?.needsReauth) {
+            problemTag = chalk.red(' [re-auth]');
+          } else if (info?.live?.status === 'org_disabled') {
+            problemTag = chalk.red(' [OAuth disabled]');
+          } else if (info?.live?.status === 'unauthorized') {
+            problemTag = chalk.red(' [re-login]');
+          } else if (info?.live?.status === 'forbidden') {
+            problemTag = chalk.red(' [forbidden]');
+          } else if (info?.live?.status === 'limit_reached') {
+            problemTag = chalk.red(' [limit reached]');
+          } else if (group === '__providers__' && info?.live?.status === 'no_api_key') {
+            problemTag = chalk.red(' [no API key]');
+          }
+          // Plan capsule suppressed when a problem tag is shown — a
+          // stale "Max 20x" next to "OAuth disabled" reads as a
+          // contradiction.
+          const planStr = (!problemTag && info?.meta?.plan) ? chalk.cyan(` [${info.meta.plan}]`) : '';
+          const emailStr = (info?.emailAddress || info?.activeAccount?.email)
+            ? chalk.dim(` · ${info?.emailAddress ?? info?.activeAccount?.email}`)
+            : '';
+          const localTag = eff === 'local-ollama' ? ' (local ollama)'
+                          : eff === 'local-proxy' ? ' (local proxy)'
+                          : '';
+          const providerStr = group === 'claude' || group === 'codex'
+            ? (localTag ? chalk.magenta(localTag) : '')
+            : chalk.dim(` ${providerLabel}`);
+          const modelStr = row.model ? chalk.dim(` · ${row.model}`) : '';
+          const sharedTag = row.sharedWith ? chalk.magenta(` [→ ${row.sharedWith}]`) : '';
+          const reverseTag = row.sharingProfiles.length > 0
+            ? chalk.dim(` (shared by: ${row.sharingProfiles.join(', ')})`)
+            : '';
+          const u5h = info?.live?.buckets?.[0]?.session?.utilization;
+          const u7d = info?.live?.buckets?.[0]?.weekly?.utilization;
+          const usageStr = (u5h !== undefined || u7d !== undefined)
+            ? chalk.dim(`  5h:${Math.round((u5h ?? 0) * 100)}% 7d:${Math.round((u7d ?? 0) * 100)}%`)
+            : '';
+          const lastStr = info ? relativeTime(info.lastActive) : '';
+          const defTag = row.isDefault ? chalk.gray(' [default]') : '';
+          console.log(`  ${dot} ${chalk.bold(row.commandName)}${defTag}${problemTag}${planStr}${emailStr}${providerStr}${modelStr}${sharedTag}${usageStr}  ${lastStr}${reverseTag}`);
+          lines++;
+        }
+        console.log();
         lines++;
       }
 
       if (installedDefaults.length === 0 && profiles.length === 0) {
-        console.log(chalk.gray('  No profiles configured. Run'), chalk.bold('sweech add'), chalk.gray('to create one.'));
+        console.log(chalk.gray('  No workspaces configured. Run'), chalk.bold('sweech add'), chalk.gray('to create one.'));
         lines++;
+      } else {
+        // Point users at the companion view — same content split the
+        // SweechBar menubar uses (Workspaces / Accounts tabs).
+        const vaultCount = (() => {
+          try { return require('./vault').listAccounts().length; } catch { return 0; }
+        })();
+        if (vaultCount > 0) {
+          console.log(chalk.dim(`  · ${vaultCount} OAuth identities in vault — `) + chalk.bold('sweech accounts list'));
+          lines++;
+        }
       }
-      console.log();
-      lines++;
       return lines;
     };
+
+    // JSON path: mirror SweechBar Workspaces tab shape so scripts can
+    // consume the same data the menubar renders.
+    if (opts.json) {
+      const infos = await getAccountInfo(accountRefs, { cacheOnly: !opts.refresh, timeoutMs: opts.refresh ? 5000 : undefined });
+      const { effectiveProvider, displayGroup } = require('./providers');
+      const out = infos.map((info: any) => ({
+        commandName: info.commandName,
+        cliType: info.cliType,
+        provider: info.provider,
+        baseUrl: info.baseUrl,
+        effectiveProvider: effectiveProvider(info.provider, info.baseUrl),
+        displayGroup: displayGroup(effectiveProvider(info.provider, info.baseUrl)),
+        isDefault: info.isDefault ?? false,
+        sharedWith: info.sharedWith,
+        plan: info.meta?.plan,
+        email: info.emailAddress ?? info.activeAccount?.email,
+        activeAccount: info.activeAccount,
+        live: info.live,
+        utilization5h: info.live?.buckets?.[0]?.session?.utilization ?? 0,
+        utilization7d: info.live?.buckets?.[0]?.weekly?.utilization ?? 0,
+        liveStatus: info.live?.status,
+        needsReauth: !!info.needsReauth,
+        lastActive: info.lastActive,
+      }));
+      process.stdout.write(JSON.stringify({ workspaces: out }, null, 2) + '\n');
+      if (!opts.refresh) kickBackgroundRefresh();
+      process.exit(0);
+    }
 
     if (isTTY) {
       // Interactive: show profiles instantly, then refresh with live data
@@ -324,6 +485,10 @@ program
       } catch { /* live data unavailable */ }
       renderProfiles(accountInfoMap);
     }
+    // Stale-while-revalidate: cache-only render is instant, but kick a
+    // detached `sweech usage --refresh` if cache is stale (throttled to once
+    // per minute). Next invocation sees fresh data, this one doesn't wait.
+    if (!opts.refresh) kickBackgroundRefresh();
     // Force exit so unawaited refresh promises (race losers with pending fetches)
     // don't keep the event loop alive after the user has their final render.
     process.exit(0);
@@ -583,10 +748,51 @@ program
   });
 
 // Compare command — side-by-side profile comparison
+//
+// JSON payload shape (stable contract — downstream tools parse this):
+type ComparePerModelTier = {
+  /** Bucket label from the live API, e.g. "All models", "Sonnet only", "gpt-5-codex" */
+  label: string;
+  /** 5h rolling window utilization (0..1), if reported */
+  session?: { utilization: number; resetsAt?: number };
+  /** 7d rolling window utilization (0..1), if reported */
+  weekly?: { utilization: number; resetsAt?: number };
+};
+type CompareProfilePayload = {
+  name: string;
+  commandName: string;
+  cliType?: string;
+  plan: string | null;
+  status: string;
+  needsReauth: boolean;
+  score: number;
+  utilization5h: number | null;
+  utilization7d: number | null;
+  reset5hAt: number | null;
+  reset7dAt: number | null;
+  tokenExpiresAt: number | null;
+  tokenStatus: string | null;
+  lastActive: string | null;
+  totalMessages: number;
+  email: string | null;
+  /** User-configured cost/limit hints from meta — null if unset */
+  limits: { window5h?: number; window7d?: number } | null;
+  /** Per-model rate-limit tiers (from live.buckets). Always present in JSON
+   *  so consumers don't need to special-case --per-model. */
+  perModel: ComparePerModelTier[];
+};
+type ComparePayload = {
+  a: CompareProfilePayload;
+  b: CompareProfilePayload;
+  capturedAt: string;
+};
+
 program
   .command('compare <a> <b>')
   .description('Compare two profiles side-by-side (usage, plan, score)')
-  .action(async (a: string, b: string) => {
+  .option('--json', 'Output as JSON (structured comparison payload)')
+  .option('--per-model', 'Render per-model rate-limit tiers side-by-side')
+  .action(async (a: string, b: string, opts: { json?: boolean; perModel?: boolean }) => {
     try {
       const config = new ConfigManager();
       const profiles = config.getProfiles();
@@ -602,11 +808,19 @@ program
       const refB = accountList.find(p => p.commandName === nameB || p.name === nameB);
 
       if (!refA) {
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ error: `Profile '${a}' not found`, available: accountList.map(p => p.name) }) + '\n');
+          process.exit(1);
+        }
         console.error(chalk.red(`Profile '${a}' not found`));
         console.log(chalk.dim('Available: ' + accountList.map(p => p.name).join(', ')));
         process.exit(1);
       }
       if (!refB) {
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ error: `Profile '${b}' not found`, available: accountList.map(p => p.name) }) + '\n');
+          process.exit(1);
+        }
         console.error(chalk.red(`Profile '${b}' not found`));
         console.log(chalk.dim('Available: ' + accountList.map(p => p.name).join(', ')));
         process.exit(1);
@@ -622,8 +836,8 @@ program
       const smartScore = (acct: typeof infoA): number => {
         if (acct.needsReauth) return -2;
         if (acct.live?.status === 'limit_reached') return -1;
-        const remaining7d = 1 - (acct.live?.utilization7d ?? 0);
-        const reset7dAt = acct.live?.reset7dAt;
+        const remaining7d = 1 - (acct.live?.buckets?.[0]?.weekly?.utilization ?? 0);
+        const reset7dAt = acct.live?.buckets?.[0]?.weekly?.resetsAt;
         if (!reset7dAt) return remaining7d / 7;
         const hoursLeft = Math.max(0.5, (reset7dAt - Date.now() / 1000) / 3600);
         const daysLeft = hoursLeft / 24;
@@ -645,13 +859,66 @@ program
         return `${days}d ago`;
       };
 
-      // Status string
+      // Plain status (no color) for JSON payload
+      const plainStatus = (acct: typeof infoA): string => {
+        if (acct.needsReauth) return 'reauth_needed';
+        if (acct.live?.status) return acct.live.status;
+        return 'ok';
+      };
+
+      // Status string (colored) for text rendering
       const statusStr = (acct: typeof infoA): string => {
         if (acct.needsReauth) return chalk.red('reauth needed');
         if (acct.live?.status === 'limit_reached') return chalk.red('limit reached');
         if (acct.live?.status === 'warning') return chalk.yellow('warning');
         return chalk.green('ok');
       };
+
+      // Extract per-model breakdown from live.buckets
+      const perModel = (acct: typeof infoA): ComparePerModelTier[] => {
+        const buckets = acct.live?.buckets;
+        if (!buckets || buckets.length === 0) return [];
+        return buckets.map(b => ({
+          label: b.label,
+          session: b.session ? { utilization: b.session.utilization, resetsAt: b.session.resetsAt } : undefined,
+          weekly: b.weekly ? { utilization: b.weekly.utilization, resetsAt: b.weekly.resetsAt } : undefined,
+        }));
+      };
+
+      // Build a stable JSON-shaped profile snapshot
+      const toPayload = (info: typeof infoA, refName: string): CompareProfilePayload => ({
+        name: refName,
+        commandName: info.commandName,
+        cliType: info.cliType,
+        plan: info.meta.plan ?? null,
+        status: plainStatus(info),
+        needsReauth: !!info.needsReauth,
+        score: smartScore(info),
+        utilization5h: info.live?.buckets?.[0]?.session?.utilization ?? null,
+        utilization7d: info.live?.buckets?.[0]?.weekly?.utilization ?? null,
+        reset5hAt: info.live?.buckets?.[0]?.session?.resetsAt ?? null,
+        reset7dAt: info.live?.buckets?.[0]?.weekly?.resetsAt ?? null,
+        tokenExpiresAt: info.live?.tokenExpiresAt ?? info.tokenExpiresAt ?? null,
+        tokenStatus: info.live?.tokenStatus ?? info.tokenStatus ?? null,
+        lastActive: info.lastActive ?? null,
+        totalMessages: info.totalMessages,
+        email: info.emailAddress ?? info.activeAccount?.email ?? null,
+        limits: info.meta.limits ?? null,
+        perModel: perModel(info),
+      });
+
+      // JSON path: emit structured payload, suppress text output. JSON
+      // always includes perModel — downstream tools shouldn't need to flip
+      // --per-model on/off to get a complete machine-readable snapshot.
+      if (opts.json) {
+        const payload: ComparePayload = {
+          a: toPayload(infoA, nameA),
+          b: toPayload(infoB, nameB),
+          capturedAt: new Date().toISOString(),
+        };
+        process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
+        return;
+      }
 
       // Column widths
       const colW = 24;
@@ -672,15 +939,15 @@ program
 
       // 5h usage bars
       const barW = 14;
-      const u5hA = infoA.live?.utilization5h ?? 0;
-      const u5hB = infoB.live?.utilization5h ?? 0;
+      const u5hA = infoA.live?.buckets?.[0]?.session?.utilization ?? 0;
+      const u5hB = infoB.live?.buckets?.[0]?.session?.utilization ?? 0;
       const bar5hA = asciiBar({ label: '', value: u5hA, max: 1, width: barW, color: barColor(u5hA) });
       const bar5hB = asciiBar({ label: '', value: u5hB, max: 1, width: barW, color: barColor(u5hB) });
       console.log(`  ${'5h:'.padEnd(7)}${bar5hA.padEnd(colW)}${bar5hB}`);
 
       // 7d usage bars
-      const u7dA = infoA.live?.utilization7d ?? 0;
-      const u7dB = infoB.live?.utilization7d ?? 0;
+      const u7dA = infoA.live?.buckets?.[0]?.weekly?.utilization ?? 0;
+      const u7dB = infoB.live?.buckets?.[0]?.weekly?.utilization ?? 0;
       const bar7dA = asciiBar({ label: '', value: u7dA, max: 1, width: barW, color: barColor(u7dA) });
       const bar7dB = asciiBar({ label: '', value: u7dB, max: 1, width: barW, color: barColor(u7dB) });
       console.log(`  ${'Week:'.padEnd(7)}${bar7dA.padEnd(colW)}${bar7dB}`);
@@ -699,6 +966,35 @@ program
       const msgsA = String(infoA.totalMessages);
       const msgsB = String(infoB.totalMessages);
       console.log(`  ${'Messages:'.padEnd(16)}${padVal(msgsA)}${msgsB}`);
+
+      // Per-model breakdown (opt-in). Renders one row per bucket label that
+      // exists in EITHER profile; missing entries on the other side show as '—'.
+      if (opts.perModel) {
+        const tiersA = perModel(infoA);
+        const tiersB = perModel(infoB);
+        if (tiersA.length === 0 && tiersB.length === 0) {
+          console.log();
+          console.log(chalk.dim('  Per-model: no live bucket data for either profile.'));
+        } else {
+          const labels = Array.from(new Set([...tiersA.map(t => t.label), ...tiersB.map(t => t.label)]));
+          const fmtTier = (tier: ComparePerModelTier | undefined): string => {
+            if (!tier) return '—';
+            const parts: string[] = [];
+            if (tier.session) parts.push(`5h:${Math.round(tier.session.utilization * 100)}%`);
+            if (tier.weekly)  parts.push(`7d:${Math.round(tier.weekly.utilization * 100)}%`);
+            return parts.length ? parts.join(' ') : '—';
+          };
+          console.log();
+          console.log(chalk.bold('  Per-model rate limits:'));
+          console.log(`  ${''.padEnd(16)}${chalk.bold(padVal(nameA))}${chalk.bold(nameB)}`);
+          for (const label of labels) {
+            const tierA = tiersA.find(t => t.label === label);
+            const tierB = tiersB.find(t => t.label === label);
+            const labelTrunc = label.length > 14 ? label.slice(0, 13) + '…' : label;
+            console.log(`  ${(labelTrunc + ':').padEnd(16)}${padVal(fmtTier(tierA))}${fmtTier(tierB)}`);
+          }
+        }
+      }
 
       console.log();
     } catch (error: unknown) {
@@ -770,11 +1066,13 @@ program
           const barColor = (r: number) => r <= 0.5 ? chalk.green : r <= 0.8 ? chalk.yellow : chalk.red;
           console.log();
           console.log(chalk.bold('Live rate limits:'));
-          if (acctInfo.live.utilization5h !== undefined) {
-            console.log('  ' + asciiBar({ label: '  5h', value: acctInfo.live.utilization5h, max: 1, width: 25, color: barColor(acctInfo.live.utilization5h) }));
+          const u5h = acctInfo.live.buckets?.[0]?.session?.utilization;
+          const u7d = acctInfo.live.buckets?.[0]?.weekly?.utilization;
+          if (u5h !== undefined) {
+            console.log('  ' + asciiBar({ label: '  5h', value: u5h, max: 1, width: 25, color: barColor(u5h) }));
           }
-          if (acctInfo.live.utilization7d !== undefined) {
-            console.log('  ' + asciiBar({ label: 'week', value: acctInfo.live.utilization7d, max: 1, width: 25, color: barColor(acctInfo.live.utilization7d) }));
+          if (u7d !== undefined) {
+            console.log('  ' + asciiBar({ label: 'week', value: u7d, max: 1, width: 25, color: barColor(u7d) }));
           }
           if (acctInfo.live.status) {
             const statusColor = acctInfo.live.status === 'allowed' ? chalk.green : acctInfo.live.status === 'limit_reached' ? chalk.red : chalk.yellow;
@@ -989,9 +1287,12 @@ program
 
     // Pre-launch reachability check (unless --force)
     if (!opts.force && profile) {
-      const daemonPort = parseInt(process.env.SWEECH_PORT ?? '') || 7801;
+      const daemonPort = envOrDefaultDaemonPort();
       try {
-        const res = await fetch(`http://127.0.0.1:${daemonPort}/check?profile=${encodeURIComponent(profile.commandName)}`, {
+        const checkPath = `/check?profile=${encodeURIComponent(profile.commandName)}`;
+        const headers = await buildAuthedHeaders('GET', checkPath, '');
+        const res = await fetch(`http://127.0.0.1:${daemonPort}${checkPath}`, {
+          headers,
           signal: AbortSignal.timeout(15_000),
         });
         if (res.ok) {
@@ -1002,7 +1303,8 @@ program
 
             // Find reachable alternatives
             try {
-              const allRes = await fetch(`http://127.0.0.1:${daemonPort}/check/all`, { signal: AbortSignal.timeout(10_000) });
+              const allHeaders = await buildAuthedHeaders('GET', '/check/all', '');
+              const allRes = await fetch(`http://127.0.0.1:${daemonPort}/check/all`, { headers: allHeaders, signal: AbortSignal.timeout(10_000) });
               if (allRes.ok) {
                 const allResults = await allRes.json() as Array<{ profile: string; reachable: boolean }>;
                 const reachable = allResults.filter(r => r.reachable).map(r => r.profile);
@@ -1050,13 +1352,28 @@ program
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
 
-    if (shouldUseTmux(isTmuxAvailable(), opts)) {
+    const profileName = profile?.commandName ?? cli.command;
+    const useTmux = shouldUseTmux(isTmuxAvailable(), opts);
+    logLaunch({
+      source: useTmux ? 'tmux' : 'cli',
+      profile: profileName,
+      cliCommand: cli.command,
+      cliArgs: launchArgs,
+      configDir: profileDir,
+      cwd: process.cwd(),
+      resume: !!opts.resume,
+      yolo: !!opts.yolo,
+      tmux: useTmux,
+      forced: !!opts.force,
+    });
+
+    if (useTmux) {
       const status = launchInTmux({
         command: cli.command,
         args: launchArgs,
         configDirEnvVar: cli.configDirEnvVar,
         configDir: profileDir,
-        profileName: profile?.commandName ?? cli.command,
+        profileName,
         resumeArgs: (cli.resumeFlag || '--continue').split(' ').filter(Boolean),
         hasResume: !!opts.resume,
       });
@@ -1147,12 +1464,13 @@ program
       return;
     }
 
-    const daemonPort = parseInt(process.env.SWEECH_PORT ?? '') || 7801;
+    const daemonPort = envOrDefaultDaemonPort();
     const baseUrl = `http://127.0.0.1:${daemonPort}`;
 
     if (opts.all || !profileName) {
       try {
-        const res = await fetch(`${baseUrl}/check/all`, { signal: AbortSignal.timeout(30_000) });
+        const allHeaders = await buildAuthedHeaders('GET', '/check/all', '');
+        const res = await fetch(`${baseUrl}/check/all`, { headers: allHeaders, signal: AbortSignal.timeout(30_000) });
         if (!res.ok) throw new Error(`Daemon returned ${res.status}`);
         const results = await res.json() as Array<{ profile: string; model: string | null; reachable: boolean; reason: string; suggestedFallback: string | null; latencyMs: number }>;
         if (opts.json) {
@@ -1174,7 +1492,9 @@ program
     }
 
     try {
-      const res = await fetch(`${baseUrl}/check?profile=${encodeURIComponent(profileName)}`, { signal: AbortSignal.timeout(15_000) });
+      const checkPath = `/check?profile=${encodeURIComponent(profileName)}`;
+      const headers = await buildAuthedHeaders('GET', checkPath, '');
+      const res = await fetch(`${baseUrl}${checkPath}`, { headers, signal: AbortSignal.timeout(15_000) });
       if (!res.ok) throw new Error(`Daemon returned ${res.status}`);
       const result = await res.json() as { profile: string; model: string | null; reachable: boolean; reason: string; suggestedFallback: string | null; latencyMs: number };
       if (opts.json) {
@@ -1236,86 +1556,14 @@ program
 
       console.log(chalk.green(`\n  ✓ Successfully re-authenticated ${resolvedName}\n`));
       if (token.expiresAt) {
-        console.log(chalk.gray(`  Token expires: ${new Date(token.expiresAt).toLocaleString()}\n`));
+        const exp = formatExpiry(token.expiresAt);
+        if (exp.text) console.log(chalk.gray(`  Token ${exp.text}\n`));
       }
     } catch (error: unknown) {
       const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Authentication failed:'), msg);
       process.exit(1);
     }
-  });
-
-// Promo command — manage active promotions (e.g. "2x Tokens Live")
-program
-  .command('promo [action]')
-  .description('Manage provider promotions (list, add, remove, clear)')
-  .option('--cli <type>', 'CLI type: claude, codex, or * for all', '*')
-  .option('--label <text>', 'Promotion label, e.g. "2x Tokens"')
-  .option('--multiplier <n>', 'Usage multiplier, e.g. 2', parseFloat)
-  .option('--expires <date>', 'Expiry date (ISO format or relative like "in 7d")')
-  .action((action: string | undefined, opts: { cli: string; label?: string; multiplier?: number; expires?: string }) => {
-    const promoFile = path.join(require('os').homedir(), '.sweech', 'promotions.json');
-    const load = (): any[] => { try { return JSON.parse(fs.readFileSync(promoFile, 'utf-8')); } catch { return []; } };
-    const save = (p: any[]) => { fs.mkdirSync(path.dirname(promoFile), { recursive: true, mode: 0o700 }); fs.writeFileSync(promoFile, JSON.stringify(p, null, 2)); };
-
-    if (!action || action === 'list') {
-      const promos = load();
-      if (promos.length === 0) {
-        console.log(chalk.dim('\n  No active promotions.\n'));
-        console.log(chalk.gray('  Add one: sweech promo add --cli claude --label "2x Tokens" --multiplier 2 --expires "2026-04-01"\n'));
-        return;
-      }
-      console.log(chalk.bold('\n  Active Promotions:\n'));
-      for (const p of promos) {
-        const expired = p.expiresAt && new Date(p.expiresAt).getTime() < Date.now();
-        const expiry = p.expiresAt ? (expired ? chalk.red('expired') : chalk.green(`until ${p.expiresAt}`)) : chalk.dim('no expiry');
-        const icon = expired ? chalk.red('✗') : chalk.green('✓');
-        console.log(`  ${icon} ${chalk.bold(p.label)} · ${p.cliType} · ${p.multiplier || '?'}x · ${expiry}`);
-      }
-      console.log();
-      return;
-    }
-
-    if (action === 'add') {
-      if (!opts.label) { console.error(chalk.red('--label required')); process.exit(1); }
-      const promos = load();
-      const entry: any = { cliType: opts.cli, label: opts.label };
-      if (opts.multiplier) entry.multiplier = opts.multiplier;
-      if (opts.expires) {
-        // Support relative dates like "in 7d"
-        const match = opts.expires.match(/^in\s+(\d+)([dhm])$/);
-        if (match) {
-          const n = parseInt(match[1]);
-          const unit = match[2] === 'd' ? 86400000 : match[2] === 'h' ? 3600000 : 60000;
-          entry.expiresAt = new Date(Date.now() + n * unit).toISOString();
-        } else {
-          entry.expiresAt = opts.expires;
-        }
-      }
-      promos.push(entry);
-      save(promos);
-      console.log(chalk.green(`\n  ✓ Added promotion: ${entry.label} (${entry.cliType})\n`));
-      return;
-    }
-
-    if (action === 'clear') {
-      save([]);
-      console.log(chalk.green('\n  ✓ All promotions cleared.\n'));
-      return;
-    }
-
-    if (action === 'remove') {
-      const promos = load();
-      const idx = promos.findIndex((p: any) => p.label === opts.label || p.cliType === opts.cli);
-      if (idx === -1) { console.error(chalk.red('Promotion not found')); process.exit(1); }
-      const removed = promos.splice(idx, 1)[0];
-      save(promos);
-      console.log(chalk.green(`\n  ✓ Removed: ${removed.label}\n`));
-      return;
-    }
-
-    console.error(chalk.red(`Unknown action: ${action}. Use: list, add, remove, clear`));
-    process.exit(1);
   });
 
 // Alias command
@@ -1444,14 +1692,18 @@ program
 // Completion command
 program
   .command('completion <shell>')
-  .description('Generate shell completion script (bash or zsh)')
+  .description('Generate shell completion script (bash | zsh | fish)')
   .action((shell: string) => {
-    if (shell !== 'bash' && shell !== 'zsh') {
-      console.error(chalk.red('Error: Unsupported shell. Use "bash" or "zsh"'));
+    if (shell !== 'bash' && shell !== 'zsh' && shell !== 'fish') {
+      console.error(chalk.red('Error: Unsupported shell. Use "bash", "zsh", or "fish"'));
       process.exit(1);
     }
 
-    const completion = shell === 'bash' ? generateBashCompletion() : generateZshCompletion();
+    const completion = shell === 'bash'
+      ? generateBashCompletion()
+      : shell === 'zsh'
+      ? generateZshCompletion()
+      : generateFishCompletion();
     console.log(completion);
 
     // Show installation instructions
@@ -1465,17 +1717,26 @@ program
       console.error();
       console.error(chalk.gray('2. Add to your ~/.bashrc or ~/.bash_profile:'));
       console.error(chalk.yellow('   source ~/.sweech-completion.bash'));
-    } else {
+      console.error();
+      console.error(chalk.gray('3. Reload your shell:'));
+      console.error(chalk.yellow('   source ~/.bashrc'));
+    } else if (shell === 'zsh') {
       console.error(chalk.gray('1. Save the completion script:'));
       console.error(chalk.yellow('   sweetch completion zsh > ~/.sweech-completion.zsh'));
       console.error();
       console.error(chalk.gray('2. Add to your ~/.zshrc:'));
       console.error(chalk.yellow('   source ~/.sweech-completion.zsh'));
+      console.error();
+      console.error(chalk.gray('3. Reload your shell:'));
+      console.error(chalk.yellow('   source ~/.zshrc'));
+    } else {
+      console.error(chalk.gray('1. Save the completion script (fish auto-loads from this path):'));
+      console.error(chalk.yellow('   sweetch completion fish > ~/.config/fish/completions/sweech.fish'));
+      console.error();
+      console.error(chalk.gray('2. Open a new shell or reload:'));
+      console.error(chalk.yellow('   source ~/.config/fish/completions/sweech.fish'));
     }
 
-    console.error();
-    console.error(chalk.gray('3. Reload your shell:'));
-    console.error(chalk.yellow(`   source ~/.${shell === 'bash' ? 'bashrc' : 'zshrc'}`));
     console.error();
   });
 
@@ -1489,7 +1750,12 @@ program
     } catch (error: unknown) {
       const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Error:'), msg);
-      process.exit(1);
+      // T-053 + code-review: doctor uses 0/1/2 severity exit codes. An
+      // uncaught throw is an error (severity 2), not a warning — preserve
+      // any exitCode runDoctor managed to set before throwing, otherwise
+      // fall through to 2.
+      const prior = typeof process.exitCode === 'number' ? process.exitCode : 0;
+      process.exitCode = prior >= 2 ? prior : 2;
     }
   });
 
@@ -1557,7 +1823,7 @@ program
       if (modelId) {
         profile.model = modelId;
         const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
-        fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+        config.writeProfiles(allProfiles);
         if (provider) {
           const apiKey = await resolveApiKey(profile);
           config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, modelId, profile.baseUrl, profile.envOverrides);
@@ -1608,7 +1874,7 @@ program
 
         profile.model = finalModel;
         const allProfiles = profiles.map(p => p.commandName === commandName ? profile : p);
-        fs.writeFileSync(config.getConfigFile(), JSON.stringify(allProfiles, null, 2));
+        config.writeProfiles(allProfiles);
         if (provider) {
           const apiKey = await resolveApiKey(profile);
           config.createProfileConfig(commandName, provider, apiKey, profile.cliType, undefined, false, finalModel, profile.baseUrl, profile.envOverrides);
@@ -1977,17 +2243,36 @@ const usageCmd = program
       return;
     }
 
-    const accounts = await getAccountInfo(accountList, { refresh: opts.refresh });
+    // Default: cache-only (instant, no network). --refresh forces a live fetch
+    // with a 5s per-profile race ceiling. The default keeps SweechBar's 30s
+    // poll from spawning 9-second blocking subprocesses (was burning ~30% CPU
+    // sustained when this command did synchronous network fetches).
+    const accounts = await getAccountInfo(
+      accountList,
+      opts.refresh ? { refresh: true, timeoutMs: 5000 } : { cacheOnly: true },
+    );
 
-    // Record history snapshot (non-blocking, max once per hour)
+    // Stale-while-revalidate: kick detached refresh if cache is stale.
+    // Not called when --refresh is set (we just did the fetch ourselves).
+    if (!opts.refresh) kickBackgroundRefresh();
+
+    // Record history snapshot (non-blocking, max once per hour) and
+    // projection samples (fast-cadence ring buffer for burn-rate ETA).
     try { appendSnapshot(accounts); } catch {}
+    try { recordProjectionSamples(accounts); } catch {}
 
     if (opts.json) {
-      // Sort by smart score within groups, add precomputed fields
+      // Sort by smart score within groups, add precomputed fields.
+      // Use effectiveProvider so workspaces with a baseUrl override
+      // (provider=anthropic but routed through local litellm / z.ai /
+      // openrouter etc.) are grouped by their *real* upstream vendor
+      // instead of the API format their config happens to label them.
       const { computeSmartScore, computeTier } = require('./liveUsage');
+      const { effectiveProvider } = require('./providers');
+      const eff = (a: any) => effectiveProvider(a.provider, a.baseUrl);
       const grouped = new Map<string, typeof accounts>();
       for (const a of accounts) {
-        const g = displayGroup(a.provider);
+        const g = displayGroup(eff(a));
         if (!grouped.has(g)) grouped.set(g, []);
         grouped.get(g)!.push(a);
       }
@@ -1997,21 +2282,42 @@ const usageCmd = program
         group.forEach((a: any, i: number) => {
           const score = computeSmartScore(a);
           const tierInfo = computeTier(a, i === 0);
+          const effective = eff(a);
+          const proj = getAccountProjection(a.commandName);
           enriched.push({
             ...a,
+            effectiveProvider: effective,
             smartScore: Math.round(score * 1000) / 1000,
             tier: tierInfo.tier,
             tierUrgent: tierInfo.urgent,
             sortRank: enriched.length,
-            displayGroup: displayGroup(a.provider),
+            displayGroup: displayGroup(effective),
+            projection5h: proj.projection5h,
+            projection7d: proj.projection7d,
           });
         });
       }
+      // Include cached provider quotas so SweechBar can decorate the
+      // Providers section without a separate fetch.
+      let providerQuotas: Record<string, unknown> = {};
+      try {
+        const { getCachedQuota } = require('./providerQuotas');
+        const seen = new Set<string>();
+        for (const a of enriched as any[]) {
+          const key = a.effectiveProvider ?? a.provider;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          const q = getCachedQuota(key);
+          if (q) providerQuotas[key] = q;
+        }
+      } catch {}
+
       process.stdout.write(JSON.stringify({
         schemaVersion: 2,
         generatedAt: new Date().toISOString(),
         summary: summarizeAccountsForTelemetry(accounts),
         accounts: enriched,
+        providerQuotas,
       }, null, 2) + '\n');
       return;
     }
@@ -2033,6 +2339,44 @@ const usageCmd = program
     }
 
     console.log(chalk.bold('\n  sweech · usage\n'));
+
+    // ── ACCOUNTS section ────────────────────────────────────────────────
+    // Top-level view of every identity in the vault, decoupled from any
+    // specific workspace. Workspaces below show which account each is
+    // currently mounting.
+    try {
+      const { listAccounts } = require('./vault');
+      const vaultAccounts = listAccounts();
+      if (vaultAccounts.length > 0) {
+        console.log(chalk.bold.cyan('  ── ACCOUNTS (vault) ──\n'));
+        const byKind: Record<string, any[]> = {};
+        for (const a of vaultAccounts) (byKind[a.kind] ||= []).push(a);
+        for (const kind of ['anthropic', 'openai']) {
+          const list = byKind[kind];
+          if (!list || list.length === 0) continue;
+          console.log(chalk.dim(`  ${kind === 'anthropic' ? 'Anthropic' : 'OpenAI'}`));
+          for (const a of list.sort((x: any, y: any) => x.email.localeCompare(y.email))) {
+            const email = a.email.endsWith('@unknown.local') ? chalk.dim('(no email)') : chalk.bold(a.email);
+            const planStr = a.plan ? chalk.cyan(` [${a.plan}]`) : '';
+            const exp = formatExpiry(a.expiresAt);
+            let expiryStr = '';
+            if (exp.short) {
+              const tinted = exp.color === 'red' ? chalk.red : exp.color === 'yellow' ? chalk.yellow : chalk.dim;
+              expiryStr = tinted(` 🔑 ${exp.short}`);
+            }
+            // Avoid showing the redundant "· expired" when the 🔑 badge
+            // already says expired. Only surface non-ok status that the
+            // expiry alone wouldn't have communicated.
+            const showStatus = a.status && a.status !== 'ok' && a.status !== 'expired'
+            const statusStr = showStatus ? chalk.red(` · ${a.status}`) : '';
+            console.log(`    ● ${email}${planStr}${expiryStr}${statusStr}`);
+          }
+        }
+        console.log();
+      }
+    } catch {}
+
+    console.log(chalk.bold.cyan('  ── WORKSPACES ──\n'));
 
     // Scoring — shared with launcher and SweechBar (via JSON precomputed fields)
     const { computeSmartScore: smartScore } = require('./liveUsage');
@@ -2069,8 +2413,14 @@ const usageCmd = program
     const sortLabel = opts.sort === 'status' ? ' · by status' : opts.sort === 'manual' ? ' · manual' : ' · smart';
     console.log(chalk.dim(`  sort${sortLabel}${opts.group !== false ? '' : ' · ungrouped'}\n`));
 
+    const groupTitle = (raw: string): string => {
+      if (raw === 'claude') return 'Claude';
+      if (raw === 'codex') return 'Codex';
+      if (raw === 'kimi') return 'Kimi';
+      return raw;
+    };
     for (const { name, items: sorted } of groups) {
-      if (name) console.log(chalk.bold.dim(`  ── ${name} ──`));
+      if (name) console.log(chalk.dim(`  ${groupTitle(name)}`));
       for (let i = 0; i < sorted.length; i++) {
         const a = sorted[i];
         const planStr = a.meta.plan ? chalk.cyan(` [${a.meta.plan}]`) : '';
@@ -2085,11 +2435,14 @@ const usageCmd = program
         } else if (a.tokenStatus === 'expired') {
           tokenStr = chalk.red(' 🔑 token expired');
         } else if (a.tokenStatus === 'valid' && a.tokenExpiresAt) {
-          const hoursLeft = Math.max(0, (a.tokenExpiresAt - Date.now()) / 3600000);
-          if (hoursLeft < 1) {
-            tokenStr = chalk.yellow(` 🔑 expires in ${Math.round(hoursLeft * 60)}m`);
-          } else if (hoursLeft < 24) {
-            tokenStr = chalk.dim(` 🔑 expires in ${Math.round(hoursLeft)}h`);
+          const exp = formatExpiry(a.tokenExpiresAt);
+          // Only render minutes/hours buckets here — preserves prior behavior
+          // where the day-bucket workspace line stayed silent (the token is
+          // healthy and unsurprising; no need to clutter).
+          if (exp.color === 'yellow') {
+            tokenStr = chalk.yellow(` 🔑 ${exp.text}`);
+          } else if (exp.color === 'dim' && /h$/.test(exp.short)) {
+            tokenStr = chalk.dim(` 🔑 ${exp.text}`);
           }
         } else if (a.tokenStatus === 'no_token' && a.cliType === 'claude') {
           tokenStr = chalk.dim(' 🔑 no token');
@@ -2097,15 +2450,17 @@ const usageCmd = program
         console.log(`  ${chalk.bold(a.name)}${planStr}${emailStr}${recommendedStr}${tokenStr}`);
 
         // 5h window
+        const liveSession = a.live?.buckets?.[0]?.session;
+        const liveWeekly = a.live?.buckets?.[0]?.weekly;
         const cap5hStr = a.minutesUntilFirstCapacity !== undefined
           ? chalk.yellow(` · capacity in ${a.minutesUntilFirstCapacity}m`)
           : '';
-        const live5hStr = a.live?.utilization5h !== undefined
-          ? ` (${Math.round(a.live.utilization5h * 100)}% used)`
+        const live5hStr = liveSession?.utilization !== undefined
+          ? ` (${Math.round(liveSession.utilization * 100)}% used)`
           : '';
-        const reset5hStr = a.live?.reset5hAt !== undefined
+        const reset5hStr = liveSession?.resetsAt !== undefined
           ? (() => {
-              const mins = Math.round((a.live!.reset5hAt! - Date.now() / 1000) / 60);
+              const mins = Math.round((liveSession.resetsAt! - Date.now() / 1000) / 60);
               if (mins < 30) return chalk.red(` · resets in ${mins}m`);
               if (mins < 120) return chalk.yellow(` · resets in ${mins}m`);
               const h = Math.floor(mins / 60), m = mins % 60;
@@ -2115,7 +2470,7 @@ const usageCmd = program
         console.log(`    5h:   ${chalk.white(String(a.messages5h))} messages${live5hStr}${reset5hStr}${cap5hStr}`);
 
         // week window + expiry alert
-        const reset7dAt = a.live?.reset7dAt;
+        const reset7dAt = liveWeekly?.resetsAt;
         const weeklyResetStr = reset7dAt !== undefined
           ? (() => {
               const h = Math.round((reset7dAt - Date.now() / 1000) / 3600);
@@ -2126,14 +2481,14 @@ const usageCmd = program
           : a.hoursUntilWeeklyReset !== undefined
             ? chalk.cyan(` · resets in ${a.hoursUntilWeeklyReset}h`)
             : chalk.dim(' · set plan to compute');
-        const live7dStr = a.live?.utilization7d !== undefined
-          ? ` (${Math.round(a.live.utilization7d * 100)}% used)`
+        const live7dStr = liveWeekly?.utilization !== undefined
+          ? ` (${Math.round(liveWeekly.utilization * 100)}% used)`
           : '';
         // Expiry alert: >10% remaining and resetting in <72h
         let expiryAlertStr = '';
         if (reset7dAt) {
           const hoursLeft = (reset7dAt - Date.now() / 1000) / 3600;
-          const remaining = 1 - (a.live?.utilization7d ?? 0);
+          const remaining = 1 - (liveWeekly?.utilization ?? 0);
           if (remaining > 0 && hoursLeft > 0 && hoursLeft < 72) {
             const pct = Math.round(remaining * 100);
             const label = hoursLeft < 24 ? `${Math.round(hoursLeft)}h` : `${Math.floor(hoursLeft / 24)}d`;
@@ -3018,11 +3373,10 @@ program
 
 // ── Startup update check (non-blocking) ────────────────────────────────────────
 // Fire-and-forget: if the check completes before parse finishes, print a notice.
-// Skip for --help, --version, --complete, and the update command itself.
-const skipUpdateCheck = process.argv.some(a =>
-  a === '--help' || a === '-h' || a === '--version' || a === '-v' || a === 'update' || a === '--complete'
-);
-if (!skipUpdateCheck && process.argv.length > 2) {
+// Skip decision lives in shouldSkipUpdateCheck() (src/updateChecker.ts) so it
+// can be unit-tested. Suppressed for --help / --version / --complete / update
+// command, --json (clean stderr for piping), and SWEECH_NO_UPDATE_NOTIFIER=1.
+if (!shouldSkipUpdateCheck(process.argv, process.env)) {
   checkForUpdate(version).then(result => {
     if (result && result.updateAvailable) {
       process.stderr.write(
@@ -3318,7 +3672,6 @@ program
 
 // ── sweech daemon start/stop/status ────────────────────────────────────────────
 const PID_FILE = path.join(os.homedir(), '.sweech', 'daemon.pid');
-const DEFAULT_DAEMON_PORT = 7801;
 
 async function resolveDaemonPort(): Promise<number> {
   const envPort = parseInt(process.env.SWEECH_PORT ?? '');
@@ -3513,10 +3866,13 @@ program
     process.on('SIGINT', () => ac.abort());
 
     try {
+      // T-039: /run is HMAC-protected; sign with the daemon secret.
+      const runBody = JSON.stringify(body);
+      const runHeaders = await buildAuthedHeaders('POST', '/run', runBody);
       const res = await fetch(`http://127.0.0.1:${port}/run`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        headers: runHeaders,
+        body: runBody,
         signal: ac.signal,
       });
 
@@ -3638,7 +3994,9 @@ program
     }
 
     try {
-      const res = await fetch(`${daemonUrl}/query`);
+      // T-039: /query is protected — sign the GET.
+      const queryHeaders = await buildAuthedHeaders('GET', '/query', '');
+      const res = await fetch(`${daemonUrl}/query`, { headers: queryHeaders });
       if (!res.ok) {
         console.error(chalk.red('Error:'), `Daemon returned ${res.status}`);
         process.exit(1);
@@ -3686,6 +4044,487 @@ program
       console.error(chalk.red('Error:'), (err as Error).message);
       process.exit(1);
     }
+  });
+
+// ── sweech guide ───────────────────────────────────────────────────────────
+// Prints the 60-second guide to stdout. Agents typically pipe this into
+// their context window when they land in a sweech-routed repo.
+program
+  .command('guide')
+  .description('Print the 60-second guide (SWEECH_GUIDE.md) for humans + agents')
+  .action(() => {
+    // Resolve relative to dist/cli.js → repo root.
+    const candidates = [
+      path.resolve(__dirname, '..', 'SWEECH_GUIDE.md'),
+      path.resolve(__dirname, '..', '..', 'SWEECH_GUIDE.md'),
+    ];
+    for (const p of candidates) {
+      try {
+        const text = fs.readFileSync(p, 'utf-8');
+        process.stdout.write(text);
+        return;
+      } catch {}
+    }
+    console.error(chalk.red('SWEECH_GUIDE.md not found alongside the install. See:'));
+    console.error(chalk.gray('  https://github.com/vykeai/sweech/blob/main/SWEECH_GUIDE.md'));
+    process.exit(1);
+  });
+
+// ── sweech providers quota ─────────────────────────────────────────────────
+// Probes each third-party provider for current balance / rate-limit. Caches
+// at ~/.sweech/provider-quotas.json (5 min TTL). SweechBar polls this to
+// decorate the Providers section of the Accounts tab.
+program
+  .command('providers')
+  .description('Manage / probe third-party provider quotas')
+  .argument('[action]', 'quota | list', 'quota')
+  .option('--json', 'Machine-readable output')
+  .option('--refresh', 'Bypass cache and re-probe every provider')
+  .action(async (action: string, opts: { json?: boolean; refresh?: boolean }) => {
+    if (action !== 'quota' && action !== 'list') {
+      console.error(chalk.red(`Unknown action: ${action}. Use: quota | list`));
+      process.exit(1);
+    }
+    const { probeAll } = require('./providerQuotas');
+    const { effectiveProvider } = require('./providers');
+    const config = new ConfigManager();
+    const profiles = config.getProfiles();
+
+    // Build probe contexts — one per canonical provider. When multiple
+    // profiles share a provider (e.g. two MiniMax profiles, one of them
+    // configured with a placeholder `sk-test` key), pick the one whose
+    // key looks most production-ready (longest non-placeholder).
+    const candidates = new Map<string, { apiKey: string; baseUrl?: string; model?: string }>();
+    for (const p of profiles) {
+      const eff = effectiveProvider(p.provider, p.baseUrl);
+      if (!eff) continue;
+      const apiKey = await resolveApiKey(p);
+      if (!apiKey || apiKey.startsWith('sk-test') || apiKey.length < 16) continue;
+      const existing = candidates.get(eff);
+      if (!existing || apiKey.length > existing.apiKey.length) {
+        candidates.set(eff, { apiKey, baseUrl: p.baseUrl, model: p.model });
+      }
+    }
+    const contexts = Array.from(candidates.entries()).map(([provider, ctx]) => ({ provider, ...ctx }));
+
+    const results = await probeAll(contexts, { refresh: !!opts.refresh });
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ quotas: results }, null, 2) + '\n');
+      return;
+    }
+    if (Object.keys(results).length === 0) {
+      console.log(chalk.dim('\n  No third-party provider quotas available.\n'));
+      return;
+    }
+    console.log(chalk.bold('\n  sweech · provider quotas\n'));
+    for (const [provider, info] of Object.entries(results) as Array<[string, any]>) {
+      const head = chalk.bold(provider.padEnd(14));
+      const parts: string[] = [];
+      if (info.balanceUsd !== undefined) parts.push(chalk.green(`$${info.balanceUsd.toFixed(2)} left`));
+      if (info.credits !== undefined) parts.push(chalk.cyan(`${info.credits} credits`));
+      if (info.rateLimit) {
+        const r = info.rateLimit;
+        if (r.used !== undefined && r.limit !== undefined) {
+          const pct = Math.round((r.used / r.limit) * 100);
+          parts.push(chalk.cyan(`${pct}% used (${r.used}/${r.limit} ${r.units ?? ''})`));
+        } else if (r.limit !== undefined) {
+          parts.push(chalk.dim(`limit: ${r.limit} ${r.units ?? ''}`));
+        }
+        if (r.resetsAt) {
+          const mins = Math.round((r.resetsAt - Date.now()) / 60000);
+          if (mins >= 0) parts.push(chalk.dim(`resets in ${mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`}`));
+        }
+      }
+      if (info.note) parts.push(chalk.dim(info.note));
+      if (info.error) parts.push(chalk.red(`error: ${info.error}`));
+      console.log('  ' + head + parts.join(' · '));
+    }
+    console.log();
+  });
+
+// ── sweech code-review ─────────────────────────────────────────────────────
+// Convenience: pick the codex profile with the most available quota and
+// print a launch command. Used by adversarial-review agents that need a
+// fresh codex profile without hand-rolling the smart-score logic.
+program
+  .command('code-review')
+  .description('Pick the best available codex profile for code-review work')
+  .option('--json', 'Machine-readable output (for scripts)')
+  .option('--exec', 'Spawn codex directly instead of printing the command')
+  .action(async (opts: { json?: boolean; exec?: boolean }) => {
+    const config = new ConfigManager();
+    const profiles = config.getProfiles();
+    const accountList = getKnownAccounts(profiles);
+    const { computeSmartScore } = require('./liveUsage');
+    const accounts = await getAccountInfo(accountList, { cacheOnly: true });
+
+    // Only consider real OpenAI codex profiles (OAuth-backed, not local
+    // proxies). Sort by smart score so the freshest weekly window wins.
+    const candidates = accounts
+      .filter(a => a.cliType === 'codex' && (!a.provider || a.provider === 'openai') && !a.baseUrl)
+      .filter(a => !a.needsReauth && a.live?.status !== 'limit_reached')
+      .sort((a, b) => computeSmartScore(b) - computeSmartScore(a));
+
+    if (candidates.length === 0) {
+      if (opts.json) { process.stdout.write(JSON.stringify({ error: 'no available codex profile' }) + '\n'); }
+      else console.error(chalk.red('\n  No available codex profile (all rate-limited or need re-auth).\n'));
+      process.exit(1);
+    }
+
+    const pick = candidates[0];
+    const u5h = Math.round((pick.live?.buckets?.[0]?.session?.utilization ?? 0) * 100);
+    const u7d = Math.round((pick.live?.buckets?.[0]?.weekly?.utilization ?? 0) * 100);
+    const cmd = `sweech use ${pick.commandName}`;
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        profile: pick.commandName,
+        account: pick.activeAccount?.email,
+        utilization5h: u5h,
+        utilization7d: u7d,
+        command: cmd,
+      }, null, 2) + '\n');
+      return;
+    }
+
+    if (opts.exec) {
+      // Spawn codex with the picked profile environment. Avoids the
+      // wrapper script — the agent gets a direct codex session.
+      const { spawn } = require('child_process');
+      const env = { ...process.env, CODEX_HOME: path.join(os.homedir(), '.' + pick.commandName) };
+      const child = spawn('codex', [], { env, stdio: 'inherit' });
+      child.on('exit', (code: number) => process.exit(code ?? 0));
+      return;
+    }
+
+    console.log(chalk.bold('\n  sweech · code-review (best codex pick)\n'));
+    console.log(`  profile  : ${chalk.bold(pick.commandName)}`);
+    if (pick.activeAccount?.email) console.log(`  account  : ${pick.activeAccount.email}`);
+    console.log(`  5h used  : ${u5h < 70 ? chalk.green(u5h + '%') : u5h < 90 ? chalk.yellow(u5h + '%') : chalk.red(u5h + '%')}`);
+    console.log(`  7d used  : ${u7d < 70 ? chalk.green(u7d + '%') : u7d < 90 ? chalk.yellow(u7d + '%') : chalk.red(u7d + '%')}`);
+    console.log(`  launch   : ${chalk.cyan(cmd)}\n`);
+    console.log(chalk.dim('  Tip: sweech code-review --exec  → spawn codex directly.'));
+    console.log();
+  });
+
+// ── sweech accounts ────────────────────────────────────────────────────────
+// Central identity vault: anthropic + openai accounts, decoupled from
+// workspace directories. See src/vault.ts.
+
+program
+  .command('accounts [action]')
+  .description('Manage credential vault (list, import, remove)')
+  .option('--kind <kind>', 'Filter by account kind: anthropic, openai')
+  .option('--email <email>', 'Target a specific account by email')
+  .option('--json', 'Machine-readable output')
+  .action(async (action: string | undefined, opts: { kind?: string; email?: string; json?: boolean }) => {
+    const { listAccounts, findAccountByEmail, removeAccount, getAccount, AccountKind } = require('./vault');
+    const { importWorkspaces, discoverWorkspaces } = require('./vaultImport');
+    const act = action || 'list';
+
+    if (act === 'list') {
+      // Mirrors SweechBar's Accounts tab: Anthropic + OpenAI sections
+      // from the vault, plus a Providers section for API-key vendors
+      // (synthetic one tile per provider derived from the workspace
+      // config + provider quota cache).
+      const filterKind = opts.kind as 'anthropic' | 'openai' | undefined;
+      const accounts = listAccounts(filterKind);
+      const { effectiveProvider } = require('./providers');
+      const { getCachedQuota } = require('./providerQuotas');
+      const config = new ConfigManager();
+      const profiles = config.getProfiles();
+
+      // Live workspace status — used to override stale vault plan when
+      // the org has since disabled OAuth on a mounted account.
+      const accountList = getKnownAccounts(profiles);
+      const workspaces = await getAccountInfo(accountList, { cacheOnly: true });
+      const wsByActive = new Map<string, typeof workspaces>();
+      for (const ws of workspaces) {
+        const id = ws.activeAccount?.id;
+        if (!id) continue;
+        if (!wsByActive.has(id)) wsByActive.set(id, []);
+        wsByActive.get(id)!.push(ws);
+      }
+
+      const liveStatusOverride = (id: string): string | undefined => {
+        const list = wsByActive.get(id) || [];
+        for (const ws of list) {
+          switch (ws.live?.status) {
+            case 'org_disabled':  return 'OAuth disabled';
+            case 'unauthorized':  return 'Re-login needed';
+            case 'forbidden':     return 'Forbidden';
+            case 'limit_reached': return 'Limit reached';
+          }
+        }
+        return undefined;
+      };
+
+      // Synthetic provider tiles for the Providers section.
+      const seenProviders = new Set<string>();
+      const providerTiles: Array<{ key: string; label: string; workspaces: string[]; quota: any }> = [];
+      const providerLabels: Record<string, string> = {
+        anthropic: 'Anthropic', openai: 'OpenAI',
+        kimi: 'Kimi', 'kimi-coding': 'Kimi Coding',
+        glm: 'GLM (z.ai)', minimax: 'MiniMax', dashscope: 'Alibaba',
+        openrouter: 'OpenRouter', gemini: 'Gemini', groq: 'Groq',
+        nvidia: 'NVIDIA', ollama: 'Ollama', 'ollama-cloud': 'Ollama Cloud',
+        deepseek: 'DeepSeek', qwen: 'Qwen', 'local-proxy': 'Local Proxy',
+        'local-ollama': 'Ollama (Local)',
+      };
+      for (const p of profiles) {
+        const eff = effectiveProvider(p.provider, p.baseUrl);
+        if (!eff || eff === 'anthropic' || eff === 'openai') continue;
+        if (seenProviders.has(eff)) {
+          providerTiles.find(t => t.key === eff)!.workspaces.push(p.commandName);
+          continue;
+        }
+        seenProviders.add(eff);
+        providerTiles.push({
+          key: eff,
+          label: providerLabels[eff] ?? eff,
+          workspaces: [p.commandName],
+          quota: getCachedQuota(eff),
+        });
+      }
+
+      if (opts.json) {
+        // Enrich vault accounts with mountedWorkspaces + liveStatus for
+        // machine consumers (parity with SweechBar's JSON shape).
+        const enrichedAccounts = accounts.map((a: any) => ({
+          ...a,
+          mountedWorkspaces: (wsByActive.get(a.id) ?? []).map(ws => ws.commandName),
+          liveStatus: liveStatusOverride(a.id),
+        }));
+        process.stdout.write(JSON.stringify({ accounts: enrichedAccounts, providers: providerTiles }, null, 2) + '\n');
+        return;
+      }
+
+      if (accounts.length === 0 && providerTiles.length === 0) {
+        console.log(chalk.dim('\n  No accounts in vault. Run: sweech accounts import\n'));
+        return;
+      }
+
+      console.log(chalk.bold('\n  sweech · accounts\n'));
+
+      const byKind: Record<string, any[]> = {};
+      for (const a of accounts) (byKind[a.kind] ||= []).push(a);
+      const kindOrder = ['anthropic', 'openai', ...Object.keys(byKind).filter(k => k !== 'anthropic' && k !== 'openai')];
+
+      for (const kind of kindOrder) {
+        const list = byKind[kind];
+        if (!list || list.length === 0) continue;
+        const header = kind === 'anthropic' ? 'Anthropic' : kind === 'openai' ? 'OpenAI' : kind;
+        console.log(chalk.bold.cyan(`  ── ${header} (${list.length}) ──`));
+        for (const a of list.sort((x: any, y: any) => x.email.localeCompare(y.email))) {
+          const liveOverride = liveStatusOverride(a.id);
+          const planStr = liveOverride
+            ? chalk.red(` [${liveOverride}]`)
+            : (a.plan ? chalk.cyan(` [${a.plan}]`) : '');
+          const exp = formatExpiry(a.expiresAt);
+          const expiryStr = exp.short
+            ? (exp.color === 'red' ? chalk.red : exp.color === 'yellow' ? chalk.yellow : chalk.dim)(` 🔑 ${exp.short}`)
+            : '';
+          const showStatus = a.status && a.status !== 'ok' && a.status !== 'expired' && !liveOverride;
+          const statusStr = showStatus ? chalk.red(` · ${a.status}`) : '';
+          const mountedWs = wsByActive.get(a.id) ?? [];
+          const unassignedStr = (mountedWs.length === 0 && !liveOverride)
+            ? chalk.yellow(' [unassigned]')
+            : '';
+          const mountedStr = mountedWs.length > 0
+            ? chalk.dim(`  📦 ${mountedWs.map(w => w.commandName).join(', ')}`)
+            : chalk.yellow('  📦 not in any workspace');
+          console.log(`  ${chalk.bold(a.email)}${unassignedStr}${planStr}${expiryStr}${statusStr}${mountedStr}`);
+        }
+        console.log();
+      }
+
+      if (providerTiles.length > 0) {
+        console.log(chalk.bold.cyan(`  ── Providers (${providerTiles.length}) ──`));
+        for (const tile of providerTiles.sort((a, b) => a.label.localeCompare(b.label))) {
+          const q = tile.quota;
+          let quotaStr = chalk.dim('  no quota probed');
+          if (q) {
+            if (typeof q.balanceUsd === 'number') quotaStr = chalk.green(`  💰 $${q.balanceUsd.toFixed(2)} left`);
+            else if (q.rateLimit?.used !== undefined && q.rateLimit?.limit) {
+              const pct = Math.round((q.rateLimit.used / q.rateLimit.limit) * 100);
+              quotaStr = chalk.cyan(`  📊 ${pct}% used (${q.rateLimit.used}/${q.rateLimit.limit} ${q.rateLimit.units ?? ''})`);
+            } else if (q.note) quotaStr = chalk.dim(`  ℹ️  ${q.note}`);
+            else if (q.error) quotaStr = chalk.red(`  ✗ ${q.error}`);
+          }
+          const wsStr = chalk.dim(`  📦 ${tile.workspaces.join(', ')}`);
+          console.log(`  ${chalk.bold(tile.label)}${chalk.dim(' (API key)')}${quotaStr}${wsStr}`);
+        }
+        console.log();
+      }
+      return;
+    }
+
+    if (act === 'import') {
+      const workspaces = discoverWorkspaces();
+      if (workspaces.length === 0) {
+        console.log(chalk.dim('\n  No ~/.claude* or ~/.codex* workspaces found.\n'));
+        return;
+      }
+      console.log(chalk.bold(`\n  Importing credentials from ${workspaces.length} workspaces…\n`));
+      const results = await importWorkspaces(workspaces);
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ results }, null, 2) + '\n');
+        return;
+      }
+      for (const r of results) {
+        const ws = r.workspace.commandName.padEnd(20);
+        if (r.outcome === 'imported') console.log(`  ${chalk.green('+')} ${ws} ${chalk.bold(r.email!)}  ${chalk.dim('imported')}`);
+        else if (r.outcome === 'updated') console.log(`  ${chalk.cyan('↻')} ${ws} ${chalk.bold(r.email!)}  ${chalk.dim('updated')}`);
+        else if (r.outcome === 'already-mounted') console.log(`  ${chalk.dim('=')} ${ws} ${chalk.bold(r.email!)}  ${chalk.dim('already mounted')}`);
+        else if (r.outcome === 'no-credentials') console.log(`  ${chalk.dim('·')} ${ws} ${chalk.dim('no credentials found')}`);
+        else console.log(`  ${chalk.red('✗')} ${ws} ${chalk.red(r.error || 'error')}`);
+      }
+      console.log();
+      return;
+    }
+
+    if (act === 'add') {
+      const requestedKind = opts.kind as 'anthropic' | 'openai' | undefined;
+      if (!requestedKind) {
+        console.error(chalk.red('--kind <anthropic|openai> required'));
+        process.exit(1);
+      }
+      if (requestedKind === 'openai') {
+        const { codexAddInstructions } = require('./vaultAdd');
+        console.log('\n' + codexAddInstructions() + '\n');
+        process.exit(1);
+      }
+      const { addAnthropicAccount } = require('./vaultAdd');
+      const result = await addAnthropicAccount();
+      if (!result.ok) {
+        console.error(chalk.red(`\n  ✗ ${result.reason}\n`));
+        process.exit(1);
+      }
+      const verb = result.alreadyExisted ? 'updated' : 'added';
+      console.log(chalk.green(`\n  ✓ ${verb} ${chalk.bold(result.account.email)} (anthropic)\n`));
+      console.log(chalk.dim(`    id=${result.account.id}  plan=${result.account.plan ?? '?'}\n`));
+      console.log(chalk.dim(`    Mount it into a workspace:\n      sweech assign <workspace> ${result.account.email}\n`));
+      return;
+    }
+
+    if (act === 'refresh') {
+      const { refreshExpiringAccounts } = require('./vaultRefresh');
+      const results = await refreshExpiringAccounts({ force: !!opts.email });
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ results }, null, 2) + '\n');
+        return;
+      }
+      if (results.length === 0) {
+        console.log(chalk.dim('\n  No accounts to refresh.\n'));
+        return;
+      }
+      console.log(chalk.bold('\n  sweech · vault refresh\n'));
+      for (const r of results) {
+        const tag = r.outcome === 'refreshed' ? chalk.green('✓ refreshed')
+          : r.outcome === 'still-valid' ? chalk.dim('· still valid')
+          : r.outcome === 'remounted' ? chalk.cyan('↻ remounted')
+          : r.outcome === 'no-refresh-token' ? chalk.yellow('⚠ no refresh token')
+          : chalk.red(`✗ ${r.error || 'failed'}`);
+        console.log(`  ${r.email.padEnd(28)} [${r.kind}]  ${tag}`);
+      }
+      console.log();
+      return;
+    }
+
+    if (act === 'remove') {
+      if (!opts.email) {
+        console.error(chalk.red('--email <email> required'));
+        process.exit(1);
+      }
+      const kind = (opts.kind as 'anthropic' | 'openai' | undefined);
+      const account = kind
+        ? findAccountByEmail(kind, opts.email)
+        : (findAccountByEmail('anthropic', opts.email) || findAccountByEmail('openai', opts.email));
+      if (!account) {
+        console.error(chalk.red(`Account not found: ${opts.email}`));
+        process.exit(1);
+      }
+      const ok = await removeAccount(account.id);
+      console.log(ok ? chalk.green(`\n  ✓ Removed ${account.email} from vault\n`) : chalk.red('Remove failed'));
+      return;
+    }
+
+    console.error(chalk.red(`Unknown action: ${act}. Use: list, import, remove`));
+    process.exit(1);
+  });
+
+// ── sweech assign ──────────────────────────────────────────────────────────
+program
+  .command('assign <workspace> [email]')
+  .description('Mount a vault account into a workspace (anthropic→claude, openai→codex)')
+  .option('--json', 'Machine-readable output')
+  .option('--force', 'Bypass the CLI-binary-on-PATH preflight (mount even if `claude`/`codex` is not installed)')
+  .action(async (workspaceName: string, email: string | undefined, opts: { json?: boolean; force?: boolean }) => {
+    const { listAccounts, findAccountByEmail, kindForCliType } = require('./vault');
+    const { assignAccountToWorkspace } = require('./vaultAssign');
+    const { discoverWorkspaces } = require('./vaultImport');
+
+    const all = discoverWorkspaces();
+    const ws = all.find((w: any) => w.commandName === workspaceName);
+    if (!ws) {
+      console.error(chalk.red(`Workspace not found: ${workspaceName}`));
+      console.error(chalk.dim(`  available: ${all.map((w: any) => w.commandName).join(', ')}`));
+      process.exit(1);
+    }
+    const requiredKind = kindForCliType(ws.cliType);
+    if (!requiredKind) {
+      console.error(chalk.red(`Unsupported cliType: ${ws.cliType}`));
+      process.exit(1);
+    }
+
+    let accountId: string | undefined;
+    if (email) {
+      const acct = findAccountByEmail(requiredKind, email);
+      if (!acct) {
+        console.error(chalk.red(`No ${requiredKind} account in vault for ${email}`));
+        console.error(chalk.dim(`  run: sweech accounts import   (or)   sweech accounts add --kind ${requiredKind}`));
+        process.exit(1);
+      }
+      accountId = acct.id;
+    } else {
+      // Interactive picker
+      const candidates = listAccounts(requiredKind);
+      if (candidates.length === 0) {
+        console.error(chalk.red(`No ${requiredKind} accounts in vault.`));
+        process.exit(1);
+      }
+      const inquirer = (await import('inquirer')).default;
+      const answer = await inquirer.prompt([{
+        type: 'list',
+        name: 'id',
+        message: `Pick account for workspace ${chalk.bold(workspaceName)} (${ws.cliType})`,
+        choices: candidates.map((a: any) => ({
+          name: `${a.email}${a.plan ? chalk.dim(` · ${a.plan}`) : ''}`,
+          value: a.id,
+        })),
+      }]);
+      accountId = answer.id as string;
+    }
+
+    const result = await assignAccountToWorkspace(ws, accountId!, { force: opts.force });
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      process.exit(result.ok ? 0 : 1);
+    }
+    if (!result.ok) {
+      console.error(chalk.red(`✗ ${result.reason}`));
+      if (!opts.force && /not found on PATH/i.test(result.reason)) {
+        console.error(chalk.dim(`  re-run with --force to mount anyway (launch will fail until installed)`));
+      }
+      process.exit(1);
+    }
+    // Surface the force-mount warning so the user knows credentials are wired
+    // but launches will fail until the binary is installed.
+    if (result.binaryOnPath === false) {
+      console.error(chalk.yellow(`WARN: ${result.binary} not on PATH — assign succeeded but launch will fail until installed`));
+    }
+    console.log(chalk.green(`\n  ✓ Mounted ${chalk.bold(result.email)} → ${chalk.bold(workspaceName)} (${ws.cliType})\n`));
   });
 
 // Default action: interactive launcher when no command given

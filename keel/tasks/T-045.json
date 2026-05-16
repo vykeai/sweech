@@ -1,0 +1,41 @@
+{
+  "id": "T-045",
+  "title": "sweech proxy — fallback-routing reverse proxy",
+  "wave": "wave-5",
+  "space": "space-api",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "The whole point of having 18 third-party workspaces is graceful degradation, yet nothing degrades automatically. Build a local Anthropic+OpenAI-compatible reverse proxy that re-targets on 429/limit_reached using the smart score and a per-chain fallback order.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [
+    "T-039"
+  ],
+  "runStatus": null,
+  "size": "L",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 2: \"Auto-fallback routing. With 18 third-party workspaces configured, the whole point is graceful degradation — and nothing degrades automatically\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "sweech proxy start --port <p> --chain <ws1,ws2,ws3> binds a local HTTP server speaking Anthropic + OpenAI Messages format",
+    "On 429 / limit_reached / org_disabled, the next workspace in the chain is tried",
+    "Each request emits a structured log line: chosen workspace, fallback hops, final status",
+    "Lives on the existing daemon process (extends /run), not a second daemon",
+    "Daemon auth from T-039 also protects this endpoint"
+  ]
+}

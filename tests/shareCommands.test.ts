@@ -212,8 +212,9 @@ describe('runShare', () => {
     setupMocks([makeProfile('claude-ali')]);
     await runShare('claude-ali', { all: true });
 
+    // writeProfiles → atomicWriteFileSync writes to `<configFile>.tmp.<pid>.<ts>` then renames.
     const writeCalls = mockFs.writeFileSync.mock.calls;
-    const configWrite = writeCalls.find(([p]) => String(p).endsWith('config.json'));
+    const configWrite = writeCalls.find(([p]) => /config\.json\.tmp\./.test(String(p)));
     expect(configWrite).toBeTruthy();
     const saved = JSON.parse(configWrite![1] as string);
     expect(saved[0].sharedWith).toBe('claude');
@@ -320,7 +321,7 @@ describe('runUnshare', () => {
 
     await runUnshare('claude-ali', { all: true });
 
-    const configWrite = mockFs.writeFileSync.mock.calls.find(([p]) => String(p).endsWith('config.json'));
+    const configWrite = mockFs.writeFileSync.mock.calls.find(([p]) => /config\.json\.tmp\./.test(String(p)));
     expect(configWrite).toBeTruthy();
     const saved = JSON.parse(configWrite![1] as string);
     expect(saved[0].sharedWith).toBeUndefined();

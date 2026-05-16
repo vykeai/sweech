@@ -1,0 +1,40 @@
+{
+  "id": "T-061",
+  "title": "macOS app: Sparkle-style auto-update",
+  "wave": "wave-5",
+  "space": "space-menubar",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "No update mechanism. Users have no way to know there is a newer SweechBar build.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [
+    "T-060"
+  ],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Priority: \"Proper SweechBar distribution (codesign + notarise + sparkle auto-update)\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Sparkle SPM dep added; appcast URL configurable in Info.plist",
+    "Checks for updates every 24h and on app launch",
+    "User can disable auto-update in a Settings sheet",
+    "No update prompts in unsigned dev builds"
+  ]
+}

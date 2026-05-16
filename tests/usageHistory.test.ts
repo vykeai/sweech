@@ -45,8 +45,6 @@ function makeAccount(
         },
       ],
       capturedAt: Date.now(),
-      utilization5h: u5h,
-      utilization7d: u7d,
     },
   };
 }

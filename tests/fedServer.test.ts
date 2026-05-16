@@ -253,7 +253,7 @@ describe('Fed Server', () => {
           weeklyResetAt: '2025-01-08T00:00:00Z',
           hoursUntilWeeklyReset: 48,
           lastActive: '2025-01-01T12:00:00Z',
-          live: { status: 'allowed', planType: 'pro', utilization7d: 0.95 },
+          live: { status: 'allowed', planType: 'pro', buckets: [{ label: 'All models', weekly: { utilization: 0.95 } }], capturedAt: Date.now() },
         },
       ] as any);
       const { status, body } = await fetch('/fed/alerts');
@@ -281,7 +281,7 @@ describe('Fed Server', () => {
           weeklyResetAt: '2025-01-08T00:00:00Z',
           hoursUntilWeeklyReset: 12,
           lastActive: '2025-01-01T12:00:00Z',
-          live: { status: 'allowed', planType: 'pro', utilization7d: 0.5, reset7dAt: resetIn12h },
+          live: { status: 'allowed', planType: 'pro', buckets: [{ label: 'All models', weekly: { utilization: 0.5, resetsAt: resetIn12h } }], capturedAt: Date.now() },
         },
       ] as any);
       const { status, body } = await fetch('/fed/alerts');

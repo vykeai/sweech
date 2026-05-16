@@ -9,7 +9,7 @@ struct LiveBucket: Codable {
 
     struct BucketWindow: Codable {
         let utilization: Double
-        let resetsAt: Double
+        let resetsAt: Double?
     }
 }
 
@@ -17,22 +17,33 @@ struct LiveData: Codable {
     let buckets: [LiveBucket]?
     let status: String?
     let planType: String?
-    let utilization5h: Double?
-    let utilization7d: Double?
-    let reset5hAt: Double?
-    let reset7dAt: Double?
     let representativeClaim: String?
     let isStale: Bool?
     let tokenStatus: String?
     let tokenRefreshedAt: Double?
     let tokenExpiresAt: Double?
-    let promotion: Promotion?
 
-    struct Promotion: Codable {
-        let label: String
-        let multiplier: Double?
-        let expiresAt: Double?
-    }
+    /// Canonical first bucket — "All models" or whatever the API marks primary.
+    /// SwiftBar always renders from this; deprecated top-level mirrors are gone (T-057).
+    var primaryBucket: LiveBucket? { buckets?.first }
+
+    /// 5h session utilization from the canonical bucket. 0 when absent.
+    var utilization5h: Double? { primaryBucket?.session?.utilization }
+    /// 7d weekly utilization from the canonical bucket. 0 when absent.
+    var utilization7d: Double? { primaryBucket?.weekly?.utilization }
+    /// 5h session reset epoch (seconds) from the canonical bucket.
+    var reset5hAt: Double? { primaryBucket?.session?.resetsAt }
+    /// 7d weekly reset epoch (seconds) from the canonical bucket.
+    var reset7dAt: Double? { primaryBucket?.weekly?.resetsAt }
+}
+
+/// Burn-rate forecast emitted by the CLI (`projection5h` / `projection7d` on
+/// each account). `etaToFullMinutes` is null when the rate is flat or
+/// utilization is falling — we deliberately refuse to project then.
+struct QuotaProjection: Codable {
+    let rateUtilPerMinute: Double
+    let etaToFullMinutes: Double?
+    let sampleCount: Int
 }
 
 struct SweechAccount: Codable, Identifiable {
@@ -43,6 +54,10 @@ struct SweechAccount: Codable, Identifiable {
     let isDefault: Bool?
     let sharedWith: String?
     let provider: String?
+    /// Custom base URL from sweech config. Presence == proxy.
+    let baseUrl: String?
+    /// Real upstream vendor derived from (provider, baseUrl) by the CLI.
+    let effectiveProvider: String?
     let meta: AccountMeta?
     let messages5h: Int?
     let messages7d: Int?
@@ -57,6 +72,9 @@ struct SweechAccount: Codable, Identifiable {
     let tokenRefreshedAt: Double?
     let tokenExpiresAt: Double?
 
+    /// Vault account currently mounted in this workspace.
+    let activeAccount: ActiveAccount?
+
     // Precomputed by CLI — single source of truth for sorting/ranking
     let precomputedSmartScore: Double?
     let tier: String?          // "use_first", "use_next", "normal"
@@ -64,12 +82,50 @@ struct SweechAccount: Codable, Identifiable {
     let sortRank: Int?
     let precomputedDisplayGroup: String?
 
+    /// Burn-rate ETA for the rolling 5h window. Null when CLI lacks ≥3 samples.
+    let projection5h: QuotaProjection?
+    /// Burn-rate ETA for the 7d weekly window.
+    let projection7d: QuotaProjection?
+
     private enum CodingKeys: String, CodingKey {
-        case name, commandName, cliType, isDefault, sharedWith, provider, meta, messages5h, messages7d, totalMessages
+        case name, commandName, cliType, isDefault, sharedWith, provider, baseUrl, effectiveProvider
+        case meta, messages5h, messages7d, totalMessages
         case minutesUntilFirstCapacity, hoursUntilWeeklyReset, oldest5hMessageAt
         case lastActive, needsReauth, live, tokenStatus, tokenRefreshedAt, tokenExpiresAt
+        case activeAccount
         case precomputedSmartScore = "smartScore"
         case tier, tierUrgent, sortRank, precomputedDisplayGroup = "displayGroup"
+        case projection5h, projection7d
+    }
+
+    /// The shortest meaningful burn-rate ETA across the 5h/7d projections,
+    /// or nil when neither has a forward-looking number. Picks the 7d window
+    /// when both are available — that's the one quotas typically exhaust against.
+    var bestProjectionEtaMinutes: Double? {
+        if let e = projection7d?.etaToFullMinutes, e > 0 { return e }
+        if let e = projection5h?.etaToFullMinutes, e > 0 { return e }
+        return nil
+    }
+
+    /// Human-readable label for the active projection, e.g. "ETA 47m".
+    /// Empty string when no projection is available.
+    var projectionLabel: String {
+        guard let mins = bestProjectionEtaMinutes else { return "" }
+        if mins < 60 { return "ETA \(Int(mins.rounded()))m" }
+        if mins < 60 * 24 { return "ETA \(Int((mins / 60).rounded()))h" }
+        return "ETA \(Int((mins / (60 * 24)).rounded()))d"
+    }
+
+    /// The real upstream provider key (e.g. "local-proxy", "glm", "kimi-coding",
+    /// "anthropic", "openai"). Falls back to the legacy `provider` field if
+    /// the CLI didn't precompute it.
+    var realProvider: String { effectiveProvider ?? provider ?? "" }
+
+    struct ActiveAccount: Codable {
+        let id: String
+        let kind: String  // "anthropic" | "openai"
+        let email: String
+        let plan: String?
     }
 
     struct AccountMeta: Codable {
@@ -91,7 +147,26 @@ struct SweechAccount: Codable, Identifiable {
     var utilization7d: Double { live?.utilization7d ?? 0 }
 
     var liveStatus: String { live?.status ?? "unknown" }
-    var planType: String? { live?.planType ?? meta?.plan }
+    /// Workspace plan label. Resolution order:
+    ///   1. live.planType         — codex returns it on every probe
+    ///   2. meta.plan             — user-set or CLI-derived (already
+    ///                              demoted to "OAuth disabled" /
+    ///                              "Re-login needed" when liveUsage
+    ///                              detects a 401/403 — so this is the
+    ///                              authoritative answer when present)
+    ///   3. activeAccount.plan    — vault snapshot, used only when the
+    ///                              workspace has no live probe yet
+    ///                              AND the live status is clean
+    var planType: String? {
+        if let p = live?.planType { return p }
+        if let p = meta?.plan { return p }
+        // Don't fall back to the vault's stored plan when live data
+        // indicates the OAuth identity is broken — the vault plan
+        // captured at import time would be misleadingly stale.
+        let badStatus: Set<String> = ["org_disabled", "unauthorized", "forbidden", "limit_reached"]
+        if let s = live?.status, badStatus.contains(s) { return nil }
+        return activeAccount?.plan
+    }
 
     /// Display group for UI grouping: 'claude', 'codex', or provider display name.
     /// Uses precomputed value from CLI (single source of truth) when available.
@@ -106,10 +181,11 @@ struct SweechAccount: Codable, Identifiable {
         }
     }
 
-    /// Short human-readable provider label for external providers
+    /// Short human-readable provider label — uses realProvider so
+    /// proxy workspaces (provider=anthropic + baseUrl=127.0.0.1) surface
+    /// as "Local Proxy" instead of misleadingly as "Claude".
     var providerLabel: String {
-        guard let provider else { return cliType ?? "claude" }
-        // Map provider keys to short display names
+        let key = realProvider.isEmpty ? (cliType ?? "claude") : realProvider
         let labels: [String: String] = [
             "anthropic": "Claude",
             "openai": "OpenAI",
@@ -121,14 +197,23 @@ struct SweechAccount: Codable, Identifiable {
             "deepseek": "DeepSeek",
             "qwen": "Qwen",
             "openrouter": "OpenRouter",
+            "ollama": "Ollama",
+            "ollama-cloud": "Ollama Cloud",
+            "local-ollama": "Ollama (Local)",
+            "local-proxy": "Local Proxy",
+            "gemini": "Gemini",
+            "groq": "Groq",
+            "nvidia": "NVIDIA",
         ]
-        return labels[provider] ?? provider
+        return labels[key] ?? key
     }
 
-    /// Whether this is an external (non-official) provider
+    /// Whether this is an external (non-anthropic / non-openai) provider.
+    /// Uses realProvider so a workspace routing through litellm shows
+    /// up as external even when its API format is anthropic-compatible.
     var isExternal: Bool {
-        guard let provider else { return false }
-        return provider != "anthropic" && provider != "openai"
+        let p = realProvider
+        return !p.isEmpty && p != "anthropic" && p != "openai"
     }
 
     var buckets: [LiveBucket] { live?.buckets ?? [] }
@@ -210,6 +295,118 @@ struct SweechAccount: Codable, Identifiable {
 
 struct UsageResponse: Codable {
     let accounts: [SweechAccount]
+    let providerQuotas: [String: ProviderQuota]?
+}
+
+/// Per-vendor quota / balance info from `sweech providers quota --json`.
+struct ProviderQuota: Codable, Hashable {
+    let provider: String
+    let capturedAt: Double
+    let balanceUsd: Double?
+    let credits: Double?
+    let rateLimit: RateLimit?
+    let note: String?
+    let error: String?
+
+    struct RateLimit: Codable, Hashable {
+        let used: Double?
+        let limit: Double?
+        let resetsAt: Double?
+        let units: String?
+        let window: String?
+    }
+
+    /// One-line human summary suitable for a tile footer.
+    var summary: String? {
+        if let bal = balanceUsd {
+            return String(format: "$%.2f left", bal)
+        }
+        if let r = rateLimit, let used = r.used, let limit = r.limit, limit > 0 {
+            let pct = Int((used / limit) * 100)
+            let unit = r.units ?? ""
+            return "\(pct)% used (\(Int(used))/\(Int(limit)) \(unit))"
+        }
+        if let r = rateLimit, let limit = r.limit, limit > 0 {
+            return "\(Int(limit)) \(r.units ?? "")"
+        }
+        return note
+    }
+
+    var resetIn: String? {
+        guard let ms = rateLimit?.resetsAt else { return nil }
+        let secs = ms / 1000 - Date().timeIntervalSince1970
+        if secs <= 0 { return nil }
+        if secs < 60 { return "\(Int(secs))s" }
+        if secs < 3600 { return "\(Int(secs / 60))m" }
+        return "\(Int(secs / 3600))h \(Int((secs.truncatingRemainder(dividingBy: 3600)) / 60))m"
+    }
+}
+
+/// A row in the central credential vault (~/.sweech/accounts.json).
+struct VaultAccount: Codable, Identifiable, Hashable {
+    var id: String { accountId }
+    let accountId: String      // 12-char vault id
+    let kind: String           // "anthropic" | "openai"
+    let email: String
+    let displayName: String?
+    let plan: String?
+    let rateLimitTier: String?
+    let addedAt: String
+    let lastRefreshedAt: String?
+    let expiresAt: Double?     // ms epoch
+    let status: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case accountId = "id"
+        case kind, email, displayName, plan, rateLimitTier, addedAt, lastRefreshedAt, expiresAt, status
+    }
+
+    /// Hides the synthetic <name>@unknown.local placeholders used during import.
+    var displayEmail: String {
+        email.hasSuffix("@unknown.local") ? "(no email)" : email
+    }
+
+    /// Compatibility check: anthropic→claude only, openai→codex only.
+    func isCompatible(with cliType: String) -> Bool {
+        switch (kind, cliType) {
+        case ("anthropic", "claude"): return true
+        case ("openai", "codex"): return true
+        default: return false
+        }
+    }
+
+    var expiryLabel: String? {
+        guard let expiresAt else { return nil }
+        let secs = expiresAt / 1000.0 - Date().timeIntervalSince1970
+        if secs < 0 { return "expired" }
+        let hours = secs / 3600
+        if hours < 24 { return String(format: "%.0fh", hours) }
+        return String(format: "%.0fd", hours / 24)
+    }
+}
+
+struct VaultListResponse: Codable {
+    let accounts: [VaultAccount]
+}
+
+struct AssignResponse: Codable {
+    let ok: Bool
+    let workspaceCommandName: String?
+    let accountId: String?
+    let email: String?
+    let reason: String?
+}
+
+struct RefreshResult: Codable {
+    let email: String
+    let kind: String
+    let outcome: String   // refreshed | still-valid | no-refresh-token | failed | remounted
+    let error: String?
+    let expiresAt: Double?
+}
+
+struct RefreshResponse: Codable {
+    let results: [RefreshResult]
 }
 
 struct ManageableProvider: Codable, Identifiable {
@@ -253,6 +450,8 @@ struct SweechInfo: Codable {
 
 class SweechService: ObservableObject {
     @Published var accounts: [SweechAccount] = []
+    /// Per-vendor balance / rate-limit info from `sweech providers quota`.
+    @Published var providerQuotas: [String: ProviderQuota] = [:]
     @Published var isConnected = false
     @Published var isFetching = false
     @Published var lastError: String?
@@ -264,6 +463,14 @@ class SweechService: ObservableObject {
     @Published var manageableProviders: [ManageableProvider] = []
     @Published var isMutatingProfiles = false
     @Published var profileMutationError: String?
+
+    // Vault state
+    @Published var vaultAccounts: [VaultAccount] = []
+    @Published var isVaultFetching = false
+    @Published var lastVaultFetched: Date?
+    @Published var vaultError: String?
+    @Published var lastAssignError: String?
+    @Published var lastRefreshSummary: String?
 
     private var previousStatuses: [String: String] = [:]  // commandName → liveStatus
     private var previousUtilizations: [String: Double] = [:]  // commandName → utilization7d
@@ -410,6 +617,7 @@ class SweechService: ObservableObject {
                         let response = try JSONDecoder().decode(UsageResponse.self, from: data)
                         self.fireStatusChangeNotifications(newAccounts: response.accounts)
                         self.accounts = response.accounts
+                        if let q = response.providerQuotas { self.providerQuotas = q }
                         self.isConnected = true
                         self.lastError = nil
                         self.lastFetched = Date()
@@ -479,6 +687,99 @@ class SweechService: ObservableObject {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - Vault
+
+    func fetchVault() {
+        DispatchQueue.main.async { [weak self] in self?.isVaultFetching = true }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Self.runSweech(["accounts", "list", "--json"])
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isVaultFetching = false
+                switch result {
+                case .success(let data):
+                    do {
+                        let resp = try JSONDecoder().decode(VaultListResponse.self, from: data)
+                        self.vaultAccounts = resp.accounts
+                        self.lastVaultFetched = Date()
+                        self.vaultError = nil
+                    } catch {
+                        self.vaultError = "Vault parse error: \(error.localizedDescription)"
+                    }
+                case .failure(let error):
+                    self.vaultError = "Vault fetch error: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func assignAccount(workspaceCommandName: String, email: String, completion: ((Bool) -> Void)? = nil) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Self.runSweech(["assign", workspaceCommandName, email, "--json"])
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let data):
+                    do {
+                        let resp = try JSONDecoder().decode(AssignResponse.self, from: data)
+                        if resp.ok {
+                            self.lastAssignError = nil
+                            self.fetch()        // refresh workspace usage view
+                            completion?(true)
+                        } else {
+                            self.lastAssignError = resp.reason ?? "Unknown assign error"
+                            completion?(false)
+                        }
+                    } catch {
+                        self.lastAssignError = "Assign parse error: \(error.localizedDescription)"
+                        completion?(false)
+                    }
+                case .failure(let error):
+                    self.lastAssignError = error.localizedDescription
+                    completion?(false)
+                }
+            }
+        }
+    }
+
+    /// Probe every third-party provider for current balance / rate-limit
+    /// and cache to ~/.sweech/provider-quotas.json. Cached results land
+    /// in the next `sweech usage --json` payload via the `providerQuotas`
+    /// field. Detached so it doesn't block the menu bar.
+    func refreshProviderQuotas(completion: (() -> Void)? = nil) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            _ = Self.runSweech(["providers", "quota", "--refresh", "--json"])
+            DispatchQueue.main.async {
+                self?.fetch()        // reload usage so the new quotas land
+                completion?()
+            }
+        }
+    }
+
+    /// Refresh any expiring tokens in the vault. Used by the 10-min timer.
+    func refreshVaultTokens(completion: (() -> Void)? = nil) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Self.runSweech(["accounts", "refresh", "--json"])
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .success(let data):
+                    if let resp = try? JSONDecoder().decode(RefreshResponse.self, from: data) {
+                        let refreshed = resp.results.filter { $0.outcome == "refreshed" }.count
+                        let failed = resp.results.filter { $0.outcome == "failed" }.count
+                        if refreshed > 0 || failed > 0 {
+                            self.lastRefreshSummary = "Vault: \(refreshed) refreshed, \(failed) failed"
+                        }
+                        self.fetchVault()
+                    }
+                case .failure(let error):
+                    NSLog("SweechBar vault refresh failed: %@", error.localizedDescription)
+                }
+                completion?()
             }
         }
     }

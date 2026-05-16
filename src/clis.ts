@@ -27,6 +27,11 @@ export const SUPPORTED_CLIS: Record<string, CLIConfig> = {
     description: 'Anthropic Claude Code CLI',
     installUrl: 'https://code.claude.com/',
     yoloFlag: '--dangerously-skip-permissions',
+    // --continue is the right default: resumes the cwd's most-recent session
+    // without going through an account-level picker. claude --resume (the
+    // picker) re-checks OAuth state and can force a re-login flow which is
+    // undesirable for an automated launch. Crashed sessions that died with no
+    // deferred-tool marker need to be resumed by explicit session id instead.
     resumeFlag: '--continue',
     agentsCommand: ['agents'],
     sessionsCommand: ['--resume'],
@@ -40,7 +45,13 @@ export const SUPPORTED_CLIS: Record<string, CLIConfig> = {
     description: 'OpenAI Codex CLI - lightweight coding agent',
     installUrl: 'https://github.com/openai/codex',
     yoloFlag: '--dangerously-bypass-approvals-and-sandbox',
-    resumeFlag: 'resume --last',
+    // `resume` (no --last) opens the cwd-filtered picker which scans the
+    // sessions/ directory — symlinked across shared profiles. `--last` queries
+    // logs_2.sqlite which is per-profile (intentionally not shared, since the
+    // codex app-server caches account-specific rate-limits there), so on a
+    // shared profile like codex-ted, --last finds nothing even when the
+    // master codex profile has recent sessions.
+    resumeFlag: 'resume',
     agentsCommand: ['resume'], // codex has no `agents` — picker for prior sessions is closest
     sessionsCommand: ['resume'], // codex resume is the cwd-filtered session picker
     // codex has no equivalent of claude's --name (sessions are identified by cwd + id)

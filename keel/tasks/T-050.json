@@ -1,0 +1,36 @@
+{
+  "id": "T-050",
+  "title": "Token expiry shown as countdown not epoch ms",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "Launcher/list output shows tokenExpiresAt: 1705123456000 instead of \"expires in 2h\". Users have to do mental math.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"Token expiry shown as countdown (expires in 2h) not epoch ms\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Launcher / sweech accounts list / sweech list show \"expires in 2h\" / \"expires in 3d\" / red \"expired\"",
+    "JSON output still includes raw expiresAt epoch for scripts"
+  ]
+}

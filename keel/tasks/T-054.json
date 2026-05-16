@@ -1,0 +1,37 @@
+{
+  "id": "T-054",
+  "title": "Daemon log file rotation",
+  "wave": "wave-5",
+  "space": "space-api",
+  "status": "done",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "~/Library/Logs/sweech-serve.log grows unbounded.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"Daemon log rotation (~/Library/Logs/sweech-serve.log)\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Log rotated when >10MB or once per day, whichever first",
+    "Last 5 rotations kept (sweech-serve.log.1 … .5)",
+    "launchd plist updated; no manual rotation script"
+  ]
+}

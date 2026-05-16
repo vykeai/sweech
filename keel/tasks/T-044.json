@@ -1,0 +1,46 @@
+{
+  "id": "T-044",
+  "title": "Launcher fails fast in non-TTY stdin",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "critical",
+  "platform": null,
+  "assignee": "claude",
+  "description": "src/launcher.ts:649 hangs forever in non-TTY stdin (piped invocation, CI). Hard to detect; only manifests when sweech is scripted.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T19:17:40.000Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-16T18:52:56.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-16T19:17:40.000Z"
+    }
+  ],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 1: \"launcher.ts:649 hangs in non-TTY stdin (e.g. piped invocation, CI)\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "If process.stdin.isTTY is false at launcher entry, print clear error to stderr and exit non-zero",
+    "Error names the alternative: \"use sweech list for non-interactive listings\"",
+    "sweech invoked in a real terminal still works exactly as before"
+  ]
+}

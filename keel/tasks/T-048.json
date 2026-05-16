@@ -1,0 +1,39 @@
+{
+  "id": "T-048",
+  "title": "Auto vault backup on every mutation",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "Vault corruption = data loss. sweech backup exists but is manual. Write a fresh encrypted backup on every accounts mutation, keeping last 7.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 2: \"Vault corruption = data loss. sweech backup exists but is manual. Should write ~/.sweech/backups/vault-YYYY-MM-DD.zip on every accounts mutation, keeping last 7\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Every accounts add/remove/import/refresh writes a fresh backup",
+    "Files named vault-YYYY-MM-DDTHH-MM-SS.zip (sortable)",
+    "Encrypted with the same AES-GCM scheme as manual backup, keyed off ~/.sweech/.backup-key (generated on first run)",
+    "Retain newest 7, delete older",
+    "Disabled with SWEECH_AUTO_BACKUP=0"
+  ]
+}

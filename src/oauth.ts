@@ -8,6 +8,7 @@ import { randomBytes } from 'crypto';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { scrubSecrets } from './scrubSecrets';
+import { getAnthropicClientId } from './anthropicAuth';
 
 export interface OAuthToken {
   accessToken: string;
@@ -48,7 +49,7 @@ export async function getOAuthToken(
  * Anthropic OAuth flow using PKCE (manual code paste)
  */
 async function getAnthropicOAuthToken(): Promise<OAuthToken> {
-  const clientId = process.env.ANTHROPIC_CLIENT_ID || 'sweech-cli';
+  const clientId = getAnthropicClientId();
   const redirectUri = 'urn:ietf:wg:oauth:2.0:oob'; // Out-of-band (manual)
 
   // Create PKCE challenge
@@ -229,7 +230,7 @@ export async function refreshOAuthToken(token: OAuthToken): Promise<OAuthToken> 
 
   // Use the real Claude Code OAuth client ID so refresh tokens issued by Claude Code work
   const clientId = token.provider === 'anthropic'
-    ? (process.env.ANTHROPIC_CLIENT_ID || '9d1c250a-e61b-44d9-88ed-5944d1962f5e')
+    ? getAnthropicClientId()
     : (process.env.OPENAI_CLIENT_ID || 'sweech-cli');
 
   const clientSecret = process.env.ANTHROPIC_CLIENT_SECRET || process.env.OPENAI_CLIENT_SECRET;

@@ -1,0 +1,37 @@
+{
+  "id": "T-052",
+  "title": "sweech compare gains --json and --per-model",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "sweech compare is ASCII-only and lacks JSON output (inconsistent with other list commands) and per-model breakdown.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"sweech compare gains --json + --per-model\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "--json emits structured comparison (both profiles, scores, plan, status, expiry, costs if known)",
+    "--per-model shows per-model rate-limit tiers side by side (e.g. sonnet vs opus quotas)",
+    "Default text output unchanged"
+  ]
+}

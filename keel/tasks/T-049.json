@@ -1,0 +1,41 @@
+{
+  "id": "T-049",
+  "title": "SweechBar reads from daemon HTTP (not subprocess)",
+  "wave": "wave-5",
+  "space": "space-menubar",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "SweechBar shells out to sweech for every read — spawning Node, parsing TypeScript, exiting, 25× per refresh — while the daemon is on 127.0.0.1:7801 with the same data already computed. /api/usage exists with zero callers.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [
+    "T-039"
+  ],
+  "runStatus": null,
+  "size": "L",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 3: \"SweechBar shells out to sweech for every read — spawning Node, parsing TypeScript, exiting, 25× per refresh — while the daemon is right there on 127.0.0.1:7801\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "fetch(), fetchVault(), refreshProviderQuotas() call daemon HTTP first",
+    "CLI subprocess remains as fallback when daemon is down/unreachable",
+    "Mutating actions (assign / accounts add) still go through CLI — daemon read-only from Swift side",
+    "Popover open is measurably faster (≥3× under cold cache); document before/after in commit msg",
+    "No regression when daemon is intentionally stopped — UI degrades gracefully to CLI path"
+  ]
+}

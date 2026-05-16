@@ -1,0 +1,37 @@
+{
+  "id": "T-051",
+  "title": "assign pre-flights which <cli> before mounting",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "sweech assign currently mounts an account into a workspace even if the underlying CLI (claude/codex) is not installed. User discovers the failure only at first launch.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"assign <ws> <email> pre-flights which <cli> and refuses if binary missing\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Before writing keychain/marker, check that workspace commandName binary resolves",
+    "If missing: refuse, print install hint (brew install … or npm i -g …)",
+    "--force flag bypasses for power users"
+  ]
+}

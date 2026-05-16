@@ -1,0 +1,37 @@
+{
+  "id": "T-057",
+  "title": "Remove deprecated fields in liveUsage.ts",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "Five @deprecated fields linger with no removal plan.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"Drop deprecated fields in liveUsage.ts:57-65 with one removal commit\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "All five @deprecated fields removed from liveUsage.ts:57-65",
+    "Callers migrated to buckets[0].session.utilization / buckets[0].weekly.utilization shapes",
+    "JSON output contract documented in SWEECH_GUIDE.md"
+  ]
+}

@@ -19,8 +19,6 @@ interface LiveRateLimitData {
     session?: RateLimitWindow;
     weekly?: RateLimitWindow;
   }>;
-  utilization5h?: number;
-  utilization7d?: number;
 }
 
 export interface AccountTelemetry {
@@ -72,8 +70,8 @@ export async function loadSweechTelemetry(): Promise<Record<string, AccountTelem
     const firstBucket = entry.buckets?.[0];
     telemetry[accountId] = {
       ...(telemetry[accountId] ?? {}),
-      utilization5h: firstBucket?.session?.utilization ?? entry.utilization5h,
-      utilization7d: firstBucket?.weekly?.utilization ?? entry.utilization7d,
+      utilization5h: firstBucket?.session?.utilization,
+      utilization7d: firstBucket?.weekly?.utilization,
     };
   }
 

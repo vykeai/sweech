@@ -394,7 +394,7 @@ sweech backup-claude           # Backup ~/.claude/ directory
 sweech doctor                  # Health check (PATH, CLIs, credentials, symlinks)
 sweech alias [action]          # Manage command aliases
 sweech discover                # Browse available providers
-sweech completion <shell>      # Shell completion (bash/zsh) with dynamic profiles
+sweech completion <shell>      # Shell completion (bash/zsh/fish) with dynamic profiles
 sweech webhooks                # Show configured webhooks
 sweech path                    # Show bin directory
 sweech update                  # Self-update from GitHub
@@ -620,6 +620,9 @@ $ sweech completion zsh > ~/.sweech-completion.zsh
 $ echo 'source ~/.sweech-completion.zsh' >> ~/.zshrc
 $ source ~/.zshrc
 
+# Fish (auto-loaded from this path on next shell)
+$ sweech completion fish > ~/.config/fish/completions/sweech.fish
+
 # Now use tab completion
 $ sweech <TAB>
 add       backup    clone     doctor    edit      list      update    ...
@@ -701,6 +704,37 @@ sweech --version
 ```bash
 sweech doctor
 ```
+
+### Building SweechBar (macOS menu bar app)
+
+```bash
+cd macos-menubar
+./build-app.sh                # dev build — unsigned, personal use only
+./build-app.sh --release      # signed + notarised, distributable
+```
+
+The `--release` path codesigns with the certificate named in `SWEECH_DEVELOPER_ID`, submits to Apple's notary service via the keychain profile named in `SWEECH_NOTARY_PROFILE`, and staples the ticket. The result passes `spctl --assess` on any Mac.
+
+**One-time setup** (per machine, before first `--release`):
+
+1. Install a **Developer ID Application** certificate in your login keychain (Xcode → Settings → Accounts → Manage Certificates).
+2. Store notarisation credentials in a keychain profile — secrets stay in the keychain, never in the script:
+
+   ```bash
+   xcrun notarytool store-credentials sweech-notary \
+       --apple-id "you@example.com" \
+       --team-id  "ABCDE12345" \
+       --password "app-specific-password"
+   ```
+
+3. Export the env vars `build-app.sh --release` reads:
+
+   ```bash
+   export SWEECH_DEVELOPER_ID="Developer ID Application: Your Name (ABCDE12345)"
+   export SWEECH_NOTARY_PROFILE="sweech-notary"
+   ```
+
+If either var is unset, `--release` exits with a clear error before doing any work.
 
 ---
 

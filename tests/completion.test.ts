@@ -3,7 +3,7 @@
  */
 
 import * as fs from 'fs';
-import { generateBashCompletion, generateZshCompletion, handleComplete } from '../src/completion';
+import { generateBashCompletion, generateZshCompletion, generateFishCompletion, handleComplete } from '../src/completion';
 import { ConfigManager } from '../src/config';
 import { AliasManager } from '../src/aliases';
 
@@ -240,6 +240,120 @@ describe('Completion Scripts', () => {
     });
   });
 
+  describe('generateFishCompletion', () => {
+    test('generates valid fish completion script', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toMatch(/^# Fish completion for sweech/);
+      expect(script).toContain('complete -c sweech -f');
+      expect(script).toContain('complete -c sweech -n __fish_use_subcommand');
+    });
+
+    test('emits every top-level subcommand', () => {
+      const script = generateFishCompletion();
+
+      // Spot-check a representative slice across the FISH_SUBCOMMANDS table.
+      const expected = [
+        'init', 'add', 'list', 'ls', 'remove', 'rm', 'info', 'use',
+        'launch', 'run', 'auth', 'alias', 'discover', 'completion',
+        'doctor', 'edit', 'usage', 'sessions', 'audit', 'team',
+        'plugins', 'peers', 'templates', 'share', 'unshare',
+      ];
+      for (const cmd of expected) {
+        expect(script).toContain(`complete -c sweech -n __fish_use_subcommand -a ${cmd} -d `);
+      }
+    });
+
+    test('completes workspace names dynamically via sweech list --json', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toContain('function __sweech_workspaces');
+      expect(script).toContain("command sweech list --json");
+      expect(script).toContain(".workspaces[]?.commandName");
+    });
+
+    test('restricts workspace completion to workspace-accepting subcommands', () => {
+      const script = generateFishCompletion();
+
+      // Must scope dynamic workspace expansion to those subcommands.
+      const ws = [
+        'remove', 'rm', 'show', 'stats', 'use', 'launch', 'run', 'auth',
+        'test', 'edit', 'clone', 'rename', 'backup-chats', 'share', 'unshare',
+      ].join(' ');
+      expect(script).toContain(`__fish_seen_subcommand_from ${ws}`);
+      expect(script).toContain("'(__sweech_workspaces)'");
+    });
+
+    test('includes snapshot workspace fallback', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toContain('claude-mini');
+      expect(script).toContain('claude-qwen');
+    });
+
+    test('completes shells for the completion subcommand', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toContain("__fish_seen_subcommand_from completion");
+      expect(script).toContain("'bash zsh fish'");
+    });
+
+    test('completes alias actions and registered alias names', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toContain('__fish_seen_subcommand_from alias');
+      expect(script).toContain('-a list');
+      expect(script).toContain('-a remove');
+      expect(script).toContain('work');
+      expect(script).toContain('personal');
+    });
+
+    test('emits --sort options scoped to usage and stats', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toContain("__fish_seen_subcommand_from usage' -l sort -xa 'smart status manual'");
+      expect(script).toContain("__fish_seen_subcommand_from stats' -l sort -xa 'uses recent name'");
+    });
+
+    test('exposes top-level flags', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toContain("complete -c sweech -l help");
+      expect(script).toContain("complete -c sweech -l version");
+    });
+
+    test('uses single-quoted fish argument syntax (no broken quotes)', () => {
+      const script = generateFishCompletion();
+
+      // Every `-d 'foo'` should be balanced; no stray unescaped quotes.
+      // A simple count check: number of single quotes must be even.
+      const quoteCount = (script.match(/'/g) || []).length;
+      expect(quoteCount % 2).toBe(0);
+    });
+
+    test('handles empty profiles gracefully', () => {
+      MockConfigManager.prototype.getProfiles = jest.fn().mockReturnValue([]);
+
+      const script = generateFishCompletion();
+
+      // Dynamic completion must still be wired even when snapshot is empty.
+      expect(script).toContain("'(__sweech_workspaces)'");
+      // No empty snapshot line — guard prevents `-a ''`.
+      expect(script).not.toMatch(/-a '' -d Workspace/);
+    });
+
+    test('handles empty aliases gracefully', () => {
+      MockAliasManager.prototype.getAliases = jest.fn().mockReturnValue({});
+
+      const script = generateFishCompletion();
+
+      // Action completion still present, alias-name completion suppressed.
+      expect(script).toContain('-a list');
+      expect(script).toContain('-a remove');
+      expect(script).not.toMatch(/__fish_seen_argument_from remove' -a ''/);
+    });
+  });
+
   describe('Script format', () => {
     test('bash script is executable format', () => {
       const script = generateBashCompletion();
@@ -253,6 +367,22 @@ describe('Completion Scripts', () => {
 
       expect(script).toMatch(/^#compdef sweech/);
       expect(script.trim().endsWith('"$@"')).toBe(true);
+    });
+
+    test('fish script is executable format', () => {
+      const script = generateFishCompletion();
+
+      expect(script).toMatch(/^# Fish completion/);
+      // Last non-empty line should still be a `complete -c sweech` directive.
+      const last = script.trim().split('\n').filter(l => l.length > 0).pop()!;
+      expect(last.startsWith('complete -c sweech')).toBe(true);
+    });
+
+    test('fish script has proper line endings', () => {
+      const script = generateFishCompletion();
+
+      expect(script).not.toContain('\r\n');
+      expect(script.split('\n').length).toBeGreaterThan(10);
     });
 
     test('bash script has proper line endings', () => {
@@ -428,12 +558,17 @@ describe('Completion Scripts', () => {
 
     test('completes completion shell argument', () => {
       const result = handleComplete('sweech completion ');
-      expect(result).toEqual(['bash', 'zsh']);
+      expect(result).toEqual(['bash', 'zsh', 'fish']);
     });
 
     test('filters completion shells by partial', () => {
       const result = handleComplete('sweech completion b');
       expect(result).toEqual(['bash']);
+    });
+
+    test('filters completion shells with f prefix to fish', () => {
+      const result = handleComplete('sweech completion f');
+      expect(result).toEqual(['fish']);
     });
 
     test('returns empty for completed commands with no more args', () => {

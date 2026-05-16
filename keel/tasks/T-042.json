@@ -1,0 +1,37 @@
+{
+  "id": "T-042",
+  "title": "Suppress update banner when --json is in argv",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "critical",
+  "platform": null,
+  "assignee": null,
+  "description": "Update-check banner prints to stderr during JSON output, breaking scripts that parse sweech usage --json. Promised JSON contract violated.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 1: \"Update-check banner pollutes stderr during JSON output. Scripts parsing sweech usage --json break\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Banner skipped when --json is present anywhere in argv",
+    "Banner still shows for human-mode invocations (bare sweech, sweech list, etc.)",
+    "SWEECH_NO_UPDATE_NOTIFIER=1 env var also suppresses it (for CI)"
+  ]
+}
