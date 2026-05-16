@@ -179,39 +179,6 @@ class SweechBarController: OnlyBarController {
     }
 
     override func makeBody() -> AnyView {
-        AnyView(
-            SweechRootView(service: service)
-        )
-    }
-}
-
-// MARK: - Root view (Tabs: Accounts / Vault)
-
-struct SweechRootView: View {
-    @ObservedObject var service: SweechService
-    // Default to the new vault view (accounts + workspaces). The old
-    // per-provider usage cards live behind the "Detail" tab for users
-    // who want the bar-by-bar breakdown.
-    @AppStorage("sweechBarRootTab") private var tab: String = "vault"
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $tab) {
-                Text("Home").tag("vault")
-                Text("Detail").tag("accounts")
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 8)
-            .padding(.top, 6)
-            .padding(.bottom, 4)
-
-            switch tab {
-            case "accounts":
-                AccountsView(service: service)
-            default:
-                VaultView(service: service)
-            }
-        }
+        AnyView(VaultView(service: service))
     }
 }
