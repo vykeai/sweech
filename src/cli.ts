@@ -19,7 +19,7 @@ import { backupSweetch, restoreSweetch, backupClaude } from './backup';
 import { UsageTracker } from './usage';
 import { summarizeAccountsForTelemetry } from './usage';
 import { AliasManager } from './aliases';
-import { generateBashCompletion, generateZshCompletion, handleComplete } from './completion';
+import { generateBashCompletion, generateZshCompletion, generateFishCompletion, handleComplete } from './completion';
 import { confirmChatBackupBeforeRemoval, backupChatHistory } from './chatBackup';
 import { isDefaultCLIDirectory } from './reset';
 import { runDoctor, runPath, runTest, runEdit, runClone } from './utilityCommands';
@@ -1481,14 +1481,18 @@ program
 // Completion command
 program
   .command('completion <shell>')
-  .description('Generate shell completion script (bash or zsh)')
+  .description('Generate shell completion script (bash | zsh | fish)')
   .action((shell: string) => {
-    if (shell !== 'bash' && shell !== 'zsh') {
-      console.error(chalk.red('Error: Unsupported shell. Use "bash" or "zsh"'));
+    if (shell !== 'bash' && shell !== 'zsh' && shell !== 'fish') {
+      console.error(chalk.red('Error: Unsupported shell. Use "bash", "zsh", or "fish"'));
       process.exit(1);
     }
 
-    const completion = shell === 'bash' ? generateBashCompletion() : generateZshCompletion();
+    const completion = shell === 'bash'
+      ? generateBashCompletion()
+      : shell === 'zsh'
+      ? generateZshCompletion()
+      : generateFishCompletion();
     console.log(completion);
 
     // Show installation instructions
@@ -1502,17 +1506,26 @@ program
       console.error();
       console.error(chalk.gray('2. Add to your ~/.bashrc or ~/.bash_profile:'));
       console.error(chalk.yellow('   source ~/.sweech-completion.bash'));
-    } else {
+      console.error();
+      console.error(chalk.gray('3. Reload your shell:'));
+      console.error(chalk.yellow('   source ~/.bashrc'));
+    } else if (shell === 'zsh') {
       console.error(chalk.gray('1. Save the completion script:'));
       console.error(chalk.yellow('   sweetch completion zsh > ~/.sweech-completion.zsh'));
       console.error();
       console.error(chalk.gray('2. Add to your ~/.zshrc:'));
       console.error(chalk.yellow('   source ~/.sweech-completion.zsh'));
+      console.error();
+      console.error(chalk.gray('3. Reload your shell:'));
+      console.error(chalk.yellow('   source ~/.zshrc'));
+    } else {
+      console.error(chalk.gray('1. Save the completion script (fish auto-loads from this path):'));
+      console.error(chalk.yellow('   sweetch completion fish > ~/.config/fish/completions/sweech.fish'));
+      console.error();
+      console.error(chalk.gray('2. Open a new shell or reload:'));
+      console.error(chalk.yellow('   source ~/.config/fish/completions/sweech.fish'));
     }
 
-    console.error();
-    console.error(chalk.gray('3. Reload your shell:'));
-    console.error(chalk.yellow(`   source ~/.${shell === 'bash' ? 'bashrc' : 'zshrc'}`));
     console.error();
   });
 

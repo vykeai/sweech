@@ -84,7 +84,7 @@ export function handleComplete(line: string): string[] {
 
   // completion shell argument
   if (subcommand === 'completion' && argIndex === 1) {
-    return ['bash', 'zsh'].filter(s => s.startsWith(partial));
+    return ['bash', 'zsh', 'fish'].filter(s => s.startsWith(partial));
   }
 
   // Flag completions (when partial starts with -)
@@ -268,11 +268,152 @@ _sweech() {
             fi
             ;;
         completion)
-            _arguments "1:shell:(bash zsh)"
+            _arguments "1:shell:(bash zsh fish)"
             ;;
     esac
 }
 
 _sweech "$@"
 `;
+}
+
+/**
+ * Top-level subcommands paired with their fish-friendly descriptions.
+ * Kept inline (not pulled from Commander) so that the generator works
+ * even when invoked from a stripped install.
+ */
+const FISH_SUBCOMMANDS: ReadonlyArray<readonly [string, string]> = [
+  ['init', 'Interactive onboarding'],
+  ['add', 'Add a new provider'],
+  ['list', 'List all configured workspaces'],
+  ['ls', 'List all configured workspaces (alias)'],
+  ['remove', 'Remove a configured provider'],
+  ['rm', 'Remove a configured provider (alias)'],
+  ['info', 'Show sweech configuration'],
+  ['update-wrappers', 'Regenerate CLI wrapper scripts'],
+  ['backup', 'Create encrypted backup'],
+  ['backup-claude', 'Backup Claude configuration'],
+  ['restore', 'Restore from backup'],
+  ['stats', 'Show usage statistics'],
+  ['show', 'Show provider details'],
+  ['use', 'Launch a workspace'],
+  ['launch', 'Launch a workspace (alias)'],
+  ['run', 'Run a workspace command'],
+  ['auth', 'Manage workspace authentication'],
+  ['alias', 'Manage command aliases'],
+  ['discover', 'Discover available providers'],
+  ['completion', 'Generate shell completion script'],
+  ['doctor', 'Check installation health'],
+  ['path', 'Show config path'],
+  ['test', 'Test a provider connection'],
+  ['edit', 'Edit a provider config'],
+  ['clone', 'Clone a profile'],
+  ['rename', 'Rename a profile'],
+  ['backup-chats', 'Backup chat history'],
+  ['serve', 'Start federation server'],
+  ['usage', 'Show account usage windows'],
+  ['reset', 'Reset to defaults'],
+  ['update', 'Update sweech'],
+  ['sessions', 'Manage sessions'],
+  ['sync', 'Sync configuration'],
+  ['audit', 'Audit configuration'],
+  ['team', 'Team management'],
+  ['plugins', 'Manage plugins'],
+  ['peers', 'Manage federation peers'],
+  ['templates', 'Manage profile templates'],
+  ['share', 'Share a profile with a peer'],
+  ['unshare', 'Revoke a shared profile'],
+];
+
+/** Subcommands that take a workspace/profile name as their first positional. */
+const FISH_WORKSPACE_COMMANDS = [
+  'remove', 'rm', 'show', 'stats', 'use', 'launch', 'run', 'auth',
+  'test', 'edit', 'clone', 'rename', 'backup-chats', 'share', 'unshare',
+];
+
+/**
+ * Escape a description for safe use inside a single-quoted fish argument.
+ * Fish only requires escaping single quotes and backslashes inside '...'.
+ */
+function fishEscape(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+export function generateFishCompletion(): string {
+  const config = new ConfigManager();
+  const aliasManager = new AliasManager();
+  const profiles = config.getProfiles();
+  const aliases = aliasManager.getAliases();
+
+  const commandNames = profiles.map(p => p.commandName);
+  const aliasNames = Object.keys(aliases);
+
+  const lines: string[] = [];
+  lines.push('# Fish completion for sweech');
+  lines.push('# Install: sweech completion fish > ~/.config/fish/completions/sweech.fish');
+  lines.push('');
+
+  // Disable file completion by default — we will add it back where useful.
+  lines.push('complete -c sweech -f');
+  lines.push('');
+
+  // Helper function: emit dynamic workspace names by calling sweech itself.
+  // Falls back to the snapshot list baked in below if the live call fails.
+  lines.push('function __sweech_workspaces');
+  lines.push('    command sweech list --json 2>/dev/null | command jq -r \'.workspaces[]?.commandName\' 2>/dev/null');
+  lines.push('end');
+  lines.push('');
+
+  // Subcommands — only when no subcommand has been chosen yet.
+  lines.push('# Subcommands');
+  for (const [name, desc] of FISH_SUBCOMMANDS) {
+    lines.push(`complete -c sweech -n __fish_use_subcommand -a ${name} -d '${fishEscape(desc)}'`);
+  }
+  lines.push('');
+
+  // Workspace name completion — only after workspace-accepting subcommands.
+  const wsCondition = `__fish_seen_subcommand_from ${FISH_WORKSPACE_COMMANDS.join(' ')}`;
+  lines.push('# Workspace names (dynamic via `sweech list --json`)');
+  lines.push(`complete -c sweech -n '${wsCondition}' -a '(__sweech_workspaces)' -d Workspace`);
+  // Snapshot fallback so completion works even without jq or a live sweech.
+  if (commandNames.length > 0) {
+    lines.push(`complete -c sweech -n '${wsCondition}' -a '${commandNames.join(' ')}' -d Workspace`);
+  }
+  lines.push('');
+
+  // `completion <shell>` — restrict to bash | zsh | fish.
+  lines.push('# completion <shell>');
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from completion' -a 'bash zsh fish' -d Shell");
+  lines.push('');
+
+  // `alias <action> [name]`
+  lines.push('# alias <action>');
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from alias; and not __fish_seen_argument_from list remove' -a list -d 'List aliases'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from alias; and not __fish_seen_argument_from list remove' -a remove -d 'Remove an alias'");
+  if (aliasNames.length > 0) {
+    lines.push(`complete -c sweech -n '__fish_seen_subcommand_from alias; and __fish_seen_argument_from remove' -a '${aliasNames.join(' ')}' -d Alias`);
+  }
+  lines.push('');
+
+  // --sort modes for usage / stats.
+  lines.push('# --sort values');
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from usage' -l sort -xa 'smart status manual' -d 'Sort order'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from stats' -l sort -xa 'uses recent name' -d 'Sort field'");
+  lines.push('');
+
+  // Common top-level flags.
+  lines.push('# Top-level flags');
+  lines.push("complete -c sweech -l help -d 'Show help'");
+  lines.push("complete -c sweech -s h -d 'Show help'");
+  lines.push("complete -c sweech -l version -d 'Show version'");
+  lines.push("complete -c sweech -s V -d 'Show version'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from list ls' -l json -d 'Output as JSON'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from list ls' -l refresh -d 'Force live quota fetch'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from stats usage' -l json -d 'Output as JSON'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from usage' -l refresh -d 'Force-refresh live usage'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from usage' -l no-group -d 'Show all workspaces in one list'");
+  lines.push("complete -c sweech -n '__fish_seen_subcommand_from usage' -s m -l models -d 'Show per-model breakdowns'");
+  lines.push('');
+
+  return lines.join('\n') + '\n';
 }

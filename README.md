@@ -394,7 +394,7 @@ sweech backup-claude           # Backup ~/.claude/ directory
 sweech doctor                  # Health check (PATH, CLIs, credentials, symlinks)
 sweech alias [action]          # Manage command aliases
 sweech discover                # Browse available providers
-sweech completion <shell>      # Shell completion (bash/zsh) with dynamic profiles
+sweech completion <shell>      # Shell completion (bash/zsh/fish) with dynamic profiles
 sweech webhooks                # Show configured webhooks
 sweech path                    # Show bin directory
 sweech update                  # Self-update from GitHub
@@ -619,6 +619,9 @@ $ source ~/.bashrc
 $ sweech completion zsh > ~/.sweech-completion.zsh
 $ echo 'source ~/.sweech-completion.zsh' >> ~/.zshrc
 $ source ~/.zshrc
+
+# Fish (auto-loaded from this path on next shell)
+$ sweech completion fish > ~/.config/fish/completions/sweech.fish
 
 # Now use tab completion
 $ sweech <TAB>
