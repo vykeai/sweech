@@ -1,40 +1,51 @@
 import SwiftUI
 
-/// Tile-grid view with two sections:
-///   Accounts   — OAuth identities (anthropic/openai from vault) plus
-///                synthetic API-key entries derived from external-provider
-///                workspaces (kimi, ollama, glm, minimax, dashscope, …).
-///   Workspaces — every ~/.<name>/ directory rendered as a card with cli
-///                badge, provider/plan, 5h+7d usage bars, and either an
-///                inline account picker (vault-bound) or a read-only
-///                provider label (external).
+/// SweechBar root view — two tabs (Accounts / Workspaces) with provider
+/// grouping and a guided assign sheet for moving an account onto a
+/// workspace.
 struct VaultView: View {
     @ObservedObject var service: SweechService
-    @AppStorage("sweechBarAccountsExpanded") private var accountsExpanded: Bool = true
-    @State private var workingWorkspace: String?
+    @AppStorage("sweechBarTab") private var tab: String = "accounts"
 
-    private let columns: [GridItem] = [
-        GridItem(.flexible(), spacing: 8),
-        GridItem(.flexible(), spacing: 8),
-    ]
+    /// When non-nil, the assignment sheet is showing for this account.
+    @State private var assigningAccount: VaultAccount?
 
     var body: some View {
         ZStack {
             Sweech.Gradient.backgroundRadial
 
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 12) {
-                    header
-                    accountsSection
-                    Divider().overlay(Sweech.Color.core.opacity(0.2))
-                    workspacesSection
-                    errorFooter
+            VStack(spacing: 0) {
+                header
+
+                Picker("", selection: $tab) {
+                    Text("Accounts (\(service.vaultAccounts.count))").tag("accounts")
+                    Text("Workspaces (\(service.accounts.count))").tag("workspaces")
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if tab == "accounts" {
+                            AccountsTab(service: service, onAssign: { assigningAccount = $0 })
+                        } else {
+                            WorkspacesTab(service: service)
+                        }
+                        errorFooter
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
-        .frame(width: 520, height: 760)
+        .frame(width: 540, height: 720)
+        .sheet(item: $assigningAccount) { account in
+            AssignSheet(service: service, account: account)
+                .frame(width: 480, height: 420)
+        }
         .onAppear {
             service.fetchVault()
             if service.accounts.isEmpty { service.fetch() }
@@ -55,7 +66,7 @@ struct VaultView: View {
                     .foregroundStyle(Sweech.Color.core)
             }
             .buttonStyle(.plain)
-            .help("Reload vault + workspaces")
+            .help("Reload")
 
             Button(action: { service.refreshVaultTokens() }) {
                 Image(systemName: "key.fill")
@@ -65,192 +76,314 @@ struct VaultView: View {
             .buttonStyle(.plain)
             .help("Refresh expiring OAuth tokens")
         }
+        .padding(.horizontal, 12)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
     }
 
-    // MARK: - Accounts section
+    // MARK: - Error footer
 
-    private var accountsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button(action: { accountsExpanded.toggle() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: accountsExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Sweech.Color.core)
-                    Text("Accounts")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(Sweech.Color.textPrimary)
-                    Text("(\(allAccountTiles().count))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Sweech.Color.textMuted)
-                    Spacer()
-                }
-            }
-            .buttonStyle(.plain)
+    @ViewBuilder
+    private var errorFooter: some View {
+        if let err = service.lastAssignError {
+            Text(err)
+                .font(.system(size: 10))
+                .foregroundStyle(Sweech.Color.danger)
+                .padding(.top, 2)
+        }
+        if let summary = service.lastRefreshSummary {
+            Text(summary)
+                .font(.system(size: 10))
+                .foregroundStyle(Sweech.Color.textMuted)
+        }
+    }
+}
 
-            if accountsExpanded {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                    ForEach(allAccountTiles(), id: \.id) { tile in
-                        accountTile(tile)
-                    }
-                }
+// MARK: - Accounts tab — grouped tile grid
+
+private struct AccountsTab: View {
+    @ObservedObject var service: SweechService
+    let onAssign: (VaultAccount) -> Void
+
+    private let columns: [GridItem] = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(grouped(), id: \.0) { providerKey, accounts in
+                providerSection(key: providerKey, accounts: accounts)
             }
         }
     }
 
-    /// Synthetic union of vault accounts (OAuth) + external-provider
-    /// summaries (one entry per unique non-anthropic/openai provider that
-    /// has at least one workspace).
-    private struct AccountTile: Identifiable, Hashable {
-        let id: String
-        let kind: String        // "anthropic" | "openai" | external provider key
-        let label: String       // email or provider display name
-        let subtitle: String?   // plan, key-count, etc
-        let expiryLabel: String?
-        let status: String?
-        let isExternal: Bool
-        let workspaceCount: Int
-    }
+    /// Returns ordered (providerKey, displayedAccounts) pairs.
+    /// Anthropic + OpenAI vault accounts first; then synthetic "API key"
+    /// tiles for each external provider that has at least one workspace.
+    private func grouped() -> [(String, [VaultAccount])] {
+        var groups: [(String, [VaultAccount])] = []
 
-    private func allAccountTiles() -> [AccountTile] {
-        var tiles: [AccountTile] = []
+        let anthropic = service.vaultAccounts.filter { $0.kind == "anthropic" }
+            .sorted { $0.email < $1.email }
+        if !anthropic.isEmpty { groups.append(("anthropic", anthropic)) }
 
-        // OAuth vault accounts
-        for a in service.vaultAccounts.sorted(by: { $0.email < $1.email }) {
-            let mountedIn = service.accounts.filter { $0.activeAccount?.id == a.id }.count
-            tiles.append(AccountTile(
-                id: "vault:\(a.id)",
-                kind: a.kind,
-                label: a.displayEmail,
-                subtitle: a.plan,
-                expiryLabel: a.expiryLabel,
-                status: a.status,
-                isExternal: false,
-                workspaceCount: mountedIn
-            ))
-        }
+        let openai = service.vaultAccounts.filter { $0.kind == "openai" }
+            .sorted { $0.email < $1.email }
+        if !openai.isEmpty { groups.append(("openai", openai)) }
 
-        // External-provider summary tiles, one per unique provider in use
+        // External providers — synthetic VaultAccounts so we can render
+        // them with the same tile component. id is `ext:<provider>`, status
+        // and expiry are nil (API-key based, no OAuth expiry).
         var seen = Set<String>()
         for ws in service.accounts where ws.isExternal {
-            guard let provider = ws.provider, !seen.contains(provider) else { continue }
-            seen.insert(provider)
-            let wsCount = service.accounts.filter { $0.provider == provider }.count
-            tiles.append(AccountTile(
-                id: "ext:\(provider)",
-                kind: provider,
-                label: ws.providerLabel,
-                subtitle: "API key",
-                expiryLabel: nil,
-                status: nil,
-                isExternal: true,
-                workspaceCount: wsCount
-            ))
+            guard let p = ws.provider, !seen.contains(p) else { continue }
+            seen.insert(p)
+            let synthetic = VaultAccount(
+                accountId: "ext:\(p)",
+                kind: p,
+                email: ws.providerLabel,
+                displayName: nil,
+                plan: nil,
+                rateLimitTier: nil,
+                addedAt: "",
+                lastRefreshedAt: nil,
+                expiresAt: nil,
+                status: nil
+            )
+            groups.append((p, [synthetic]))
         }
-        return tiles
+        return groups
     }
 
-    private func accountTile(_ tile: AccountTile) -> some View {
-        let glyph = providerGlyph(kind: tile.kind, isExternal: tile.isExternal)
-        let tint = providerTint(kind: tile.kind, isExternal: tile.isExternal)
-        let isExpired = tile.expiryLabel == "expired"
-        let badStatus = (tile.status != nil && tile.status != "ok" && tile.status != "expired")
+    @ViewBuilder
+    private func providerSection(key: String, accounts: [VaultAccount]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: TileStyle.glyph(kind: key))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(TileStyle.tint(kind: key))
+                Text(TileStyle.label(kind: key))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(Sweech.Color.textPrimary)
+                Text("(\(accounts.count))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Sweech.Color.textMuted)
+                Spacer()
+            }
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(accounts) { account in
+                    AccountTile(
+                        account: account,
+                        workspaceCount: workspaceCount(for: account),
+                        onAssign: { onAssign(account) }
+                    )
+                }
+            }
+        }
+    }
 
-        return VStack(alignment: .leading, spacing: 4) {
+    private func workspaceCount(for account: VaultAccount) -> Int {
+        if account.accountId.hasPrefix("ext:") {
+            return service.accounts.filter { $0.provider == account.kind }.count
+        }
+        return service.accounts.filter { $0.activeAccount?.id == account.id }.count
+    }
+}
+
+// MARK: - Account tile
+
+private struct AccountTile: View {
+    let account: VaultAccount
+    let workspaceCount: Int
+    let onAssign: () -> Void
+
+    private var isExternal: Bool { account.accountId.hasPrefix("ext:") }
+    private var tint: Color { TileStyle.tint(kind: account.kind) }
+    private var glyph: String { TileStyle.glyph(kind: account.kind) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Row 1: glyph + identity
             HStack(spacing: 6) {
                 Image(systemName: glyph)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(tint)
-                Text(tile.label)
+                Text(isExternal ? account.email : account.displayEmail)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Sweech.Color.textPrimary)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
 
+            // Row 2: plan + auth-type badge
             HStack(spacing: 4) {
-                kindBadge(kind: tile.kind, isExternal: tile.isExternal)
-                if let sub = tile.subtitle {
-                    Text(sub)
-                        .font(.system(size: 9, weight: .semibold))
+                if let plan = account.plan {
+                    Text(plan)
+                        .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Sweech.Color.core.opacity(0.12))
+                        .background(Sweech.Color.core.opacity(0.15))
                         .clipShape(Capsule())
                         .foregroundStyle(Sweech.Color.core)
                 }
+                Text(isExternal ? "API key" : "OAuth")
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(tint.opacity(0.15))
+                    .clipShape(Capsule())
+                    .foregroundStyle(tint)
+                Spacer(minLength: 0)
             }
 
+            // Row 3: expiry + mounted-in count
             HStack(spacing: 4) {
-                if let exp = tile.expiryLabel {
+                if let exp = account.expiryLabel {
                     HStack(spacing: 2) {
                         Image(systemName: "key.fill").font(.system(size: 8))
                         Text(exp).font(.system(size: 9))
                     }
-                    .foregroundStyle(isExpired ? Sweech.Color.danger : Sweech.Color.textMuted)
+                    .foregroundStyle(exp == "expired" ? Sweech.Color.danger : Sweech.Color.textMuted)
                 }
-                if badStatus, let s = tile.status {
-                    Text(s)
+                if let status = account.status, status != "ok", status != "expired" {
+                    Text(status)
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Sweech.Color.danger)
                 }
                 Spacer(minLength: 0)
-                if tile.workspaceCount > 0 {
-                    Text("·")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Sweech.Color.textMuted)
-                    Text("\(tile.workspaceCount) ws")
-                        .font(.system(size: 9))
-                        .foregroundStyle(Sweech.Color.textMuted)
-                        .help("Mounted in \(tile.workspaceCount) workspace(s)")
+                if workspaceCount > 0 {
+                    HStack(spacing: 2) {
+                        Image(systemName: "rectangle.stack.fill").font(.system(size: 8))
+                        Text("\(workspaceCount)")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundStyle(Sweech.Color.textMuted)
+                    .help("Mounted in \(workspaceCount) workspace(s)")
                 }
+            }
+
+            // Action — only for vault-backed (OAuth) accounts. External
+            // entries are read-only (managed via `sweech profile`).
+            if !isExternal {
+                Button(action: onAssign) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.system(size: 10))
+                        Text("Assign to workspace…")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundStyle(tint)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                    .background(tint.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Sweech.Color.surface.opacity(0.8))
+        .background(Sweech.Color.surface.opacity(0.85))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.25), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
+}
 
-    // MARK: - Workspaces section
+// MARK: - Workspaces tab — grouped tile grid
 
-    private var workspacesSection: some View {
+private struct WorkspacesTab: View {
+    @ObservedObject var service: SweechService
+    @State private var workingWorkspace: String?
+
+    private let columns: [GridItem] = [
+        GridItem(.flexible(), spacing: 8),
+        GridItem(.flexible(), spacing: 8),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(grouped(), id: \.0) { key, list in
+                providerSection(key: key, workspaces: list)
+            }
+        }
+    }
+
+    private func grouped() -> [(String, [SweechAccount])] {
+        var map: [String: [SweechAccount]] = [:]
+        for ws in service.accounts {
+            map[ws.displayGroup, default: []].append(ws)
+        }
+        // claude, codex first then external providers alphabetically
+        var ordered: [(String, [SweechAccount])] = []
+        for key in ["claude", "codex"] {
+            if let list = map.removeValue(forKey: key) {
+                ordered.append((key, list))
+            }
+        }
+        for key in map.keys.sorted() {
+            ordered.append((key, map[key]!))
+        }
+        return ordered
+    }
+
+    @ViewBuilder
+    private func providerSection(key: String, workspaces: [SweechAccount]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                Text("Workspaces")
+            HStack(spacing: 6) {
+                Image(systemName: TileStyle.glyph(kind: key))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(TileStyle.tint(kind: key))
+                Text(TileStyle.label(kind: key))
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(Sweech.Color.textPrimary)
-                Text("(\(service.accounts.count))")
-                    .font(.system(size: 11))
+                Text("(\(workspaces.count))")
+                    .font(.system(size: 10))
                     .foregroundStyle(Sweech.Color.textMuted)
                 Spacer()
             }
-
-            if service.accounts.isEmpty {
-                Text("No workspaces found.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Sweech.Color.textMuted)
-            } else {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                    ForEach(service.accounts, id: \.commandName) { ws in
-                        workspaceTile(ws)
-                    }
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(workspaces, id: \.commandName) { ws in
+                    WorkspaceTile(
+                        ws: ws,
+                        compatibleAccounts: compatibleAccounts(for: ws),
+                        busy: workingWorkspace == ws.commandName,
+                        onPick: { email in
+                            workingWorkspace = ws.commandName
+                            service.assignAccount(
+                                workspaceCommandName: ws.commandName,
+                                email: email
+                            ) { _ in workingWorkspace = nil }
+                        }
+                    )
                 }
             }
         }
     }
 
-    private func workspaceTile(_ ws: SweechAccount) -> some View {
-        let cliType = ws.cliType ?? "?"
-        let isVault = !ws.isExternal
-        let busy = workingWorkspace == ws.commandName
-        let kind = ws.isExternal ? (ws.provider ?? "") : (cliType == "claude" ? "anthropic" : "openai")
-        let tint = providerTint(kind: kind, isExternal: ws.isExternal)
-        let glyph = providerGlyph(kind: kind, isExternal: ws.isExternal)
-        let activeId = ws.activeAccount?.id
-        let compatible = compatibleAccounts(for: cliType)
+    private func compatibleAccounts(for ws: SweechAccount) -> [VaultAccount] {
+        let kind = ws.cliType == "claude" ? "anthropic" : "openai"
+        return service.vaultAccounts
+            .filter { $0.kind == kind }
+            .sorted { $0.email < $1.email }
+    }
+}
 
-        return VStack(alignment: .leading, spacing: 6) {
-            // Top: glyph + name + status pill
+// MARK: - Workspace tile
+
+private struct WorkspaceTile: View {
+    let ws: SweechAccount
+    let compatibleAccounts: [VaultAccount]
+    let busy: Bool
+    let onPick: (String) -> Void
+
+    private var cliType: String { ws.cliType ?? "?" }
+    private var kind: String { ws.isExternal ? (ws.provider ?? "") : (cliType == "claude" ? "anthropic" : "openai") }
+    private var tint: Color { TileStyle.tint(kind: kind) }
+    private var glyph: String { TileStyle.glyph(kind: kind) }
+    private var activeId: String? { ws.activeAccount?.id }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Top: glyph + name + warning
             HStack(spacing: 6) {
                 Image(systemName: glyph)
                     .font(.system(size: 14, weight: .semibold))
@@ -259,7 +392,6 @@ struct VaultView: View {
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(Sweech.Color.textPrimary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
                 Spacer(minLength: 0)
                 if ws.needsReauth == true {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -269,24 +401,29 @@ struct VaultView: View {
                 }
             }
 
-            // Badges row
+            // Badges
             HStack(spacing: 4) {
-                kindBadge(kind: kind, isExternal: ws.isExternal)
+                Text(TileStyle.label(kind: kind))
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(tint.opacity(0.15))
+                    .clipShape(Capsule())
+                    .foregroundStyle(tint)
                 if let plan = ws.planType {
                     Text(plan)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Sweech.Color.core.opacity(0.12))
+                        .background(Sweech.Color.core.opacity(0.15))
                         .clipShape(Capsule())
                         .foregroundStyle(Sweech.Color.core)
                 }
                 Spacer(minLength: 0)
             }
 
-            // Usage bars (always rendered if we have live data)
+            // Usage bars / external label
             if ws.live != nil {
-                usageBar(label: "5h", pct: ws.utilization5h)
-                usageBar(label: "7d", pct: ws.utilization7d)
+                UsageBar(label: "5h", pct: ws.utilization5h)
+                UsageBar(label: "7d", pct: ws.utilization7d)
             } else if ws.isExternal {
                 Text("API key · no quota info")
                     .font(.system(size: 9))
@@ -297,72 +434,41 @@ struct VaultView: View {
                     .foregroundStyle(Sweech.Color.textMuted)
             }
 
-            // Footer: account row
+            // Footer: active account / picker
             HStack(spacing: 4) {
                 Image(systemName: "person.crop.circle")
                     .font(.system(size: 9))
                     .foregroundStyle(Sweech.Color.textMuted)
                 if busy {
                     ProgressView().controlSize(.small)
-                } else if isVault {
-                    accountMenu(for: ws, compatible: compatible, activeId: activeId)
-                } else {
+                } else if ws.isExternal {
                     Text(ws.providerLabel)
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Sweech.Color.warm)
+                } else {
+                    accountMenu
                 }
                 Spacer(minLength: 0)
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Sweech.Color.surface.opacity(0.8))
+        .background(Sweech.Color.surface.opacity(0.85))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(tint.opacity(0.25), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private func usageBar(label: String, pct: Double) -> some View {
-        let clamped = max(0, min(pct, 1))
-        let color: Color = clamped >= 0.9 ? Sweech.Color.danger : (clamped >= 0.7 ? Sweech.Color.warning : Sweech.Color.ok)
-        return HStack(spacing: 6) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Sweech.Color.textMuted)
-                .frame(width: 16, alignment: .leading)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Sweech.Color.surfaceHigh)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(color)
-                        .frame(width: geo.size.width * clamped)
-                }
-            }
-            .frame(height: 4)
-            Text("\(Int(clamped * 100))%")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(color)
-                .frame(width: 30, alignment: .trailing)
-        }
-    }
-
-    // MARK: - Account picker (inline menu)
-
-    private func accountMenu(for ws: SweechAccount, compatible: [VaultAccount], activeId: String?) -> some View {
-        let active = compatible.first(where: { $0.id == activeId })
+    private var accountMenu: some View {
+        let active = compatibleAccounts.first(where: { $0.id == activeId })
         let label = active?.displayEmail ?? "no account"
 
         return Menu {
-            if compatible.isEmpty {
+            if compatibleAccounts.isEmpty {
                 Text("No compatible accounts in vault")
             } else {
-                ForEach(compatible) { account in
+                ForEach(compatibleAccounts) { account in
                     Button {
-                        workingWorkspace = ws.commandName
-                        service.assignAccount(
-                            workspaceCommandName: ws.commandName,
-                            email: account.email
-                        ) { _ in workingWorkspace = nil }
+                        onPick(account.email)
                     } label: {
                         if account.id == activeId {
                             Label(account.displayEmail, systemImage: "checkmark")
@@ -387,77 +493,229 @@ struct VaultView: View {
         .menuIndicator(.hidden)
         .fixedSize()
     }
+}
 
-    private func compatibleAccounts(for cliType: String) -> [VaultAccount] {
-        let kind = cliType == "claude" ? "anthropic" : "openai"
-        return service.vaultAccounts
-            .filter { $0.kind == kind }
-            .sorted { $0.email < $1.email }
-    }
+// MARK: - Assign sheet (journey)
 
-    // MARK: - Style helpers
+private struct AssignSheet: View {
+    @ObservedObject var service: SweechService
+    let account: VaultAccount
+    @Environment(\.dismiss) private var dismiss
+    @State private var workingWorkspace: String?
+    @State private var doneMessage: String?
 
-    /// Always-filled glyph for consistency across tiles.
-    private func providerGlyph(kind: String, isExternal: Bool) -> String {
-        if isExternal { return "globe" }
-        switch kind {
-        case "anthropic": return "a.circle.fill"
-        case "openai":    return "o.circle.fill"
-        default:          return "circle.fill"
+    private var tint: Color { TileStyle.tint(kind: account.kind) }
+    private var glyph: String { TileStyle.glyph(kind: account.kind) }
+
+    private var compatibleWorkspaces: [SweechAccount] {
+        service.accounts.filter { ws in
+            let k = ws.cliType == "claude" ? "anthropic" : ws.cliType == "codex" ? "openai" : ""
+            return k == account.kind && !ws.isExternal
         }
     }
 
-    private func providerTint(kind: String, isExternal: Bool) -> Color {
-        if isExternal { return Sweech.Color.warm }
-        switch kind {
-        case "anthropic": return Color(hex: "#FF8C42")  // claude orange
-        case "openai":    return Sweech.Color.ok        // openai green
-        default:          return Sweech.Color.accent
+    var body: some View {
+        ZStack {
+            Sweech.Gradient.backgroundRadial
+
+            VStack(alignment: .leading, spacing: 12) {
+                // Sheet header
+                HStack(spacing: 8) {
+                    Image(systemName: glyph)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(tint)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Assign account")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Sweech.Color.textMuted)
+                        Text(account.displayEmail)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Sweech.Color.textPrimary)
+                    }
+                    Spacer()
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Sweech.Color.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Text("Pick a compatible workspace to mount this account into. The chosen workspace's credentials are rewritten so the next CLI launch picks them up.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Sweech.Color.textMuted)
+
+                ScrollView {
+                    VStack(spacing: 6) {
+                        if compatibleWorkspaces.isEmpty {
+                            Text("No compatible \(account.kind == "anthropic" ? "claude" : "codex") workspaces found.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Sweech.Color.textMuted)
+                                .padding(.vertical, 12)
+                        } else {
+                            ForEach(compatibleWorkspaces, id: \.commandName) { ws in
+                                assignRow(ws)
+                            }
+                        }
+                    }
+                }
+
+                if let msg = doneMessage {
+                    Text(msg)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Sweech.Color.ok)
+                }
+            }
+            .padding(16)
         }
     }
 
-    private func kindBadge(kind: String, isExternal: Bool) -> some View {
-        let labels: [String: String] = [
-            "anthropic": "Anthropic",
-            "openai": "OpenAI",
-            "kimi": "Kimi",
-            "kimi-coding": "Kimi Coding",
-            "glm": "GLM",
-            "minimax": "MiniMax",
-            "dashscope": "Alibaba",
-            "openrouter": "OpenRouter",
-            "deepseek": "DeepSeek",
-            "qwen": "Qwen",
-            "ollama": "Ollama",
-            "ollama-cloud": "Ollama Cloud",
-            "nvidia": "NVIDIA",
-            "gemini": "Gemini",
-            "groq": "Groq",
-        ]
-        let label = labels[kind] ?? kind.capitalized
-        let color = providerTint(kind: kind, isExternal: isExternal)
-        return Text(label)
-            .font(.system(size: 9, weight: .bold))
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(color.opacity(0.15))
-            .clipShape(Capsule())
-            .foregroundStyle(color)
-    }
+    private func assignRow(_ ws: SweechAccount) -> some View {
+        let isCurrentMount = ws.activeAccount?.id == account.id
+        let busy = workingWorkspace == ws.commandName
 
-    // MARK: - Error footer
-
-    @ViewBuilder
-    private var errorFooter: some View {
-        if let err = service.lastAssignError {
-            Text(err)
-                .font(.system(size: 10))
-                .foregroundStyle(Sweech.Color.danger)
-                .padding(.top, 2)
+        return Button(action: {
+            workingWorkspace = ws.commandName
+            service.assignAccount(workspaceCommandName: ws.commandName, email: account.email) { ok in
+                workingWorkspace = nil
+                if ok {
+                    doneMessage = "✓ Mounted into \(ws.commandName)"
+                    // Auto-dismiss after a short beat
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                        dismiss()
+                    }
+                }
+            }
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: TileStyle.glyph(kind: ws.cliType == "claude" ? "anthropic" : "openai"))
+                    .font(.system(size: 14))
+                    .foregroundStyle(tint)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(ws.commandName)
+                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Sweech.Color.textPrimary)
+                    if let active = ws.activeAccount {
+                        Text("currently: \(active.email.hasSuffix("@unknown.local") ? "(no email)" : active.email)")
+                            .font(.system(size: 9))
+                            .foregroundStyle(isCurrentMount ? Sweech.Color.ok : Sweech.Color.textMuted)
+                    } else {
+                        Text("currently: no account mounted")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Sweech.Color.textMuted)
+                    }
+                }
+                Spacer()
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else if isCurrentMount {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Sweech.Color.ok)
+                } else {
+                    Image(systemName: "arrow.right.circle")
+                        .foregroundStyle(tint)
+                }
+            }
+            .padding(10)
+            .background(Sweech.Color.surface.opacity(0.85))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(tint.opacity(0.2)))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        if let summary = service.lastRefreshSummary {
-            Text(summary)
-                .font(.system(size: 10))
+        .buttonStyle(.plain)
+        .disabled(isCurrentMount || busy)
+    }
+}
+
+// MARK: - Usage bar
+
+private struct UsageBar: View {
+    let label: String
+    let pct: Double
+
+    var body: some View {
+        let clamped = max(0, min(pct, 1))
+        let color: Color = clamped >= 0.9 ? Sweech.Color.danger : (clamped >= 0.7 ? Sweech.Color.warning : Sweech.Color.ok)
+        return HStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(Sweech.Color.textMuted)
+                .frame(width: 16, alignment: .leading)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2).fill(Sweech.Color.surfaceHigh)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(color)
+                        .frame(width: geo.size.width * clamped)
+                }
+            }
+            .frame(height: 4)
+            Text("\(Int(clamped * 100))%")
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundStyle(color)
+                .frame(width: 30, alignment: .trailing)
+        }
+    }
+}
+
+// MARK: - Provider style centralisation
+
+private enum TileStyle {
+    static func glyph(kind: String) -> String {
+        switch kind {
+        case "anthropic", "claude": return "a.circle.fill"
+        case "openai", "codex":     return "o.circle.fill"
+        case "kimi", "kimi-coding": return "k.circle.fill"
+        case "glm":                 return "g.circle.fill"
+        case "minimax":             return "m.circle.fill"
+        case "dashscope":           return "q.circle.fill"
+        case "ollama", "ollama-cloud": return "cube.fill"
+        case "openrouter":          return "globe"
+        case "gemini":              return "sparkle"
+        case "groq":                return "bolt.fill"
+        case "nvidia":              return "n.circle.fill"
+        case "deepseek":            return "d.circle.fill"
+        case "qwen":                return "q.circle.fill"
+        default:                    return "circle.fill"
+        }
+    }
+
+    static func tint(kind: String) -> Color {
+        switch kind {
+        case "anthropic", "claude": return Color(hex: "#FF8C42")
+        case "openai", "codex":     return Sweech.Color.ok
+        case "kimi", "kimi-coding": return Color(hex: "#7DD3FC")
+        case "glm":                 return Color(hex: "#A78BFA")
+        case "minimax":             return Color(hex: "#F472B6")
+        case "dashscope":           return Color(hex: "#FB923C")
+        case "ollama", "ollama-cloud": return Color(hex: "#94A3B8")
+        case "openrouter":          return Sweech.Color.accent
+        case "gemini":              return Color(hex: "#60A5FA")
+        case "groq":                return Color(hex: "#F87171")
+        case "nvidia":              return Color(hex: "#76FF03")
+        case "deepseek":            return Color(hex: "#22D3EE")
+        case "qwen":                return Color(hex: "#FBBF24")
+        default:                    return Sweech.Color.warm
+        }
+    }
+
+    static func label(kind: String) -> String {
+        switch kind {
+        case "anthropic", "claude": return "Anthropic"
+        case "openai", "codex":     return "OpenAI"
+        case "kimi":                return "Kimi"
+        case "kimi-coding":         return "Kimi Coding"
+        case "glm":                 return "GLM"
+        case "minimax":             return "MiniMax"
+        case "dashscope":           return "Alibaba"
+        case "openrouter":          return "OpenRouter"
+        case "deepseek":            return "DeepSeek"
+        case "qwen":                return "Qwen"
+        case "ollama":              return "Ollama"
+        case "ollama-cloud":        return "Ollama Cloud"
+        case "nvidia":              return "NVIDIA"
+        case "gemini":              return "Gemini"
+        case "groq":                return "Groq"
+        default:                    return kind.capitalized
         }
     }
 }
