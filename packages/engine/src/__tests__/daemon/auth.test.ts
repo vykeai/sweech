@@ -90,15 +90,17 @@ describe('daemon auth — secret lifecycle', () => {
     expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
-  it('normalises lax file modes back to 0600 only on creation', async () => {
-    // Pre-existing secret with bad perms — we read it as-is. (Tightening
-    // is a separate concern; here we just assert we don't loosen it.)
+  it('tightens lax file modes back to 0600 on read', async () => {
+    // Codex adversarial review found that the previous behaviour
+    // (accept the secret regardless of mode) let any local user with
+    // write access drop a 0644 secret and read the HMAC key. Now we
+    // tighten back to 0600 on every load.
     await writeFile(secretPath, TEST_SECRET + '\n', { mode: 0o644 });
     await chmod(secretPath, 0o644);
     const secret = await loadOrCreateSecret(secretPath);
     expect(secret).toBe(TEST_SECRET);
     const mode = await getSecretFileMode(secretPath);
-    expect(mode).toBe(0o644);
+    expect(mode).toBe(0o600);
   });
 });
 

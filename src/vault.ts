@@ -148,6 +148,53 @@ function writeMeta(accounts: AccountMeta[]): void {
   try { fs.chmodSync(ACCOUNTS_FILE, 0o600) } catch {}
 }
 
+/**
+ * Acquire an advisory file lock on accounts.json so two concurrent
+ * sweech invocations can't both read-modify-write the vault and lose
+ * one of their rows. Uses an O_EXCL flag file in the same dir; spins
+ * with backoff for up to ~2s, then bypasses (better than deadlocking).
+ *
+ * Codex adversarial review (HIGH) flagged the previous lock-free
+ * read-modify-write as a real data-loss race.
+ */
+const LOCK_FILE = path.join(SWEECH_DIR, 'accounts.lock')
+function withVaultLock<T>(fn: () => T): T {
+  fs.mkdirSync(SWEECH_DIR, { recursive: true, mode: 0o700 })
+  const deadline = Date.now() + 2000
+  let fd: number | null = null
+  while (Date.now() < deadline) {
+    try {
+      fd = fs.openSync(LOCK_FILE, 'wx', 0o600)
+      break
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+        // Stale lock detection: if the lock is >10s old, steal it.
+        try {
+          const st = fs.statSync(LOCK_FILE)
+          if (Date.now() - st.mtimeMs > 10_000) {
+            fs.unlinkSync(LOCK_FILE)
+            continue
+          }
+        } catch {}
+        // Brief sleep via Atomics.wait on a SharedArrayBuffer view.
+        // No setTimeout because we're sync — yield by busy-wait.
+        const until = Date.now() + 25
+        while (Date.now() < until) { /* spin */ }
+        continue
+      }
+      throw err
+    }
+  }
+  try {
+    return fn()
+  } finally {
+    if (fd !== null) {
+      try { fs.closeSync(fd) } catch {}
+    }
+    try { fs.unlinkSync(LOCK_FILE) } catch {}
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export function listAccounts(kind?: AccountKind): AccountMeta[] {
@@ -282,30 +329,38 @@ export async function getAccountSecret(id: string): Promise<AccountSecret | null
 }
 
 export async function saveAccount(meta: AccountMeta, secret: AccountSecret): Promise<void> {
-  const all = readMeta()
-  const idx = all.findIndex(a => a.id === meta.id)
-  if (idx >= 0) all[idx] = meta
-  else all.push(meta)
-  writeMeta(all)
+  withVaultLock(() => {
+    const all = readMeta()
+    const idx = all.findIndex(a => a.id === meta.id)
+    if (idx >= 0) all[idx] = meta
+    else all.push(meta)
+    writeMeta(all)
+  })
   const store = getCredentialStore()
   await store.set(keychainService(meta.kind, meta.id), KEYCHAIN_ACCOUNT, JSON.stringify(secret))
 }
 
 /** Update only the metadata side of an account (no secret rewrite). */
 export function updateAccountMeta(id: string, patch: Partial<AccountMeta>): AccountMeta | null {
-  const all = readMeta()
-  const idx = all.findIndex(a => a.id === id)
-  if (idx < 0) return null
-  all[idx] = { ...all[idx], ...patch, id: all[idx].id, kind: all[idx].kind }
-  writeMeta(all)
-  return all[idx]
+  return withVaultLock(() => {
+    const all = readMeta()
+    const idx = all.findIndex(a => a.id === id)
+    if (idx < 0) return null
+    all[idx] = { ...all[idx], ...patch, id: all[idx].id, kind: all[idx].kind }
+    writeMeta(all)
+    return all[idx]
+  })
 }
 
 export async function removeAccount(id: string): Promise<boolean> {
-  const all = readMeta()
-  const meta = all.find(a => a.id === id)
+  const meta = withVaultLock(() => {
+    const all = readMeta()
+    const m = all.find(a => a.id === id)
+    if (!m) return null
+    writeMeta(all.filter(a => a.id !== id))
+    return m
+  })
   if (!meta) return false
-  writeMeta(all.filter(a => a.id !== id))
   try {
     await getCredentialStore().delete(keychainService(meta.kind, meta.id), KEYCHAIN_ACCOUNT)
   } catch {}

@@ -50,6 +50,17 @@ export function getDefaultSecretPath(): string {
 /// errors instead of silently regenerating.
 async function readSecretFile(path: string): Promise<string | null> {
   try {
+    // Refuse to use a secret whose file perms are wider than 0o600.
+    // Other local users reading the HMAC key would let them sign as
+    // any sweech CLI invocation. If we find a wider mode, tighten it
+    // back to 0o600 and continue — this fixes accidental drift from
+    // umask leakage on older sweech versions that didn't enforce
+    // mode at create time.
+    const st = await stat(path);
+    const mode = st.mode & 0o777;
+    if (mode & 0o077) {
+      await chmod(path, 0o600);
+    }
     const raw = await readFile(path, 'utf-8');
     const trimmed = raw.trim();
     if (!trimmed) return null;
