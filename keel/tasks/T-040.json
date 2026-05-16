@@ -1,0 +1,37 @@
+{
+  "id": "T-040",
+  "title": "Engine hot-reloads ~/.sweech/config.json",
+  "wave": "wave-5",
+  "space": "space-api",
+  "status": "ready",
+  "priority": "critical",
+  "platform": null,
+  "assignee": null,
+  "description": "Engine watches providers.yaml but not config.json. Profile mutations through CLI require daemon stop && start before the daemon API reflects them. Stale state risk in the very HTTP API agents depend on.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 1: \"Daemon doesn't watch config.json. Engine only hot-reloads providers.yaml; profile mutations via CLI require daemon stop && start\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "fs.watch on ~/.sweech/config.json triggers loadProfiles() with debounce",
+    "In-flight requests use the old snapshot; new requests use the reloaded set",
+    "Handles atomic-rename writes (vim, jq -i) — not just inotify IN_MODIFY"
+  ]
+}

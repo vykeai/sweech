@@ -1,0 +1,38 @@
+{
+  "id": "T-047",
+  "title": "Usage history log + sweech history command",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "No ~/.sweech/usage-log.jsonl. No trend lines. No \"you spent $84 on OpenRouter last week\". Every user with a multi-provider setup will want this within 30 days.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 2: \"No ~/.sweech/usage-log.jsonl. No trend lines. No you spent $84 on OpenRouter last week\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Every quota refresh appends a JSONL row: { ts, workspace, util5h, util7d, tokensUsed, costUsd? }",
+    "sweech history [--workspace X] [--since 7d] [--json] reads and summarises",
+    "Log auto-rotated at 50MB or 90 days, whichever first",
+    "Cost field populated only for providers that expose $ (openrouter, groq); omitted otherwise — no fake numbers"
+  ]
+}

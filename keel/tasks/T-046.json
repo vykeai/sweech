@@ -1,0 +1,38 @@
+{
+  "id": "T-046",
+  "title": "Predictive quota: burn-rate projection",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "5h:80% does not answer \"can I finish this PR?\". Burn-rate math (Δutil/Δtime over last hour) → \"at current rate you will hit 100% in 47 minutes\". Transformative UX from three lines of code.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 2: \"Predictive quota. 5h:80% does not answer can I finish this PR? Burn-rate math gives at current rate you will hit 100% in 47 minutes\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Last ≥3 quota samples per workspace persisted to disk (rolling window)",
+    "live.projection5h / projection7d populated in JSON output: { rateUtilPerMinute, etaToFullMinutes }",
+    "CLI shows \"ETA 47m\" in red when <60min; menubar shows same in tile sub-row",
+    "No projection shown when fewer than 3 samples — never lie with a single data point"
+  ]
+}

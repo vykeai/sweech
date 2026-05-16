@@ -1,0 +1,41 @@
+{
+  "id": "T-062",
+  "title": "Multi-machine vault sync",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "No way to move a vault between machines without re-authenticating every account.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [
+    "T-048"
+  ],
+  "runStatus": null,
+  "size": "L",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Priority: \"Multi-machine vault sync (CRDT or simple last-write-wins)\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "sweech sync configure picks a transport (iCloud Drive folder by default, S3/git remote optional)",
+    "Vault and config.json synced — secrets stay in keychain on each machine (never synced)",
+    "Conflict policy: last-write-wins with a .conflict-<ts>.json backup written if remote is newer",
+    "sweech sync status shows last sync, conflict count, remote",
+    "Disabled by default — opt-in only"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "id": "T-053",
+  "title": "sweech doctor: per-check timeouts + daemon health probe",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "medium",
+  "platform": null,
+  "assignee": null,
+  "description": "sweech doctor can hang indefinitely on network checks and does not probe daemon health.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"sweech doctor adds per-check timeouts + daemon health probe\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "Every network check has a 5s timeout; reported as \"timeout\" not \"hung\"",
+    "Daemon /healthz probed and surfaced as a separate row",
+    "Exit code reflects worst result (0=all good, 1=warnings, 2=errors)"
+  ]
+}

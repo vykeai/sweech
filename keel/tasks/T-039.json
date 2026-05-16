@@ -1,0 +1,39 @@
+{
+  "id": "T-039",
+  "title": "Add HMAC auth to sweech daemon HTTP API",
+  "wave": "wave-5",
+  "space": "space-api",
+  "status": "ready",
+  "priority": "critical",
+  "platform": null,
+  "assignee": null,
+  "description": "Daemon binds to 127.0.0.1:7801 with zero auth. /run executes model requests against the user keys — any local process (Docker, browser extension, sibling CLI) can drain quota. Loopback is not a security boundary on multi-user macOS.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "L",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 1: \"Daemon loopback ≠ auth. /run executes model runs against the user's keys with zero auth on 127.0.0.1:7801\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "~/.sweech/daemon.secret generated with 0600 perms on first daemon start",
+    "Non-trivial endpoints (/run, /select, mutating routes) require HMAC of method+path+body signed with that secret",
+    "sweech CLI signs automatically — no user friction",
+    "/health and /healthz remain unauthenticated for orchestrator probes",
+    "Curl from another local process without the secret returns 401"
+  ]
+}

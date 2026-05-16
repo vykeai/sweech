@@ -1,0 +1,38 @@
+{
+  "id": "T-038",
+  "title": "Prevent same-email vault collision across orgs",
+  "wave": "wave-5",
+  "space": "space-cli",
+  "status": "ready",
+  "priority": "critical",
+  "platform": null,
+  "assignee": null,
+  "description": "idFor(kind, email) currently keys vault entries by email alone — adding the same email from a different org silently overwrites the prior entry in both ~/.sweech/accounts.json and macOS keychain. Real data-loss bug.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 1: \"Same-email accounts collide in vault. idFor(kind, email) keys by email — adding ted@2pumpkins from work org silently overwrites the personal-org entry\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "idFor() includes an org_id (or workspace-fingerprint) component when known",
+    "OAuth import prompts for confirmation if kind+email already exists with a different org_id",
+    "Existing single-org vaults migrate in-place — no manual re-import required",
+    "Does NOT break the case where the same email IS the same account (one org_id)"
+  ]
+}

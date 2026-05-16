@@ -1,0 +1,38 @@
+{
+  "id": "T-060",
+  "title": "macOS app: codesign + notarise in build script",
+  "wave": "wave-5",
+  "space": "space-infra",
+  "status": "ready",
+  "priority": "low",
+  "platform": null,
+  "assignee": null,
+  "description": "macos-menubar/build-app.sh does bare swift build + manual plist copy with no signing. Cannot distribute SweechBar to other Macs.",
+  "createdAt": "2026-05-16T18:00:00Z",
+  "updatedAt": "2026-05-16T18:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-16T18:00:00Z",
+      "by": "claude",
+      "text": "Source (verbatim from 2026-05-16 audit): Audit Section 4: \"Build script does codesigning + notarisation for distribution\""
+    }
+  ],
+  "acceptanceCriteria": [
+    "build-app.sh accepts --release flag that codesigns with a Developer ID",
+    "Notarisation uses xcrun notarytool with credentials from keychain profile name (no plaintext secrets)",
+    "Resulting .app passes spctl --assess -vv",
+    "Dev build path (no --release) stays as-is — no signing required for personal use"
+  ]
+}
