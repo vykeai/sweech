@@ -188,33 +188,67 @@ export async function runInit(): Promise<void> {
 
   console.log();
 
-  // Step 3: Add first provider
+  // Step 3: Add first provider (loops so users can add multiple in one run)
   console.log(chalk.bold('Step 3: Add your first provider\n'));
 
-  try {
-    const answers = await interactiveAddProvider(existingProfiles);
+  let addedThisRun = 0;
 
-    const provider = answers.customProviderConfig || getProvider(answers.provider);
-    if (!provider) {
-      console.error(chalk.red(`\n✗ Provider '${answers.provider}' not found`));
-      return;
+  while (true) {
+    try {
+      // Pass the current set of profiles so duplicate-name checks see prior additions
+      const currentProfiles = config.getProfiles();
+      const answers = await interactiveAddProvider(currentProfiles);
+
+      const provider = answers.customProviderConfig || getProvider(answers.provider);
+      if (!provider) {
+        console.error(chalk.red(`\n✗ Provider '${answers.provider}' not found`));
+        return;
+      }
+
+      const cli = getCLI(answers.cliType);
+      if (!cli) {
+        console.error(chalk.red(`\n✗ CLI '${answers.cliType}' not found`));
+        return;
+      }
+
+      // Create profile with OAuth or API key
+      const { createProfile } = await import('./profileCreation');
+      await createProfile(answers, provider, cli, config);
+      addedThisRun += 1;
+      console.log();
+
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(chalk.red('\n✗ Setup failed:', msg));
+      // If no profile has been saved yet, there's nothing to verify — bail out.
+      if (addedThisRun === 0) {
+        return;
+      }
+      // Otherwise we already have at least one profile saved; exit the loop and continue.
+      break;
     }
 
-    const cli = getCLI(answers.cliType);
-    if (!cli) {
-      console.error(chalk.red(`\n✗ CLI '${answers.cliType}' not found`));
-      return;
+    // Ask if the user wants to add another profile.
+    let addAnother = false;
+    try {
+      const ans = await inquirer.prompt([
+        {
+          type: 'confirm',
+          name: 'addAnother',
+          message: 'Add another profile?',
+          default: false
+        }
+      ]);
+      addAnother = !!ans.addAnother;
+    } catch {
+      // Prompt cancelled (Ctrl+C / non-TTY) — treat as "no".
+      addAnother = false;
     }
 
-    // Create profile with OAuth or API key
-    const { createProfile } = await import('./profileCreation');
-    await createProfile(answers, provider, cli, config);
+    if (!addAnother) {
+      break;
+    }
     console.log();
-
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error(chalk.red('\n✗ Setup failed:', msg));
-    return;
   }
 
   // Step 4: Verify setup
@@ -259,10 +293,16 @@ export async function runInit(): Promise<void> {
   }
 
   const profiles = config.getProfiles();
+  if (addedThisRun > 1) {
+    console.log(chalk.bold.cyan(`  ${addedThisRun} workspaces ready — run \`sweech\` anytime to launch a workspace`));
+  } else {
+    console.log(chalk.cyan('  Run `sweech` anytime to launch a workspace'));
+  }
   if (profiles.length > 0) {
     const firstProfile = profiles[0];
-    console.log(chalk.cyan('  Run `sweech` to launch the interactive switcher'));
     console.log(chalk.bold.cyan(`  Try your new command: ${firstProfile.commandName}\n`));
+  } else {
+    console.log();
   }
 
   console.log(chalk.gray('  Run `sweech add` to add more profiles'));
