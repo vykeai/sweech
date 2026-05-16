@@ -1095,6 +1095,26 @@ struct AccountCard: View {
                 }
             }
 
+            // Predictive ETA — CLI-computed burn rate. Red when <60min,
+            // amber <4h, dim otherwise. Hidden when no projection exists
+            // (i.e. fewer than 3 samples or utilization not rising).
+            if let mins = account.bestProjectionEtaMinutes, mins > 0, !account.isExternal {
+                let etaColor: Color =
+                    mins < 60 ? Sweech.Color.danger
+                  : mins < 240 ? Sweech.Color.warning
+                  : Sweech.Color.textMuted
+                HStack(spacing: 3) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 9))
+                    Text(account.projectionLabel)
+                        .font(.system(size: 9, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(etaColor)
+                .padding(.top, 2)
+                .help("Projected burn rate from recent quota samples")
+            }
+
             // Footer — single tight row, never wraps
             HStack(spacing: 10) {
                 if onMoveUp != nil || onMoveDown != nil {

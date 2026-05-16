@@ -28,6 +28,15 @@ struct LiveData: Codable {
     let tokenExpiresAt: Double?
 }
 
+/// Burn-rate forecast emitted by the CLI (`projection5h` / `projection7d` on
+/// each account). `etaToFullMinutes` is null when the rate is flat or
+/// utilization is falling — we deliberately refuse to project then.
+struct QuotaProjection: Codable {
+    let rateUtilPerMinute: Double
+    let etaToFullMinutes: Double?
+    let sampleCount: Int
+}
+
 struct SweechAccount: Codable, Identifiable {
     var id: String { commandName }
     let name: String
@@ -64,6 +73,11 @@ struct SweechAccount: Codable, Identifiable {
     let sortRank: Int?
     let precomputedDisplayGroup: String?
 
+    /// Burn-rate ETA for the rolling 5h window. Null when CLI lacks ≥3 samples.
+    let projection5h: QuotaProjection?
+    /// Burn-rate ETA for the 7d weekly window.
+    let projection7d: QuotaProjection?
+
     private enum CodingKeys: String, CodingKey {
         case name, commandName, cliType, isDefault, sharedWith, provider, baseUrl, effectiveProvider
         case meta, messages5h, messages7d, totalMessages
@@ -72,6 +86,25 @@ struct SweechAccount: Codable, Identifiable {
         case activeAccount
         case precomputedSmartScore = "smartScore"
         case tier, tierUrgent, sortRank, precomputedDisplayGroup = "displayGroup"
+        case projection5h, projection7d
+    }
+
+    /// The shortest meaningful burn-rate ETA across the 5h/7d projections,
+    /// or nil when neither has a forward-looking number. Picks the 7d window
+    /// when both are available — that's the one quotas typically exhaust against.
+    var bestProjectionEtaMinutes: Double? {
+        if let e = projection7d?.etaToFullMinutes, e > 0 { return e }
+        if let e = projection5h?.etaToFullMinutes, e > 0 { return e }
+        return nil
+    }
+
+    /// Human-readable label for the active projection, e.g. "ETA 47m".
+    /// Empty string when no projection is available.
+    var projectionLabel: String {
+        guard let mins = bestProjectionEtaMinutes else { return "" }
+        if mins < 60 { return "ETA \(Int(mins.rounded()))m" }
+        if mins < 60 * 24 { return "ETA \(Int((mins / 60).rounded()))h" }
+        return "ETA \(Int((mins / (60 * 24)).rounded()))d"
     }
 
     /// The real upstream provider key (e.g. "local-proxy", "glm", "kimi-coding",

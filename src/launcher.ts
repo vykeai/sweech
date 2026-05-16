@@ -14,6 +14,7 @@ import { getCLI, SUPPORTED_CLIS } from './clis';
 import { getAccountInfo, type AccountInfo } from './subscriptions';
 import { logLaunch } from './launchLog';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
+import { recordProjectionSamples, getAccountProjection, formatEta } from './quotaProjection';
 import { sweechEvents } from './events';
 import { runHook } from './plugins';
 import { isTmuxAvailable, launchInTmux } from './tmux';
@@ -523,6 +524,22 @@ export function render(entries: LaunchEntry[], state: LaunchState, usageLoad: Us
           body.push(prefix + chalk.dim('24h trend   ') + chalk.cyan(spark));
         }
       }
+      // Predictive ETA — only shown when we have ≥3 samples and a positive
+      // burn rate. Red <60min, yellow <4h, dim otherwise. 7d window first
+      // (the one quotas usually exhaust against); falls back to 5h.
+      const proj = getAccountProjection(entry.name);
+      const best = proj.projection7d?.etaToFullMinutes != null
+        ? { etaMin: proj.projection7d.etaToFullMinutes, window: '7d' }
+        : proj.projection5h?.etaToFullMinutes != null
+          ? { etaMin: proj.projection5h.etaToFullMinutes, window: '5h' }
+          : null;
+      if (best && best.etaMin > 0) {
+        const label = `ETA ${formatEta(best.etaMin)} (${best.window})`;
+        const colored = best.etaMin < 60 ? chalk.red(label)
+                       : best.etaMin < 240 ? chalk.yellow(label)
+                       : chalk.dim(label);
+        body.push(prefix + chalk.dim('forecast    ') + colored);
+      }
     };
 
     if (selected) {
@@ -764,6 +781,7 @@ export async function runLauncher(): Promise<void> {
       .then(accounts => {
         patchEntries(accounts);
         try { appendSnapshot(accounts); } catch {}
+        try { recordProjectionSamples(accounts); } catch {}
         usageLoad = 'loaded';
         draw();
       })
@@ -802,6 +820,7 @@ export async function runLauncher(): Promise<void> {
       if (usageLoad !== 'loading') {
         patchEntries(accounts);
         try { appendSnapshot(accounts); } catch {}
+        try { recordProjectionSamples(accounts); } catch {}
         state.usage = true;
         usageLoad = 'loaded';
         draw();

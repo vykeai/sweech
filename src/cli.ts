@@ -35,6 +35,7 @@ import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { kickBackgroundRefresh } from './backgroundRefresh';
 import { recommendRoute } from './accountSelector';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
+import { recordProjectionSamples, getAccountProjection, formatEta } from './quotaProjection';
 import { startSweechFedServerWithShutdown } from './fedServer';
 import { scrubSecrets } from './scrubSecrets';
 import { checkForUpdate, fetchChangelog } from './updateChecker';
@@ -2045,8 +2046,10 @@ const usageCmd = program
     // Not called when --refresh is set (we just did the fetch ourselves).
     if (!opts.refresh) kickBackgroundRefresh();
 
-    // Record history snapshot (non-blocking, max once per hour)
+    // Record history snapshot (non-blocking, max once per hour) and
+    // projection samples (fast-cadence ring buffer for burn-rate ETA).
     try { appendSnapshot(accounts); } catch {}
+    try { recordProjectionSamples(accounts); } catch {}
 
     if (opts.json) {
       // Sort by smart score within groups, add precomputed fields.
@@ -2070,6 +2073,7 @@ const usageCmd = program
           const score = computeSmartScore(a);
           const tierInfo = computeTier(a, i === 0);
           const effective = eff(a);
+          const proj = getAccountProjection(a.commandName);
           enriched.push({
             ...a,
             effectiveProvider: effective,
@@ -2078,6 +2082,8 @@ const usageCmd = program
             tierUrgent: tierInfo.urgent,
             sortRank: enriched.length,
             displayGroup: displayGroup(effective),
+            projection5h: proj.projection5h,
+            projection7d: proj.projection7d,
           });
         });
       }
