@@ -1,4 +1,5 @@
 import { DEFAULT_DAEMON_PORT, envOrDefaultDaemonPort } from '../src/constants';
+import { DEFAULT_DAEMON_PORT as ENGINE_DEFAULT_DAEMON_PORT } from '../packages/engine/src/constants';
 
 describe('constants (T-056)', () => {
   const originalEnv = process.env.SWEECH_PORT;
@@ -9,6 +10,13 @@ describe('constants (T-056)', () => {
 
   test('DEFAULT_DAEMON_PORT is 7801', () => {
     expect(DEFAULT_DAEMON_PORT).toBe(7801);
+  });
+
+  test('CLI and engine DEFAULT_DAEMON_PORT stay in sync (cross-workspace)', () => {
+    // Integration-audit Finding 7a: without this lock, a future bump of one
+    // workspace's constant silently breaks daemon ↔ CLI connectivity. Bump
+    // both or bump neither.
+    expect(DEFAULT_DAEMON_PORT).toBe(ENGINE_DEFAULT_DAEMON_PORT);
   });
 
   test('envOrDefaultDaemonPort returns DEFAULT_DAEMON_PORT when env unset', () => {

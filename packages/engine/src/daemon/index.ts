@@ -46,7 +46,7 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   // Resolve port: env var > fed config > fallback
   const envPort = parseInt(process.env.SWEECH_PORT ?? '');
   const fedCfg2 = await readFedConfig();
-  PORT = (Number.isFinite(envPort) && envPort > 0 ? envPort : fedCfg2?.tools?.['sweech-engine']?.dash) ?? 7801;
+  PORT = (Number.isFinite(envPort) && envPort > 0 ? envPort : fedCfg2?.tools?.['sweech-engine']?.dash) ?? DEFAULT_DAEMON_PORT;
 
   setDaemonLifecycleState('booting', 'initializing');
   resetDaemonStartedAt();
