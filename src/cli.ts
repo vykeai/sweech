@@ -3653,6 +3653,30 @@ program
       return;
     }
 
+    if (act === 'add') {
+      const requestedKind = opts.kind as 'anthropic' | 'openai' | undefined;
+      if (!requestedKind) {
+        console.error(chalk.red('--kind <anthropic|openai> required'));
+        process.exit(1);
+      }
+      if (requestedKind === 'openai') {
+        const { codexAddInstructions } = require('./vaultAdd');
+        console.log('\n' + codexAddInstructions() + '\n');
+        process.exit(1);
+      }
+      const { addAnthropicAccount } = require('./vaultAdd');
+      const result = await addAnthropicAccount();
+      if (!result.ok) {
+        console.error(chalk.red(`\n  ✗ ${result.reason}\n`));
+        process.exit(1);
+      }
+      const verb = result.alreadyExisted ? 'updated' : 'added';
+      console.log(chalk.green(`\n  ✓ ${verb} ${chalk.bold(result.account.email)} (anthropic)\n`));
+      console.log(chalk.dim(`    id=${result.account.id}  plan=${result.account.plan ?? '?'}\n`));
+      console.log(chalk.dim(`    Mount it into a workspace:\n      sweech assign <workspace> ${result.account.email}\n`));
+      return;
+    }
+
     if (act === 'refresh') {
       const { refreshExpiringAccounts } = require('./vaultRefresh');
       const results = await refreshExpiringAccounts({ force: !!opts.email });
