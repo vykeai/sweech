@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { registerTool } from '@vykeai/fed';
 import { loadOrCreateSecret } from './auth.js';
 import { startConfigWatcher, stopConfigWatcher } from '../middleware/profiles.js';
+import { LogRotator, getDaemonLogPath } from './log.js';
 
 let PORT = 7801;
 const PID_DIR = join(homedir(), '.sweech');
@@ -53,6 +54,7 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   let stopProvidersWatch: (() => void) | null = null;
   let server: ReturnType<typeof serve> | null = null;
   let fedCleanup: (() => void) | null = null;
+  let logRotator: LogRotator | null = null;
   let shuttingDown = false;
   let shutdownPromise: Promise<void> | null = null;
   let closeServerPromise: Promise<void> | null = null;
@@ -145,6 +147,8 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
       stopConfigWatcher();
       fedCleanup?.();
       fedCleanup = null;
+      logRotator?.stop();
+      logRotator = null;
 
       const shutdownResult = await Promise.race([
         closeServer().then(() => 'closed' as const).catch(() => 'close-error' as const),
@@ -233,6 +237,18 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`[engine] failed to start config watcher: ${message}\n`);
+  }
+
+  // T-054: rotate the launchd-redirected stdout/stderr log so it never
+  // grows unbounded. Triggers on size (>10 MiB) or daily boundary; keeps
+  // last 5 rotations. Timer is unref'd, so it does not block shutdown.
+  try {
+    logRotator = new LogRotator({ logPath: getDaemonLogPath() });
+    logRotator.start();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[engine] failed to start log rotator: ${message}\n`);
+    logRotator = null;
   }
 
   await mkdir(PID_DIR, { recursive: true });

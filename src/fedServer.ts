@@ -20,6 +20,7 @@ import { getAccountInfo, getKnownAccounts } from './subscriptions'
 import { recommendRoute, suggestBestAccount, type RouteRecommendationRequest } from './accountSelector'
 import { summarizeAccountsForTelemetry } from './usage'
 import { readAuditLog } from './auditLog'
+import { LogRotator, getServeLogPath } from './logRotator'
 
 const packageJsonPath = path.join(__dirname, '../package.json')
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { version: string }
@@ -283,12 +284,30 @@ export async function startSweechFedServer(port: number): Promise<http.Server> {
 /**
  * Start server with graceful shutdown on SIGTERM/SIGINT.
  * Used by `sweech serve`.
+ *
+ * T-054: also starts a LogRotator against ~/Library/Logs/sweech-serve.log
+ * (or whatever SWEECH_LOG_PATH points to). The launchd plist redirects
+ * stdout/stderr to that file; without rotation it grows unbounded. The
+ * rotator runs immediately on start, then hourly, capped at 5 historical
+ * files. Timer is unref'd, so it never blocks shutdown.
  */
 export async function startSweechFedServerWithShutdown(port: number): Promise<http.Server> {
   const server = await startSweechFedServer(port)
 
+  let logRotator: LogRotator | null = null
+  try {
+    logRotator = new LogRotator({ logPath: getServeLogPath() })
+    logRotator.start()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`[sweech serve] failed to start log rotator: ${message}\n`)
+    logRotator = null
+  }
+
   const shutdown = () => {
     console.error('[sweech serve] shutting down...')
+    logRotator?.stop()
+    logRotator = null
     server.close(() => {
       process.exit(0)
     })

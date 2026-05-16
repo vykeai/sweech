@@ -29,6 +29,11 @@ function generatePlist(port: number): string {
   const nodeBin = findNodeBinary();
   const sweechScript = path.resolve(path.join(__dirname, '../dist/cli.js'));
 
+  // T-054: the daemon rotates ~/Library/Logs/sweech-serve.log itself via
+  // its LogRotator (size >10 MiB or daily, keep last 5). The plist still
+  // redirects stdout/stderr to the same file — no newsyslog config required.
+  // SWEECH_LOG_PATH is exported so the rotator and the redirect agree on
+  // the path even if a future operator overrides it.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -43,6 +48,11 @@ function generatePlist(port: number): string {
     <string>--port</string>
     <string>${port}</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SWEECH_LOG_PATH</key>
+    <string>${LOG_PATH}</string>
+  </dict>
   <key>KeepAlive</key>
   <true/>
   <key>RunAtLoad</key>
