@@ -67,6 +67,141 @@ interface HealthIssue {
   fix: string;
 }
 
+/** Per-check severity used by runDoctor to compute the exit code. */
+export type CheckSeverity = 'ok' | 'warn' | 'error';
+
+/** T-053: timeout budget for individual doctor network checks. */
+export const DOCTOR_CHECK_TIMEOUT_MS = 5000;
+
+/** T-053: shape of a daemon /healthz probe outcome. */
+export interface DaemonHealthzProbe {
+  /** ok = 2xx + body.ok===true; timeout = AbortSignal fired; unreachable = no socket; error = anything else. */
+  status: 'ok' | 'timeout' | 'unreachable' | 'error';
+  /** Human-readable detail used by the doctor row. */
+  message: string;
+  /** Daemon version when reachable. */
+  version?: string;
+  /** Daemon uptime (seconds) when reachable. */
+  uptime?: number;
+  /** Daemon lifecycle state (e.g. 'ready', 'starting') when reachable. */
+  state?: string;
+}
+
+/**
+ * T-053: collapse a set of check severities to the worst exit code.
+ * Exit semantics: 0 = all ok, 1 = at least one warning, 2 = at least one error.
+ */
+export function worstSeverity(severities: CheckSeverity[]): 0 | 1 | 2 {
+  let exit: 0 | 1 | 2 = 0;
+  for (const s of severities) {
+    if (s === 'error') return 2;
+    if (s === 'warn' && exit === 0) exit = 1;
+  }
+  return exit;
+}
+
+/**
+ * T-053: race a promise against a deadline. On timeout the returned promise
+ * rejects with an Error whose `code === 'TIMEOUT'`, so callers can label the
+ * check as "timeout" (acceptance criterion #1) instead of "hung" or a generic
+ * fetch error. The wrapped promise keeps running in the background — this is
+ * intentional and matches Node's fetch-with-AbortSignal behaviour.
+ */
+export function withTimeout<T>(p: Promise<T>, ms: number, label = 'operation'): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const err = new Error(`${label} timed out after ${ms}ms`) as Error & { code?: string };
+      err.code = 'TIMEOUT';
+      reject(err);
+    }, ms);
+    // Don't keep the event loop alive just for the timer.
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+  return Promise.race([p, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * T-053: resolve the daemon HTTP port the same way other CLI commands do.
+ * Order: SWEECH_PORT env var → ~/.fed/config.json (`tools.sweech-engine.dash`)
+ * → 7801. Centralisation across the CLI is tracked by T-056.
+ */
+function resolveDaemonPortForDoctor(): number {
+  const envPort = parseInt(process.env.SWEECH_PORT ?? '', 10);
+  if (Number.isFinite(envPort) && envPort > 0) return envPort;
+  try {
+    const raw = fs.readFileSync(path.join(os.homedir(), '.fed', 'config.json'), 'utf-8');
+    const cfg = JSON.parse(raw) as { tools?: Record<string, { dash?: number }> };
+    return cfg?.tools?.['sweech-engine']?.dash ?? 7801;
+  } catch {
+    return 7801;
+  }
+}
+
+/**
+ * T-053: probe the daemon /healthz endpoint with a hard 5s deadline. The
+ * /healthz route is intentionally public (see packages/engine/src/daemon/auth.ts)
+ * so no HMAC signing is needed. Caller injects `fetchImpl` for tests.
+ */
+export async function probeDaemonHealthz(opts: {
+  port?: number;
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+} = {}): Promise<DaemonHealthzProbe> {
+  const port = opts.port ?? resolveDaemonPortForDoctor();
+  const timeoutMs = opts.timeoutMs ?? DOCTOR_CHECK_TIMEOUT_MS;
+  const fetchFn = opts.fetchImpl ?? fetch;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (typeof timer.unref === 'function') timer.unref();
+  try {
+    const res = await fetchFn(`http://127.0.0.1:${port}/healthz`, { signal: controller.signal });
+    let body: { ok?: boolean; version?: string; uptime?: number; state?: string; reason?: string } = {};
+    try {
+      body = (await res.json()) as typeof body;
+    } catch {
+      // ignore — treat as error below if body is unusable
+    }
+    if (res.ok && body.ok) {
+      return {
+        status: 'ok',
+        message: `ready (v${body.version ?? '?'}, uptime ${Math.round(body.uptime ?? 0)}s)`,
+        version: body.version,
+        uptime: body.uptime,
+        state: body.state,
+      };
+    }
+    return {
+      status: 'error',
+      message: `unhealthy (HTTP ${res.status}${body.state ? `, state=${body.state}` : ''}${body.reason ? `, reason=${body.reason}` : ''})`,
+      version: body.version,
+      uptime: body.uptime,
+      state: body.state,
+    };
+  } catch (err: unknown) {
+    const e = err as { name?: string; code?: string; message?: string; cause?: { name?: string; code?: string } };
+    // Node's fetch wraps network errors in a TypeError whose `name` is
+    // 'TypeError' — the real AbortError / ECONNREFUSED lives on `.cause`.
+    // Check both layers so the probe classifies correctly regardless of
+    // which Node/undici version produced the error.
+    const names = new Set([e?.name, e?.cause?.name].filter(Boolean));
+    const codes = new Set([e?.code, e?.cause?.code].filter(Boolean));
+    // AbortController.abort() makes fetch throw a DOMException whose name is AbortError;
+    // surface that as "timeout" per acceptance criterion #1.
+    if (names.has('AbortError') || names.has('TimeoutError') || codes.has('TIMEOUT') || codes.has('ABORT_ERR')) {
+      return { status: 'timeout', message: `no response in ${timeoutMs}ms` };
+    }
+    if (codes.has('ECONNREFUSED') || codes.has('ENOTFOUND') || codes.has('EHOSTUNREACH') || codes.has('ECONNRESET')) {
+      return { status: 'unreachable', message: `daemon not running on port ${port}` };
+    }
+    return { status: 'error', message: e?.message ?? String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * sweetch doctor - Health check
  */
@@ -80,13 +215,20 @@ export async function runDoctor(): Promise<void> {
   const largeProfiles: string[] = [];
   let healthyProfileCount = 0;
 
+  // T-053: severities feed `worstSeverity()` to compute the final exit code
+  // (0=all ok, 1=warnings, 2=errors). Every check that prints a row should
+  // also push its severity here.
+  const severities: CheckSeverity[] = [];
+
   // Check Node.js
   console.log(chalk.bold('Environment:'));
   try {
     const nodeVersion = process.version;
     console.log(chalk.green(`  ✓ Node.js: ${nodeVersion}`));
+    severities.push('ok');
   } catch {
     console.log(chalk.red('  ✗ Node.js: Not detected'));
+    severities.push('error');
   }
 
   // Check sweetch version
@@ -104,9 +246,11 @@ export async function runDoctor(): Promise<void> {
     const rcFile = getShellRCFile();
     console.log(chalk.green(`  ✓ ${binDir} is in PATH`));
     console.log(chalk.gray(`    Location: ${rcFile}`));
+    severities.push('ok');
   } else {
     console.log(chalk.red(`  ✗ ${binDir} is NOT in PATH`));
     console.log(chalk.yellow(`    Run: ${chalk.bold('sweetch path')} for help`));
+    severities.push('warn');
   }
 
   // Check installed CLIs
@@ -133,45 +277,96 @@ export async function runDoctor(): Promise<void> {
     const cacheAgeHours = Math.floor(cacheAgeMs / (1000 * 60 * 60));
     if (cacheAgeMs > 24 * 60 * 60 * 1000) {
       console.log(chalk.yellow(`  ⚠ Usage cache is stale (last updated ${cacheAgeHours}h ago) — run \`sweech usage --refresh\``));
+      severities.push('warn');
     } else {
       const agoLabel = cacheAgeHours > 0 ? `${cacheAgeHours}h ago` : 'just now';
       console.log(chalk.green(`  ✓ Usage cache is fresh (updated ${agoLabel})`));
+      severities.push('ok');
     }
   } else {
     console.log(chalk.gray(`  ✗ No usage cache found — run \`sweech usage\` to populate`));
+    // No cache is informational, not a warning — fresh installs land here.
+    severities.push('ok');
+  }
+
+  // T-053: daemon /healthz probe — surfaces as its own row, with a 5s
+  // timeout so a stuck daemon never hangs `sweech doctor`. Public route
+  // (no HMAC), see packages/engine/src/daemon/auth.ts PUBLIC_PATHS.
+  console.log(chalk.bold('\nDaemon:'));
+  const healthz = await probeDaemonHealthz({ timeoutMs: DOCTOR_CHECK_TIMEOUT_MS });
+  if (healthz.status === 'ok') {
+    console.log(chalk.green(`  ✓ /healthz: ${healthz.message}`));
+    severities.push('ok');
+  } else if (healthz.status === 'unreachable') {
+    // Daemon being down is a warning, not an error — the CLI works fine without it.
+    console.log(chalk.yellow(`  ⚠ /healthz: ${healthz.message}`));
+    console.log(chalk.gray(`    Run: sweech daemon start`));
+    severities.push('warn');
+  } else if (healthz.status === 'timeout') {
+    // Stuck daemon is a real error — the probe explicitly says "timeout"
+    // (acceptance criterion #1) instead of letting the check appear to hang.
+    console.log(chalk.red(`  ✗ /healthz: timeout (${healthz.message})`));
+    console.log(chalk.gray(`    Run: sweech daemon stop && sweech daemon start`));
+    severities.push('error');
+  } else {
+    console.log(chalk.red(`  ✗ /healthz: ${healthz.message}`));
+    severities.push('error');
   }
 
   // Check credential freshness (OAuth tokens in Keychain)
   console.log(chalk.bold('\nCredentials:'));
-  let reauthNeeded: string[] = [];
+  const reauthNeeded: string[] = [];
   try {
     const accountList = getKnownAccounts(profiles);
-    const accounts = await getAccountInfo(accountList, { timeoutMs: 5000 });
+    // T-053: wrap the entire account-info fetch in a hard 5s deadline. The
+    // inner getAccountInfo also takes timeoutMs but only applies it per-account
+    // for the live-usage subcall; the outer race guarantees the whole check
+    // reports "timeout" (criterion #1) even if some other step inside stalls.
+    const accounts = await withTimeout(
+      getAccountInfo(accountList, { timeoutMs: DOCTOR_CHECK_TIMEOUT_MS }),
+      DOCTOR_CHECK_TIMEOUT_MS,
+      'credential check',
+    );
     for (const acct of accounts) {
       if (acct.needsReauth) {
         reauthNeeded.push(acct.name);
         console.log(chalk.red(`  ✗ ${acct.name}: needs re-authentication`));
         console.log(chalk.gray(`    Run: sweech auth ${acct.commandName}`));
+        severities.push('error');
       } else if (acct.live?.tokenStatus === 'expired') {
         reauthNeeded.push(acct.name);
         console.log(chalk.yellow(`  ⚠ ${acct.name}: token expired`));
         console.log(chalk.gray(`    Run: sweech auth ${acct.commandName}`));
+        severities.push('warn');
       } else if (acct.live?.tokenExpiresAt) {
         const hoursLeft = (acct.live.tokenExpiresAt - Date.now()) / 3600000;
         if (hoursLeft > 0 && hoursLeft < 24) {
           console.log(chalk.yellow(`  ⚠ ${acct.name}: token expires in ${Math.round(hoursLeft)}h`));
+          severities.push('warn');
         } else {
           console.log(chalk.green(`  ✓ ${acct.name}: token valid`));
+          severities.push('ok');
         }
       } else {
         console.log(chalk.green(`  ✓ ${acct.name}: ok`));
+        severities.push('ok');
       }
     }
-    if (reauthNeeded.length === 0 && accounts.length > 0) {
+    if (reauthNeeded.length === 0 && accounts.length > 0 && !accounts.some(a => a.live?.tokenStatus === 'expired')) {
+      // Only emit the summary line when nothing above flagged a problem.
       console.log(chalk.green(`  All ${accounts.length} account credentials valid`));
     }
-  } catch {
-    console.log(chalk.gray('  ✗ Could not check credentials (fetch failed)'));
+  } catch (err: unknown) {
+    const e = err as { code?: string };
+    if (e?.code === 'TIMEOUT') {
+      // Acceptance criterion #1: explicitly labelled "timeout" instead of
+      // letting a stalled keychain call quietly degrade to "fetch failed".
+      console.log(chalk.yellow(`  ⚠ credential check: timeout (no response in ${DOCTOR_CHECK_TIMEOUT_MS}ms)`));
+      severities.push('warn');
+    } else {
+      console.log(chalk.gray('  ✗ Could not check credentials (fetch failed)'));
+      severities.push('warn');
+    }
   }
 
   // Check profiles
@@ -199,6 +394,7 @@ export async function runDoctor(): Promise<void> {
       if (profileHealthy) {
         healthyProfileCount++;
         console.log(chalk.green(`  ✓ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
+        severities.push('ok');
       } else {
         console.log(chalk.yellow(`  ⚠ ${profile.commandName} → ${provider?.displayName}`) + sharedTag);
         if (!wrapperExists) {
@@ -209,16 +405,19 @@ export async function runDoctor(): Promise<void> {
         if (!configExists) {
           console.log(chalk.gray(`    Missing config file`));
         }
+        // Missing wrapper / config is a hard error — the profile won't run.
+        severities.push('error');
       }
 
       // Check profile data directory size
       try {
-        const { stdout } = await execFileAsync('du', ['-sk', profileDir], { timeout: 5000 });
+        const { stdout } = await execFileAsync('du', ['-sk', profileDir], { timeout: DOCTOR_CHECK_TIMEOUT_MS });
         const sizeKB = parseInt(stdout.split('\t')[0], 10);
         if (!isNaN(sizeKB) && sizeKB > 5 * 1024 * 1024) { // 5GB in KB
           const sizeGB = (sizeKB / (1024 * 1024)).toFixed(1);
           console.log(chalk.yellow(`    ⚠ Profile data is large (${sizeGB} GB)`));
           largeProfiles.push(profile.commandName);
+          severities.push('warn');
         }
       } catch {
         // du not available or dir doesn't exist — skip size check
@@ -237,17 +436,26 @@ export async function runDoctor(): Promise<void> {
         }
         for (const dbFile of dbFiles) {
           try {
-            const { stdout } = await execFileAsync('sqlite3', [dbFile, 'PRAGMA integrity_check'], { timeout: 5000 });
+            const { stdout } = await execFileAsync('sqlite3', [dbFile, 'PRAGMA integrity_check'], { timeout: DOCTOR_CHECK_TIMEOUT_MS });
             if (stdout.trim() === 'ok') {
               console.log(chalk.green(`    ✓ ${path.basename(dbFile)}: integrity ok`));
+              severities.push('ok');
             } else {
               console.log(chalk.yellow(`    ⚠ ${path.basename(dbFile)}: integrity issue — ${stdout.trim()}`));
               console.log(chalk.gray(`      Run: sqlite3 "${dbFile}" "PRAGMA integrity_check" for details`));
+              severities.push('warn');
             }
           } catch (dbErr: unknown) {
+            const e = dbErr as { killed?: boolean; signal?: string; code?: string; message?: string };
             const dbMsg = dbErr instanceof Error ? dbErr.message : String(dbErr);
-            console.log(chalk.yellow(`    ⚠ ${path.basename(dbFile)}: check failed — ${dbMsg}`));
+            // child_process kills with SIGTERM when its `timeout` option fires — surface as timeout.
+            if (e?.killed && (e.signal === 'SIGTERM' || e.signal === 'SIGKILL')) {
+              console.log(chalk.yellow(`    ⚠ ${path.basename(dbFile)}: check timed out after ${DOCTOR_CHECK_TIMEOUT_MS}ms`));
+            } else {
+              console.log(chalk.yellow(`    ⚠ ${path.basename(dbFile)}: check failed — ${dbMsg}`));
+            }
             console.log(chalk.gray(`      Run: sqlite3 "${dbFile}" ".recover" to attempt recovery`));
+            severities.push('warn');
           }
         }
       } catch {
@@ -299,6 +507,7 @@ export async function runDoctor(): Promise<void> {
 
           if (status === 'ok') {
             console.log(chalk.green(`      ✓ ${item}`));
+            severities.push('ok');
           } else {
             const isSqlite = item.endsWith('.sqlite');
             let problem = '';
@@ -321,6 +530,8 @@ export async function runDoctor(): Promise<void> {
 
             console.log(chalk.red(`      ✗ ${item}`) + chalk.gray(` — ${problem}`));
             symlinkIssues.push({ profile: profile.commandName, item, problem, fix });
+            // Broken/missing share-links can silently desync session state — error, not warn.
+            severities.push('error');
           }
         }
       }
@@ -341,18 +552,6 @@ export async function runDoctor(): Promise<void> {
       console.log(chalk.yellow(`  ${largeProfiles.length} profile${largeProfiles.length > 1 ? 's' : ''} over 5 GB: ${largeProfiles.join(', ')}`));
     }
   }
-
-  // Summary
-  const cacheStale = fs.existsSync(cachePath) && (Date.now() - fs.statSync(cachePath).mtimeMs > 24 * 60 * 60 * 1000);
-  const hasIssues = !isInPath(binDir) ||
-    symlinkIssues.length > 0 ||
-    largeProfiles.length > 0 ||
-    reauthNeeded.length > 0 ||
-    cacheStale ||
-    profiles.some(p => {
-      const wrapperPath = path.join(binDir, p.commandName);
-      return !fs.existsSync(wrapperPath);
-    });
 
   console.log();
 
@@ -380,12 +579,17 @@ export async function runDoctor(): Promise<void> {
     console.log();
   }
 
-  if (hasIssues) {
-    console.log(chalk.yellow('⚠️  Some issues detected. See above for details.\n'));
-    process.exitCode = 1;
+  // T-053: exit code reflects the worst severity across every check
+  // (0 = all ok, 1 = warnings, 2 = errors). Acceptance criterion #3.
+  const exit = worstSeverity(severities);
+  if (exit === 2) {
+    console.log(chalk.red('❌ Errors detected. See above for details.\n'));
+  } else if (exit === 1) {
+    console.log(chalk.yellow('⚠️  Some warnings detected. See above for details.\n'));
   } else {
     console.log(chalk.green('✅ Everything looks good! 🎉\n'));
   }
+  process.exitCode = exit;
 }
 
 /**
