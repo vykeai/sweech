@@ -72,9 +72,11 @@ class SweechBarController: OnlyBarController {
         // Kick once on launch (after a 5s grace so the menubar appears first).
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             self?.service.refreshVaultTokens()
+            self?.service.refreshProviderQuotas()
         }
         vaultRefreshTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: true) { [weak self] _ in
             self?.service.refreshVaultTokens()
+            self?.service.refreshProviderQuotas()
         }
     }
 

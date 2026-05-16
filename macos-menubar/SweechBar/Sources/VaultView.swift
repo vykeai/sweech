@@ -249,12 +249,24 @@ private struct AccountsTab: View {
                     AccountTile(
                         account: account,
                         mountedWorkspaces: mountedWorkspaces(for: account),
+                        providerQuota: quotaFor(account),
                         onAssign: { onAssign(account) },
                         onReauth: { reauth(account) }
                     )
                 }
             }
         }
+    }
+
+    /// Quota cache is keyed by exact effective-provider (e.g. "kimi-coding",
+    /// "glm"); synthetic tiles use a canonical key (e.g. "kimi"). Look up
+    /// the canonical first, then any non-canonical variant that maps to it.
+    private func quotaFor(_ account: VaultAccount) -> ProviderQuota? {
+        if let q = service.providerQuotas[account.kind] { return q }
+        for (provKey, quota) in service.providerQuotas {
+            if canonicalProviderKey(provKey) == account.kind { return quota }
+        }
+        return nil
     }
 
     private func mountedWorkspaces(for account: VaultAccount) -> [SweechAccount] {
@@ -288,6 +300,7 @@ private struct AccountsTab: View {
 private struct AccountTile: View {
     let account: VaultAccount
     let mountedWorkspaces: [SweechAccount]
+    let providerQuota: ProviderQuota?
     let onAssign: () -> Void
     let onReauth: () -> Void
 
@@ -327,7 +340,9 @@ private struct AccountTile: View {
                 UsageBar(label: "7d", pct: ws.utilization7d, resetsIn: ws.reset7dRelative)
             }
 
-            if !isExternal {
+            if isExternal {
+                quotaFooter
+            } else {
                 actionRow
             }
         }
@@ -442,6 +457,42 @@ private struct AccountTile: View {
                 color: tint,
                 action: onAssign
             )
+        }
+    }
+
+    /// Quota footer for external API-key tiles. Shows balance, rate-limit
+    /// %, dashboard hint, or an error message — whatever the probe found.
+    @ViewBuilder
+    private var quotaFooter: some View {
+        if let q = providerQuota {
+            if let summary = q.summary {
+                HStack(spacing: 4) {
+                    Image(systemName: q.balanceUsd != nil ? "dollarsign.circle.fill"
+                                       : (q.rateLimit != nil ? "gauge.with.dots.needle.50percent" : "info.circle"))
+                        .font(.system(size: 9))
+                        .foregroundStyle(tint)
+                    Text(summary)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Sweech.Color.textPrimary.opacity(0.9))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if let reset = q.resetIn {
+                        Text("⏱ \(reset)")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Sweech.Color.textMuted)
+                    }
+                }
+            }
+            if let err = q.error {
+                Text(err)
+                    .font(.system(size: 9))
+                    .foregroundStyle(Sweech.Color.danger)
+                    .lineLimit(1)
+            }
+        } else {
+            Text("no quota probed yet")
+                .font(.system(size: 9))
+                .foregroundStyle(Sweech.Color.textMuted)
         }
     }
 

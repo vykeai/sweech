@@ -233,6 +233,51 @@ struct SweechAccount: Codable, Identifiable {
 
 struct UsageResponse: Codable {
     let accounts: [SweechAccount]
+    let providerQuotas: [String: ProviderQuota]?
+}
+
+/// Per-vendor quota / balance info from `sweech providers quota --json`.
+struct ProviderQuota: Codable, Hashable {
+    let provider: String
+    let capturedAt: Double
+    let balanceUsd: Double?
+    let credits: Double?
+    let rateLimit: RateLimit?
+    let note: String?
+    let error: String?
+
+    struct RateLimit: Codable, Hashable {
+        let used: Double?
+        let limit: Double?
+        let resetsAt: Double?
+        let units: String?
+        let window: String?
+    }
+
+    /// One-line human summary suitable for a tile footer.
+    var summary: String? {
+        if let bal = balanceUsd {
+            return String(format: "$%.2f left", bal)
+        }
+        if let r = rateLimit, let used = r.used, let limit = r.limit, limit > 0 {
+            let pct = Int((used / limit) * 100)
+            let unit = r.units ?? ""
+            return "\(pct)% used (\(Int(used))/\(Int(limit)) \(unit))"
+        }
+        if let r = rateLimit, let limit = r.limit, limit > 0 {
+            return "\(Int(limit)) \(r.units ?? "")"
+        }
+        return note
+    }
+
+    var resetIn: String? {
+        guard let ms = rateLimit?.resetsAt else { return nil }
+        let secs = ms / 1000 - Date().timeIntervalSince1970
+        if secs <= 0 { return nil }
+        if secs < 60 { return "\(Int(secs))s" }
+        if secs < 3600 { return "\(Int(secs / 60))m" }
+        return "\(Int(secs / 3600))h \(Int((secs.truncatingRemainder(dividingBy: 3600)) / 60))m"
+    }
 }
 
 /// A row in the central credential vault (~/.sweech/accounts.json).
@@ -343,6 +388,8 @@ struct SweechInfo: Codable {
 
 class SweechService: ObservableObject {
     @Published var accounts: [SweechAccount] = []
+    /// Per-vendor balance / rate-limit info from `sweech providers quota`.
+    @Published var providerQuotas: [String: ProviderQuota] = [:]
     @Published var isConnected = false
     @Published var isFetching = false
     @Published var lastError: String?
@@ -508,6 +555,7 @@ class SweechService: ObservableObject {
                         let response = try JSONDecoder().decode(UsageResponse.self, from: data)
                         self.fireStatusChangeNotifications(newAccounts: response.accounts)
                         self.accounts = response.accounts
+                        if let q = response.providerQuotas { self.providerQuotas = q }
                         self.isConnected = true
                         self.lastError = nil
                         self.lastFetched = Date()
@@ -632,6 +680,20 @@ class SweechService: ObservableObject {
                     self.lastAssignError = error.localizedDescription
                     completion?(false)
                 }
+            }
+        }
+    }
+
+    /// Probe every third-party provider for current balance / rate-limit
+    /// and cache to ~/.sweech/provider-quotas.json. Cached results land
+    /// in the next `sweech usage --json` payload via the `providerQuotas`
+    /// field. Detached so it doesn't block the menu bar.
+    func refreshProviderQuotas(completion: (() -> Void)? = nil) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            _ = Self.runSweech(["providers", "quota", "--refresh", "--json"])
+            DispatchQueue.main.async {
+                self?.fetch()        // reload usage so the new quotas land
+                completion?()
             }
         }
     }

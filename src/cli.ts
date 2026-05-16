@@ -1905,11 +1905,27 @@ const usageCmd = program
           });
         });
       }
+      // Include cached provider quotas so SweechBar can decorate the
+      // Providers section without a separate fetch.
+      let providerQuotas: Record<string, unknown> = {};
+      try {
+        const { getCachedQuota } = require('./providerQuotas');
+        const seen = new Set<string>();
+        for (const a of enriched as any[]) {
+          const key = a.effectiveProvider ?? a.provider;
+          if (!key || seen.has(key)) continue;
+          seen.add(key);
+          const q = getCachedQuota(key);
+          if (q) providerQuotas[key] = q;
+        }
+      } catch {}
+
       process.stdout.write(JSON.stringify({
         schemaVersion: 2,
         generatedAt: new Date().toISOString(),
         summary: summarizeAccountsForTelemetry(accounts),
         accounts: enriched,
+        providerQuotas,
       }, null, 2) + '\n');
       return;
     }
@@ -3630,6 +3646,144 @@ program
       console.error(chalk.red('Error:'), (err as Error).message);
       process.exit(1);
     }
+  });
+
+// ── sweech providers quota ─────────────────────────────────────────────────
+// Probes each third-party provider for current balance / rate-limit. Caches
+// at ~/.sweech/provider-quotas.json (5 min TTL). SweechBar polls this to
+// decorate the Providers section of the Accounts tab.
+program
+  .command('providers')
+  .description('Manage / probe third-party provider quotas')
+  .argument('[action]', 'quota | list', 'quota')
+  .option('--json', 'Machine-readable output')
+  .option('--refresh', 'Bypass cache and re-probe every provider')
+  .action(async (action: string, opts: { json?: boolean; refresh?: boolean }) => {
+    if (action !== 'quota' && action !== 'list') {
+      console.error(chalk.red(`Unknown action: ${action}. Use: quota | list`));
+      process.exit(1);
+    }
+    const { probeAll } = require('./providerQuotas');
+    const { effectiveProvider } = require('./providers');
+    const config = new ConfigManager();
+    const profiles = config.getProfiles();
+
+    // Build probe contexts — one per canonical provider. When multiple
+    // profiles share a provider (e.g. two MiniMax profiles, one of them
+    // configured with a placeholder `sk-test` key), pick the one whose
+    // key looks most production-ready (longest non-placeholder).
+    const candidates = new Map<string, { apiKey: string; baseUrl?: string; model?: string }>();
+    for (const p of profiles) {
+      const eff = effectiveProvider(p.provider, p.baseUrl);
+      if (!eff) continue;
+      const apiKey = await resolveApiKey(p);
+      if (!apiKey || apiKey.startsWith('sk-test') || apiKey.length < 16) continue;
+      const existing = candidates.get(eff);
+      if (!existing || apiKey.length > existing.apiKey.length) {
+        candidates.set(eff, { apiKey, baseUrl: p.baseUrl, model: p.model });
+      }
+    }
+    const contexts = Array.from(candidates.entries()).map(([provider, ctx]) => ({ provider, ...ctx }));
+
+    const results = await probeAll(contexts, { refresh: !!opts.refresh });
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({ quotas: results }, null, 2) + '\n');
+      return;
+    }
+    if (Object.keys(results).length === 0) {
+      console.log(chalk.dim('\n  No third-party provider quotas available.\n'));
+      return;
+    }
+    console.log(chalk.bold('\n  sweech · provider quotas\n'));
+    for (const [provider, info] of Object.entries(results) as Array<[string, any]>) {
+      const head = chalk.bold(provider.padEnd(14));
+      const parts: string[] = [];
+      if (info.balanceUsd !== undefined) parts.push(chalk.green(`$${info.balanceUsd.toFixed(2)} left`));
+      if (info.credits !== undefined) parts.push(chalk.cyan(`${info.credits} credits`));
+      if (info.rateLimit) {
+        const r = info.rateLimit;
+        if (r.used !== undefined && r.limit !== undefined) {
+          const pct = Math.round((r.used / r.limit) * 100);
+          parts.push(chalk.cyan(`${pct}% used (${r.used}/${r.limit} ${r.units ?? ''})`));
+        } else if (r.limit !== undefined) {
+          parts.push(chalk.dim(`limit: ${r.limit} ${r.units ?? ''}`));
+        }
+        if (r.resetsAt) {
+          const mins = Math.round((r.resetsAt - Date.now()) / 60000);
+          if (mins >= 0) parts.push(chalk.dim(`resets in ${mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`}`));
+        }
+      }
+      if (info.note) parts.push(chalk.dim(info.note));
+      if (info.error) parts.push(chalk.red(`error: ${info.error}`));
+      console.log('  ' + head + parts.join(' · '));
+    }
+    console.log();
+  });
+
+// ── sweech code-review ─────────────────────────────────────────────────────
+// Convenience: pick the codex profile with the most available quota and
+// print a launch command. Used by adversarial-review agents that need a
+// fresh codex profile without hand-rolling the smart-score logic.
+program
+  .command('code-review')
+  .description('Pick the best available codex profile for code-review work')
+  .option('--json', 'Machine-readable output (for scripts)')
+  .option('--exec', 'Spawn codex directly instead of printing the command')
+  .action(async (opts: { json?: boolean; exec?: boolean }) => {
+    const config = new ConfigManager();
+    const profiles = config.getProfiles();
+    const accountList = getKnownAccounts(profiles);
+    const { computeSmartScore } = require('./liveUsage');
+    const accounts = await getAccountInfo(accountList, { cacheOnly: true });
+
+    // Only consider real OpenAI codex profiles (OAuth-backed, not local
+    // proxies). Sort by smart score so the freshest weekly window wins.
+    const candidates = accounts
+      .filter(a => a.cliType === 'codex' && (!a.provider || a.provider === 'openai') && !a.baseUrl)
+      .filter(a => !a.needsReauth && a.live?.status !== 'limit_reached')
+      .sort((a, b) => computeSmartScore(b) - computeSmartScore(a));
+
+    if (candidates.length === 0) {
+      if (opts.json) { process.stdout.write(JSON.stringify({ error: 'no available codex profile' }) + '\n'); }
+      else console.error(chalk.red('\n  No available codex profile (all rate-limited or need re-auth).\n'));
+      process.exit(1);
+    }
+
+    const pick = candidates[0];
+    const u5h = Math.round((pick.live?.utilization5h ?? 0) * 100);
+    const u7d = Math.round((pick.live?.utilization7d ?? 0) * 100);
+    const cmd = `sweech use ${pick.commandName}`;
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        profile: pick.commandName,
+        account: pick.activeAccount?.email,
+        utilization5h: u5h,
+        utilization7d: u7d,
+        command: cmd,
+      }, null, 2) + '\n');
+      return;
+    }
+
+    if (opts.exec) {
+      // Spawn codex with the picked profile environment. Avoids the
+      // wrapper script — the agent gets a direct codex session.
+      const { spawn } = require('child_process');
+      const env = { ...process.env, CODEX_HOME: path.join(os.homedir(), '.' + pick.commandName) };
+      const child = spawn('codex', [], { env, stdio: 'inherit' });
+      child.on('exit', (code: number) => process.exit(code ?? 0));
+      return;
+    }
+
+    console.log(chalk.bold('\n  sweech · code-review (best codex pick)\n'));
+    console.log(`  profile  : ${chalk.bold(pick.commandName)}`);
+    if (pick.activeAccount?.email) console.log(`  account  : ${pick.activeAccount.email}`);
+    console.log(`  5h used  : ${u5h < 70 ? chalk.green(u5h + '%') : u5h < 90 ? chalk.yellow(u5h + '%') : chalk.red(u5h + '%')}`);
+    console.log(`  7d used  : ${u7d < 70 ? chalk.green(u7d + '%') : u7d < 90 ? chalk.yellow(u7d + '%') : chalk.red(u7d + '%')}`);
+    console.log(`  launch   : ${chalk.cyan(cmd)}\n`);
+    console.log(chalk.dim('  Tip: sweech code-review --exec  → spawn codex directly.'));
+    console.log();
   });
 
 // ── sweech accounts ────────────────────────────────────────────────────────
