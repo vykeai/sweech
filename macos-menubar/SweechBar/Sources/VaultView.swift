@@ -227,7 +227,9 @@ private struct AccountsTab: View {
     private func canonicalProviderKey(_ p: String) -> String {
         switch p {
         case "kimi-coding": return "kimi"
-        case "ollama-cloud": return "ollama"
+        // Ollama cloud and local-ollama are intentionally NOT collapsed:
+        // cloud uses an API key + ollama.com endpoints, local-ollama
+        // talks to the local daemon. Different auth, different surface.
         default: return p
         }
     }
@@ -1074,7 +1076,7 @@ private enum TileStyle {
         case "glm":                 return "g.circle.fill"
         case "minimax":             return "m.circle.fill"
         case "dashscope":           return "q.circle.fill"
-        case "ollama", "ollama-cloud": return "cube.fill"
+        case "ollama", "ollama-cloud", "local-ollama": return "cube.fill"
         case "openrouter":          return "globe"
         case "gemini":              return "sparkle"
         case "groq":                return "bolt.fill"
@@ -1094,7 +1096,10 @@ private enum TileStyle {
         case "glm":                 return Color(hex: "#A78BFA")
         case "minimax":             return Color(hex: "#F472B6")
         case "dashscope":           return Color(hex: "#FB923C")
-        case "ollama", "ollama-cloud": return Color(hex: "#94A3B8")
+        case "ollama-cloud":        return Color(hex: "#94A3B8")
+        // Local ollama gets a warmer tint than ollama-cloud so the
+        // two are visually distinct even before the label is read.
+        case "ollama", "local-ollama": return Color(hex: "#34D399")
         case "openrouter":          return Sweech.Color.accent
         case "gemini":              return Color(hex: "#60A5FA")
         case "groq":                return Color(hex: "#F87171")
@@ -1119,6 +1124,7 @@ private enum TileStyle {
         case "deepseek":            return "DeepSeek"
         case "qwen":                return "Qwen"
         case "ollama":              return "Ollama"
+        case "local-ollama":        return "Ollama (Local)"
         case "ollama-cloud":        return "Ollama Cloud"
         case "nvidia":              return "NVIDIA"
         case "gemini":              return "Gemini"

@@ -157,6 +157,7 @@ struct SweechAccount: Codable, Identifiable {
             "openrouter": "OpenRouter",
             "ollama": "Ollama",
             "ollama-cloud": "Ollama Cloud",
+            "local-ollama": "Ollama (Local)",
             "local-proxy": "Local Proxy",
             "gemini": "Gemini",
             "groq": "Groq",

@@ -341,6 +341,7 @@ export function displayGroup(providerKey?: string): string {
   if (providerKey === 'openai') return 'codex';
   if (providerKey === 'kimi' || providerKey === 'kimi-coding') return 'kimi';
   if (providerKey === 'local-proxy') return 'Local Proxy';
+  if (providerKey === 'local-ollama') return 'Ollama (Local)';
   const p = PROVIDERS[providerKey];
   return p?.displayName || providerKey;
 }
@@ -369,7 +370,22 @@ export function effectiveProvider(provider?: string, baseUrl?: string): string {
   let host = '';
   try { host = new URL(baseUrl).hostname.toLowerCase(); } catch { host = baseUrl.toLowerCase(); }
 
-  if (host === '127.0.0.1' || host === 'localhost' || host.endsWith('.local')) return 'local-proxy';
+  // Local addresses split into two buckets:
+  //   - `local-ollama`: the canonical Ollama daemon (port 11434) or any
+  //     local URL the user has tagged as provider=ollama. These are
+  //     real Ollama instances, not gateways, and deserve their own
+  //     identity in the UI so users can tell at a glance whether the
+  //     workspace runs through actual local models vs a litellm-style
+  //     compatibility shim sitting on 4000/8000/etc.
+  //   - `local-proxy`: anything else on localhost (litellm, openrouter
+  //     bridges, vLLM, etc).
+  const isLocal = host === '127.0.0.1' || host === 'localhost' || host.endsWith('.local');
+  if (isLocal) {
+    let port = '';
+    try { port = new URL(baseUrl).port; } catch {}
+    if (port === '11434' || provider === 'ollama') return 'local-ollama';
+    return 'local-proxy';
+  }
   if (host.endsWith('z.ai'))                                                    return 'glm';
   if (host.endsWith('kimi.com') || host.endsWith('moonshot.ai'))                return 'kimi-coding';
   if (host.endsWith('minimax.io'))                                              return 'minimax';

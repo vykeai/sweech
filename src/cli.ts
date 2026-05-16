@@ -277,6 +277,7 @@ program
       glm: 'GLM (z.ai)', minimax: 'MiniMax', dashscope: 'Alibaba', openrouter: 'OpenRouter',
       gemini: 'Gemini', groq: 'Groq', nvidia: 'NVIDIA', ollama: 'Ollama',
       'ollama-cloud': 'Ollama Cloud', deepseek: 'DeepSeek', qwen: 'Qwen', 'local-proxy': 'Local Proxy',
+      'local-ollama': 'Ollama (Local)',
     };
 
     const renderProfiles = (accountInfoMap?: Map<string, Awaited<ReturnType<typeof getAccountInfo>>[number]>): number => {
@@ -390,9 +391,11 @@ program
           const emailStr = (info?.emailAddress || info?.activeAccount?.email)
             ? chalk.dim(` · ${info?.emailAddress ?? info?.activeAccount?.email}`)
             : '';
-          const isProxy = eff === 'local-proxy' || (row.baseUrl && (row.baseUrl.includes('127.0.0.1') || row.baseUrl.includes('localhost')));
+          const localTag = eff === 'local-ollama' ? ' (local ollama)'
+                          : eff === 'local-proxy' ? ' (local proxy)'
+                          : '';
           const providerStr = group === 'claude' || group === 'codex'
-            ? (isProxy ? chalk.magenta(' (local proxy)') : '')
+            ? (localTag ? chalk.magenta(localTag) : '')
             : chalk.dim(` ${providerLabel}`);
           const modelStr = row.model ? chalk.dim(` · ${row.model}`) : '';
           const sharedTag = row.sharedWith ? chalk.magenta(` [→ ${row.sharedWith}]`) : '';
@@ -4014,6 +4017,7 @@ program
         openrouter: 'OpenRouter', gemini: 'Gemini', groq: 'Groq',
         nvidia: 'NVIDIA', ollama: 'Ollama', 'ollama-cloud': 'Ollama Cloud',
         deepseek: 'DeepSeek', qwen: 'Qwen', 'local-proxy': 'Local Proxy',
+        'local-ollama': 'Ollama (Local)',
       };
       for (const p of profiles) {
         const eff = effectiveProvider(p.provider, p.baseUrl);
