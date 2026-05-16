@@ -10,6 +10,7 @@ import os from 'node:os';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { registerTool } from '@vykeai/fed';
+import { loadOrCreateSecret } from './auth.js';
 
 let PORT = 7801;
 const PID_DIR = join(homedir(), '.sweech');
@@ -74,7 +75,20 @@ export async function startDaemon(options: StartDaemonOptions = {}) {
     // providers.yaml may not exist or be invalid — continue without it
   }
 
-  const app = createApp({ quotaTracker });
+  // T-039: load (or lazily create) the per-host HMAC secret before the
+  // server binds — if we can't read or write ~/.sweech/daemon.secret the
+  // daemon must fail fast rather than come up unauthenticated. The CLI
+  // signs every outbound request with this secret; another local process
+  // without read access to the file cannot hit /run, /select, or any
+  // config-mutation route.
+  const daemonSecret = await loadOrCreateSecret();
+  const app = createApp({
+    quotaTracker,
+    auth: {
+      enabled: true,
+      getSecret: async () => daemonSecret,
+    },
+  });
 
   const closeServer = async () => {
     if (!server) return;

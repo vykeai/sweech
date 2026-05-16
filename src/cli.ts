@@ -41,6 +41,7 @@ import { checkForUpdate, fetchChangelog } from './updateChecker';
 import { asciiBar, barColor } from './charts';
 import { installPlugin, uninstallPlugin, listPlugins } from './plugins';
 import { getAllTemplates, findTemplate, saveCustomTemplate, loadCustomTemplates, deleteCustomTemplate, BUILT_IN_TEMPLATES, ProfileTemplate } from './templates';
+import { buildAuthedHeaders } from './daemonAuth';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -3628,10 +3629,13 @@ program
     process.on('SIGINT', () => ac.abort());
 
     try {
+      // T-039: /run is HMAC-protected; sign with the daemon secret.
+      const runBody = JSON.stringify(body);
+      const runHeaders = await buildAuthedHeaders('POST', '/run', runBody);
       const res = await fetch(`http://127.0.0.1:${port}/run`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        headers: runHeaders,
+        body: runBody,
         signal: ac.signal,
       });
 
@@ -3753,7 +3757,9 @@ program
     }
 
     try {
-      const res = await fetch(`${daemonUrl}/query`);
+      // T-039: /query is protected — sign the GET.
+      const queryHeaders = await buildAuthedHeaders('GET', '/query', '');
+      const res = await fetch(`${daemonUrl}/query`, { headers: queryHeaders });
       if (!res.ok) {
         console.error(chalk.red('Error:'), `Daemon returned ${res.status}`);
         process.exit(1);
