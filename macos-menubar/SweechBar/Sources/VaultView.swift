@@ -190,15 +190,16 @@ private struct AccountsTab: View {
         return groups
     }
 
-    /// One synthetic tile per unique external vendor in use, deduped
-    /// across endpoint variants (kimi vs kimi-coding both → "kimi").
+    /// One synthetic tile per unique external vendor in use, keyed by
+    /// realProvider (so xortron/heretic localhost-litellm workspaces show
+    /// up as "Local Proxy" rather than mistakenly inflating "Anthropic").
+    /// Endpoint variants (kimi vs kimi-coding) collapse via canonicalKey.
     private func externalTiles() -> [VaultAccount] {
         var seen = Set<String>()
         var tiles: [VaultAccount] = []
         for ws in service.accounts where ws.isExternal {
-            guard let p = ws.provider else { continue }
-            let canonical = canonicalProviderKey(p)
-            if seen.contains(canonical) { continue }
+            let canonical = canonicalProviderKey(ws.realProvider)
+            if canonical.isEmpty || seen.contains(canonical) { continue }
             seen.insert(canonical)
             tiles.append(VaultAccount(
                 accountId: "ext:\(canonical)",
@@ -258,7 +259,11 @@ private struct AccountsTab: View {
 
     private func mountedWorkspaces(for account: VaultAccount) -> [SweechAccount] {
         if account.accountId.hasPrefix("ext:") {
-            return service.accounts.filter { $0.provider == account.kind }
+            // Match by realProvider (with the same canonicalisation used
+            // for synthetic tiles) so a Kimi tile picks up both `kimi`
+            // and `kimi-coding` workspaces.
+            let canonicalKind = canonicalProviderKey(account.kind)
+            return service.accounts.filter { canonicalProviderKey($0.realProvider) == canonicalKind }
         }
         return service.accounts.filter { $0.activeAccount?.id == account.id }
     }
@@ -318,8 +323,8 @@ private struct AccountTile: View {
             metaRow
 
             if let ws = representativeUsage {
-                UsageBar(label: "5h", pct: ws.utilization5h)
-                UsageBar(label: "7d", pct: ws.utilization7d)
+                UsageBar(label: "5h", pct: ws.utilization5h, resetsIn: ws.reset5hRelative)
+                UsageBar(label: "7d", pct: ws.utilization7d, resetsIn: ws.reset7dRelative)
             }
 
             if !isExternal {
@@ -553,7 +558,13 @@ private struct WorkspaceTile: View {
     let onPick: (String) -> Void
 
     private var cliType: String { ws.cliType ?? "?" }
-    private var kind: String { ws.isExternal ? (ws.provider ?? "") : (cliType == "claude" ? "anthropic" : "openai") }
+    private var kind: String {
+        // Use realProvider so proxy workspaces are coloured + glyphed
+        // by their actual upstream vendor (local-proxy / glm / etc),
+        // not by the API format their config happens to label them.
+        if ws.isExternal { return ws.realProvider }
+        return cliType == "claude" ? "anthropic" : "openai"
+    }
     private var tint: Color { TileStyle.tint(kind: kind) }
     private var glyph: String { TileStyle.glyph(kind: kind) }
     private var activeId: String? { ws.activeAccount?.id }
@@ -599,8 +610,8 @@ private struct WorkspaceTile: View {
 
             // Usage bars / external label
             if ws.live != nil {
-                UsageBar(label: "5h", pct: ws.utilization5h)
-                UsageBar(label: "7d", pct: ws.utilization7d)
+                UsageBar(label: "5h", pct: ws.utilization5h, resetsIn: ws.reset5hRelative)
+                UsageBar(label: "7d", pct: ws.utilization7d, resetsIn: ws.reset7dRelative)
             } else if ws.isExternal {
                 Text("API key · no quota info")
                     .font(.system(size: 9))
@@ -808,28 +819,43 @@ private struct AssignSheet: View {
 private struct UsageBar: View {
     let label: String
     let pct: Double
+    let resetsIn: String?
 
     var body: some View {
         let clamped = max(0, min(pct, 1))
         let color: Color = clamped >= 0.9 ? Sweech.Color.danger : (clamped >= 0.7 ? Sweech.Color.warning : Sweech.Color.ok)
-        return HStack(spacing: 6) {
-            Text(label)
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(Sweech.Color.textMuted)
-                .frame(width: 16, alignment: .leading)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2).fill(Sweech.Color.surfaceHigh)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(color)
-                        .frame(width: geo.size.width * clamped)
+        return VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Sweech.Color.textMuted)
+                    .frame(width: 16, alignment: .leading)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2).fill(Sweech.Color.surfaceHigh)
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(color)
+                            .frame(width: geo.size.width * clamped)
+                    }
+                }
+                .frame(height: 4)
+                Text("\(Int(clamped * 100))%")
+                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .foregroundStyle(color)
+                    .frame(width: 30, alignment: .trailing)
+            }
+            if let resetsIn, !resetsIn.isEmpty {
+                HStack(spacing: 4) {
+                    Spacer().frame(width: 16)
+                    Image(systemName: "clock")
+                        .font(.system(size: 7))
+                        .foregroundStyle(Sweech.Color.textMuted)
+                    Text("resets in \(resetsIn)")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Sweech.Color.textMuted)
+                    Spacer(minLength: 0)
                 }
             }
-            .frame(height: 4)
-            Text("\(Int(clamped * 100))%")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
-                .foregroundStyle(color)
-                .frame(width: 30, alignment: .trailing)
         }
     }
 }
@@ -841,6 +867,7 @@ private enum TileStyle {
         switch kind {
         case "anthropic", "claude": return "a.circle.fill"
         case "openai", "codex":     return "o.circle.fill"
+        case "local-proxy":         return "house.fill"
         case "kimi", "kimi-coding": return "k.circle.fill"
         case "glm":                 return "g.circle.fill"
         case "minimax":             return "m.circle.fill"
@@ -860,6 +887,7 @@ private enum TileStyle {
         switch kind {
         case "anthropic", "claude": return Color(hex: "#FF8C42")
         case "openai", "codex":     return Sweech.Color.ok
+        case "local-proxy":         return Color(hex: "#94A3B8")
         case "kimi", "kimi-coding": return Color(hex: "#7DD3FC")
         case "glm":                 return Color(hex: "#A78BFA")
         case "minimax":             return Color(hex: "#F472B6")
@@ -879,6 +907,7 @@ private enum TileStyle {
         switch kind {
         case "anthropic", "claude": return "Anthropic"
         case "openai", "codex":     return "OpenAI"
+        case "local-proxy":         return "Local Proxy"
         case "kimi":                return "Kimi"
         case "kimi-coding":         return "Kimi Coding"
         case "glm":                 return "GLM"

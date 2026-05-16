@@ -1873,11 +1873,17 @@ const usageCmd = program
     try { appendSnapshot(accounts); } catch {}
 
     if (opts.json) {
-      // Sort by smart score within groups, add precomputed fields
+      // Sort by smart score within groups, add precomputed fields.
+      // Use effectiveProvider so workspaces with a baseUrl override
+      // (provider=anthropic but routed through local litellm / z.ai /
+      // openrouter etc.) are grouped by their *real* upstream vendor
+      // instead of the API format their config happens to label them.
       const { computeSmartScore, computeTier } = require('./liveUsage');
+      const { effectiveProvider } = require('./providers');
+      const eff = (a: any) => effectiveProvider(a.provider, a.baseUrl);
       const grouped = new Map<string, typeof accounts>();
       for (const a of accounts) {
-        const g = displayGroup(a.provider);
+        const g = displayGroup(eff(a));
         if (!grouped.has(g)) grouped.set(g, []);
         grouped.get(g)!.push(a);
       }
@@ -1887,13 +1893,15 @@ const usageCmd = program
         group.forEach((a: any, i: number) => {
           const score = computeSmartScore(a);
           const tierInfo = computeTier(a, i === 0);
+          const effective = eff(a);
           enriched.push({
             ...a,
+            effectiveProvider: effective,
             smartScore: Math.round(score * 1000) / 1000,
             tier: tierInfo.tier,
             tierUrgent: tierInfo.urgent,
             sortRank: enriched.length,
-            displayGroup: displayGroup(a.provider),
+            displayGroup: displayGroup(effective),
           });
         });
       }

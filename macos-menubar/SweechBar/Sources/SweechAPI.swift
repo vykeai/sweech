@@ -36,6 +36,10 @@ struct SweechAccount: Codable, Identifiable {
     let isDefault: Bool?
     let sharedWith: String?
     let provider: String?
+    /// Custom base URL from sweech config. Presence == proxy.
+    let baseUrl: String?
+    /// Real upstream vendor derived from (provider, baseUrl) by the CLI.
+    let effectiveProvider: String?
     let meta: AccountMeta?
     let messages5h: Int?
     let messages7d: Int?
@@ -61,13 +65,19 @@ struct SweechAccount: Codable, Identifiable {
     let precomputedDisplayGroup: String?
 
     private enum CodingKeys: String, CodingKey {
-        case name, commandName, cliType, isDefault, sharedWith, provider, meta, messages5h, messages7d, totalMessages
+        case name, commandName, cliType, isDefault, sharedWith, provider, baseUrl, effectiveProvider
+        case meta, messages5h, messages7d, totalMessages
         case minutesUntilFirstCapacity, hoursUntilWeeklyReset, oldest5hMessageAt
         case lastActive, needsReauth, live, tokenStatus, tokenRefreshedAt, tokenExpiresAt
         case activeAccount
         case precomputedSmartScore = "smartScore"
         case tier, tierUrgent, sortRank, precomputedDisplayGroup = "displayGroup"
     }
+
+    /// The real upstream provider key (e.g. "local-proxy", "glm", "kimi-coding",
+    /// "anthropic", "openai"). Falls back to the legacy `provider` field if
+    /// the CLI didn't precompute it.
+    var realProvider: String { effectiveProvider ?? provider ?? "" }
 
     struct ActiveAccount: Codable {
         let id: String
@@ -110,10 +120,11 @@ struct SweechAccount: Codable, Identifiable {
         }
     }
 
-    /// Short human-readable provider label for external providers
+    /// Short human-readable provider label — uses realProvider so
+    /// proxy workspaces (provider=anthropic + baseUrl=127.0.0.1) surface
+    /// as "Local Proxy" instead of misleadingly as "Claude".
     var providerLabel: String {
-        guard let provider else { return cliType ?? "claude" }
-        // Map provider keys to short display names
+        let key = realProvider.isEmpty ? (cliType ?? "claude") : realProvider
         let labels: [String: String] = [
             "anthropic": "Claude",
             "openai": "OpenAI",
@@ -125,14 +136,22 @@ struct SweechAccount: Codable, Identifiable {
             "deepseek": "DeepSeek",
             "qwen": "Qwen",
             "openrouter": "OpenRouter",
+            "ollama": "Ollama",
+            "ollama-cloud": "Ollama Cloud",
+            "local-proxy": "Local Proxy",
+            "gemini": "Gemini",
+            "groq": "Groq",
+            "nvidia": "NVIDIA",
         ]
-        return labels[provider] ?? provider
+        return labels[key] ?? key
     }
 
-    /// Whether this is an external (non-official) provider
+    /// Whether this is an external (non-anthropic / non-openai) provider.
+    /// Uses realProvider so a workspace routing through litellm shows
+    /// up as external even when its API format is anthropic-compatible.
     var isExternal: Bool {
-        guard let provider else { return false }
-        return provider != "anthropic" && provider != "openai"
+        let p = realProvider
+        return !p.isEmpty && p != "anthropic" && p != "openai"
     }
 
     var buckets: [LiveBucket] { live?.buckets ?? [] }

@@ -35,6 +35,10 @@ export interface AccountInfo {
 
   /** Provider key from sweech config (e.g. 'anthropic', 'dashscope', 'minimax') */
   provider?: string
+  /** Optional custom base URL from sweech config; presence usually means
+   *  the workspace routes through a proxy (local litellm, openrouter, …)
+   *  even when provider key is 'anthropic' or 'openai'. */
+  baseUrl?: string
 
   // From .claude.json or .credentials.json
   displayName?: string
@@ -90,6 +94,7 @@ export interface AccountRef {
   commandName: string
   cliType?: string
   provider?: string
+  baseUrl?: string
   isDefault?: boolean
   sharedWith?: string
 }
@@ -324,7 +329,7 @@ function computeWeeklyReset(subscriptionCreatedAt: string): { weeklyResetAt: str
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function getKnownAccounts(
-  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; sharedWith?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; baseUrl?: string; sharedWith?: string }>,
 ): AccountRef[] {
   const seen = new Set<string>()
   const accounts: AccountRef[] = []
@@ -349,6 +354,7 @@ export function getKnownAccounts(
       commandName: profile.commandName,
       cliType: profile.cliType,
       provider: profile.provider,
+      baseUrl: profile.baseUrl,
       isDefault: false,
       sharedWith: profile.sharedWith,
     })
@@ -358,7 +364,7 @@ export function getKnownAccounts(
 }
 
 export async function getAccountInfo(
-  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; isDefault?: boolean; sharedWith?: string }>,
+  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; baseUrl?: string; isDefault?: boolean; sharedWith?: string }>,
   options: { refresh?: boolean; timeoutMs?: number; cacheOnly?: boolean } = {},
 ): Promise<AccountInfo[]> {
   const allMeta = readMeta()
@@ -473,6 +479,7 @@ export async function getAccountInfo(
       isDefault: p.isDefault,
       sharedWith: p.sharedWith,
       provider: p.provider,
+      baseUrl: p.baseUrl,
       displayName: sub?.displayName,
       // Prefer the vault's known email over whatever oauthAccount happens to
       // hold — vault is the single source of truth once a workspace has been
