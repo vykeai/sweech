@@ -6,14 +6,17 @@ import type { EngineId, RunOptions } from '../types.js';
 import type { CredentialProfile } from './types.js';
 import {
   createEmptyRuntimeDocument,
-  migrateRuntimeDocument,
-  serializeRuntimeDocument,
   toLegacyRuntimeConfig,
   type SweechLegacyRuntimeConfig,
 } from '../persistence-contract.js';
 import { getKey, migrateFromConfig } from '../keychain.js';
 
-const PROFILES_PATH = join(homedir(), '.sweech', 'profiles.json');
+/// Single source of truth: the sweech CLI's config.json. The engine
+/// previously kept its own `~/.sweech/profiles.json` but that created
+/// two parallel stores users had to keep in sync. With one store, every
+/// profile the user adds via `sweech profile` is immediately visible
+/// to the engine daemon (`sweech check`, `/recommend`, etc.).
+const PROFILES_PATH = join(homedir(), '.sweech', 'config.json');
 const SWEECH_FED_PORT = 7854;
 
 function isSafeProfileName(name: string): boolean {
@@ -29,6 +32,12 @@ export function getProfilesPath(): string {
   return PROFILES_PATH;
 }
 
+/**
+ * Read `~/.sweech/config.json` — the CLI's profile array — and shape it
+ * into the engine's keyed-by-commandName map. Single source of truth:
+ * every profile the user adds via `sweech profile` is immediately
+ * visible to engine daemon endpoints (/check, /recommend, …).
+ */
 export async function loadProfilesConfig(): Promise<ProfilesConfig> {
   if (cached) return cached;
   if (loadPromise) return loadPromise;
@@ -37,12 +46,32 @@ export async function loadProfilesConfig(): Promise<ProfilesConfig> {
     try {
       const raw = await readFile(PROFILES_PATH, 'utf-8');
       const parsed = JSON.parse(raw) as unknown;
-      const document = migrateRuntimeDocument(parsed, PROFILES_PATH);
-      cached = toLegacyRuntimeConfig(document);
-      if (!('schema' in (parsed as Record<string, unknown>)) || (parsed as Record<string, unknown>).version !== document.version) {
-        await mkdir(dirname(PROFILES_PATH), { recursive: true });
-        await writeFile(PROFILES_PATH, serializeRuntimeDocument(cached), 'utf-8');
+      if (!Array.isArray(parsed)) {
+        throw new Error(`Expected an array of profiles at ${PROFILES_PATH}`);
       }
+      const document = createEmptyRuntimeDocument();
+      const result = toLegacyRuntimeConfig(document) as Record<string, unknown>;
+      for (const entry of parsed) {
+        if (!entry || typeof entry !== 'object') continue;
+        const profile = entry as Record<string, unknown>;
+        const commandName = typeof profile.commandName === 'string' ? profile.commandName : undefined;
+        if (!commandName || !isSafeProfileName(commandName)) continue;
+        result[commandName] = {
+          name: profile.name ?? commandName,
+          commandName,
+          cliType: profile.cliType,
+          provider: profile.provider,
+          apiKey: profile.apiKey,
+          keyInKeychain: profile.keyInKeychain === true,
+          oauth: profile.oauth,
+          baseUrl: profile.baseUrl,
+          model: profile.model,
+          smallFastModel: profile.smallFastModel,
+          sharedWith: profile.sharedWith,
+          createdAt: profile.createdAt,
+        };
+      }
+      cached = result as ProfilesConfig;
       return cached;
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
@@ -69,8 +98,19 @@ export async function loadProfiles(): Promise<Record<string, CredentialProfile>>
 }
 
 export async function saveProfilesConfig(config: ProfilesConfig): Promise<void> {
+  // Serialise as the CLI's array shape (matches what `sweech profile`
+  // writes). `_config` (defaults / failover) is intentionally not
+  // persisted by the engine — the CLI doesn't have that concept yet, so
+  // round-tripping it would silently drop on the next CLI write. When
+  // the engine genuinely needs to persist defaults, store them in a
+  // sidecar file under ~/.sweech/.
+  const array: unknown[] = [];
+  for (const [key, value] of Object.entries(config)) {
+    if (key === '_config' || !value || typeof value !== 'object' || !('name' in value)) continue;
+    array.push(value);
+  }
   await mkdir(dirname(PROFILES_PATH), { recursive: true });
-  await writeFile(PROFILES_PATH, serializeRuntimeDocument(config), 'utf-8');
+  await writeFile(PROFILES_PATH, JSON.stringify(array, null, 2), 'utf-8');
   cached = config;
 }
 

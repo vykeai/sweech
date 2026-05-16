@@ -3,7 +3,11 @@ import { homedir } from 'node:os';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-const SERVICE = 'sweech';
+/// Single source of truth for API keys: the same Keychain service the
+/// CLI writes to. `sweech` (the legacy engine-only service) is no
+/// longer used — `sweech profile` puts keys here, the engine reads
+/// from here. One store.
+const SERVICE = 'sweech-api-key';
 const MIGRATION_FLAG_PATH = join(homedir(), '.sweech', '.keychain-migrated');
 const SAFE_ACCOUNT_RE = /^[a-zA-Z0-9_.-]+$/;
 

@@ -105,7 +105,15 @@ struct SweechAccount: Codable, Identifiable {
     var utilization7d: Double { live?.utilization7d ?? 0 }
 
     var liveStatus: String { live?.status ?? "unknown" }
-    var planType: String? { live?.planType ?? meta?.plan }
+    /// Workspace plan label, with vault-derived fallback. The CLI's
+    /// per-workspace subscriptions.json (= meta.plan) only carries plans
+    /// the user explicitly set; the vault knows every OAuth identity's
+    /// rate-limit tier (Max 20x / Max 5x / Pro / …). When the workspace
+    /// has a vault account mounted, surface that plan so every workspace
+    /// shows its tier without the user having to run sweech usage set-plan.
+    var planType: String? {
+        live?.planType ?? meta?.plan ?? activeAccount?.plan
+    }
 
     /// Display group for UI grouping: 'claude', 'codex', or provider display name.
     /// Uses precomputed value from CLI (single source of truth) when available.

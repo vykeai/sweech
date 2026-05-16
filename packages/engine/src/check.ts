@@ -17,6 +17,11 @@ export interface CheckResult {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const checkCache = new Map<string, { result: CheckResult; expiresAt: number }>();
 
+/// Hosts whose base URLs are safe to call from /check probes. Anything
+/// outside this list with provider!=local is rejected so a typo in
+/// config.json can't redirect a probe to an attacker host. Local
+/// proxies (litellm running on 127.0.0.1) are allowed regardless of
+/// host because they're explicitly user-administered.
 const ALLOWED_PROVIDER_HOSTS = new Set([
   'api.anthropic.com',
   'api.openai.com',
@@ -27,14 +32,27 @@ const ALLOWED_PROVIDER_HOSTS = new Set([
   'api.mistral.ai',
   'api.cerebras.ai',
   'api.minimax.chat',
+  'api.minimax.io',
   'generativelanguage.googleapis.com',
+  // Third-party Anthropic-compat + OpenAI-compat endpoints actually in
+  // use across our profile zoo. Add more here when new vendors land.
+  'api.z.ai',
+  'api.kimi.com',
+  'platform.moonshot.cn',
+  'coding-intl.dashscope.aliyuncs.com',
+  'integrate.api.nvidia.com',
+  'ollama.com',
 ]);
 
 function isAllowedBaseUrl(urlStr: string): boolean {
   try {
     const url = new URL(urlStr);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-    return ALLOWED_PROVIDER_HOSTS.has(url.hostname.toLowerCase());
+    const host = url.hostname.toLowerCase();
+    if (ALLOWED_PROVIDER_HOSTS.has(host)) return true;
+    // Always allow loopback / link-local for local proxy workspaces.
+    if (host === 'localhost' || host === '127.0.0.1' || host.endsWith('.local')) return true;
+    return false;
   } catch {
     return false;
   }
@@ -96,15 +114,26 @@ async function resolveApiKey(profile: CredentialProfile): Promise<string | null>
   return null;
 }
 
-function isSubscriptionProvider(provider: string): boolean {
-  return provider === 'claude' || provider === 'codex' || provider === 'gemini' || provider === 'amazon-q' || provider === 'github' || provider === 'copilot';
+function isSubscriptionProvider(provider: string, profile?: { baseUrl?: string }): boolean {
+  // Legacy engine names + the CLI's terminology. A workspace with
+  // provider=anthropic/openai but a custom baseUrl is a proxy (litellm,
+  // openrouter, …), not a subscription — those route through the
+  // API-key path so we can still hit /v1/models or /v1/messages.
+  if (provider === 'claude' || provider === 'codex') return true;
+  if (provider === 'gemini' || provider === 'amazon-q' || provider === 'github' || provider === 'copilot') return true;
+  if ((provider === 'anthropic' || provider === 'openai') && !profile?.baseUrl) return true;
+  return false;
 }
 
 async function checkSubscriptionProvider(profileName: string, profile: CredentialProfile): Promise<CheckResult> {
   const start = Date.now();
   const { execFileSync } = await import('node:child_process');
   const provider = profile.provider;
-  const KNOWN_COMMANDS: Record<string, string> = { claude: 'claude', codex: 'codex', gemini: 'gemini', 'amazon-q': 'q', github: 'gh', copilot: 'copilot' };
+  const KNOWN_COMMANDS: Record<string, string> = {
+    claude: 'claude', anthropic: 'claude',
+    codex: 'codex',   openai: 'codex',
+    gemini: 'gemini', 'amazon-q': 'q', github: 'gh', copilot: 'copilot',
+  };
   const command = KNOWN_COMMANDS[provider];
   if (!command) {
     return {
@@ -174,9 +203,12 @@ async function checkApiProvider(profileName: string, profile: CredentialProfile)
     };
   }
 
-  // Anthropic uses x-api-key, Google uses x-goog-api-key, others use Bearer auth
-  const isAnthropic = provider === 'anthropic';
-  const isGoogle = provider === 'google';
+  // Anthropic uses x-api-key, Google uses x-goog-api-key, others use Bearer auth.
+  // Anthropic-format proxies (glm, kimi-coding, dashscope) speak the same
+  // /v1/messages contract — detect them so we use the right header + body.
+  const ANTHROPIC_FORMAT = new Set(['anthropic', 'glm', 'kimi-coding', 'dashscope']);
+  const isAnthropic = ANTHROPIC_FORMAT.has(provider);
+  const isGoogle = provider === 'google' || provider === 'gemini';
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(isAnthropic
@@ -302,7 +334,7 @@ export async function checkProfile(profileName: string): Promise<CheckResult> {
   const provider = profile.provider;
   let result: CheckResult;
 
-  if (isSubscriptionProvider(provider)) {
+  if (isSubscriptionProvider(provider, profile)) {
     result = await checkSubscriptionProvider(profileName, profile);
   } else {
     result = await checkApiProvider(profileName, profile);
