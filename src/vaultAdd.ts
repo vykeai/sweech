@@ -24,8 +24,7 @@ import {
   AccountKind,
   AccountMeta,
   AnthropicSecret,
-  findAccountByEmail,
-  idFor,
+  resolveAccountForImport,
   saveAccount,
 } from './vault'
 
@@ -107,17 +106,37 @@ export async function addAnthropicAccount(): Promise<AddAccountResult | AddAccou
   const profile = await fetchAnthropicProfile(accessToken).catch(() => null)
   const email = profile?.email ?? `anthropic-${Date.now()}@unknown.local`
   const accountUuid = profile?.accountUuid
+  const orgId = profile?.organizationUuid
+  const orgName = profile?.organizationName
 
   const kind: AccountKind = 'anthropic'
-  const id = idFor(kind, email)
-  const existing = findAccountByEmail(kind, email)
+  const resolution = resolveAccountForImport(kind, email, orgId)
 
+  if (resolution.action === 'collision') {
+    const proceed = await confirmOrgCollision({
+      email,
+      existing: resolution.conflict,
+      incomingOrgId: orgId!,
+      incomingOrgName: orgName,
+    })
+    if (!proceed) {
+      return {
+        ok: false,
+        reason: `Account ${email} already exists under a different org `
+          + `(${resolution.conflict.orgName ?? resolution.conflict.orgId}); aborted to avoid overwrite`,
+      }
+    }
+  }
+
+  const existing = resolution.action === 'update' ? resolution.existing : null
   const meta: AccountMeta = {
-    id,
+    id: resolution.id,
     kind,
     email,
     displayName: profile?.displayName,
     externalId: accountUuid,
+    orgId,
+    orgName,
     plan: profile?.plan,
     rateLimitTier: profile?.rateLimitTier,
     addedAt: existing?.addedAt ?? new Date().toISOString(),
@@ -136,10 +155,51 @@ export async function addAnthropicAccount(): Promise<AddAccountResult | AddAccou
   return { ok: true, account: meta, alreadyExisted: !!existing }
 }
 
+/**
+ * Interactive y/N prompt when the OAuth flow lands an email that
+ * already lives in the vault under a different org. Refuses
+ * (returns false) when stdin is not a TTY — non-interactive
+ * contexts can't make this safety call.
+ */
+async function confirmOrgCollision(args: {
+  email: string
+  existing: AccountMeta
+  incomingOrgId: string
+  incomingOrgName?: string
+}): Promise<boolean> {
+  const existingOrg = args.existing.orgName ?? args.existing.orgId ?? '(unknown org)'
+  const incomingOrg = args.incomingOrgName ?? args.incomingOrgId
+  process.stderr.write(
+    chalk.yellow(
+      `\n  ⚠ Account ${chalk.bold(args.email)} already exists in vault for org `
+      + `${chalk.bold(existingOrg)}.\n`
+      + `    Adding another entry for org ${chalk.bold(incomingOrg)} will create a `
+      + `separate vault entry.\n`,
+    ),
+  )
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      chalk.red(`    Refusing in non-interactive mode. Re-run from a TTY to confirm.\n\n`),
+    )
+    return false
+  }
+  const { proceed } = await inquirer.prompt([{
+    type: 'confirm',
+    name: 'proceed',
+    message: 'Add the second org-scoped account?',
+    default: false,
+  }])
+  return !!proceed
+}
+
 export interface AnthropicProfile {
   email?: string
   displayName?: string
   accountUuid?: string
+  /** Anthropic organization.uuid — used as orgId for vault disambiguation. */
+  organizationUuid?: string
+  /** Human-readable organization name (e.g. "Personal", "Acme Inc."). */
+  organizationName?: string
   plan?: string
   rateLimitTier?: string
   subscriptionType?: string
@@ -155,11 +215,14 @@ export async function fetchAnthropicProfile(accessToken: string): Promise<Anthro
   if (!res.ok) return null
   const data = (await res.json()) as Record<string, any>
   const account = data.account ?? data
+  const organization = data.organization ?? {}
   return {
     email: account.email_address ?? account.email,
     displayName: account.display_name ?? account.name,
     accountUuid: account.uuid ?? account.account_uuid,
-    plan: data.organization?.plan_type ?? account.plan,
+    organizationUuid: organization.uuid ?? organization.organization_uuid ?? organization.id,
+    organizationName: organization.name ?? organization.organization_name,
+    plan: organization.plan_type ?? account.plan,
     rateLimitTier: account.rate_limit_tier ?? account.rateLimitTier,
     subscriptionType: account.subscription_type ?? account.billing_type,
   }

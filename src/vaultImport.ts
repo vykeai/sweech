@@ -19,8 +19,7 @@ import {
   AccountMeta,
   AnthropicSecret,
   OpenAISecret,
-  findAccountByEmail,
-  idFor,
+  resolveAccountForImport,
   saveAccount,
   setActiveAccountId,
 } from './vault'
@@ -100,6 +99,9 @@ interface ClaudeIdentity {
   email?: string
   displayName?: string
   accountUuid?: string
+  /** OAuth organization.uuid as written by Claude Code into .claude.json. */
+  organizationUuid?: string
+  organizationName?: string
   billingType?: string
   rateLimitTier?: string
 }
@@ -112,6 +114,8 @@ function readClaudeIdentity(configDir: string): ClaudeIdentity {
       email: oa.emailAddress,
       displayName: oa.displayName,
       accountUuid: oa.accountUuid,
+      organizationUuid: oa.organizationUuid ?? oa.organization_uuid ?? oa.organizationId,
+      organizationName: oa.organizationName ?? oa.organization_name,
       billingType: oa.billingType,
       rateLimitTier: oa.rateLimitTier,
     }
@@ -165,7 +169,12 @@ function readCodexAuth(configDir: string): CodexAuthFile | null {
   }
 }
 
-function extractCodexEmail(auth: CodexAuthFile): { email?: string; expiresAt?: number; plan?: string } {
+function extractCodexEmail(auth: CodexAuthFile): {
+  email?: string
+  expiresAt?: number
+  plan?: string
+  orgId?: string
+} {
   const idToken = auth.tokens?.id_token
   if (!idToken) return {}
   const payload = decodeJwtPayload(idToken)
@@ -177,7 +186,13 @@ function extractCodexEmail(auth: CodexAuthFile): { email?: string; expiresAt?: n
   const expSec = payload.exp as number | undefined
   const plan = (authClaim.chatgpt_plan_type as string | undefined)
     ?? (authClaim.plan_type as string | undefined)
-  return { email, expiresAt: expSec ? expSec * 1000 : undefined, plan }
+  // OpenAI's id-token surfaces the workspace/org under several keys
+  // depending on whether it's a personal ChatGPT account or an
+  // enterprise/team workspace.
+  const orgId = (authClaim.organization_id as string | undefined)
+    ?? (authClaim.workspace_id as string | undefined)
+    ?? (auth.tokens?.account_id)
+  return { email, expiresAt: expSec ? expSec * 1000 : undefined, plan, orgId }
 }
 
 async function importCodexWorkspace(ws: ImportedWorkspace): Promise<ImportResult> {
@@ -190,16 +205,27 @@ async function importCodexWorkspace(ws: ImportedWorkspace): Promise<ImportResult
   if (!auth.tokens?.id_token) {
     return { workspace: ws, outcome: 'no-credentials' }
   }
-  const { email, expiresAt, plan } = extractCodexEmail(auth)
+  const { email, expiresAt, plan, orgId } = extractCodexEmail(auth)
   const fallbackEmail = email || `${ws.commandName}@unknown.local`
   const kind: AccountKind = 'openai'
-  const id = idFor(kind, fallbackEmail)
-  const existing = findAccountByEmail(kind, fallbackEmail)
+  const resolution = resolveAccountForImport(kind, fallbackEmail, orgId)
+  if (resolution.action === 'collision') {
+    // Import is a bulk, non-interactive flow — refuse instead of
+    // silently overwriting; the user can re-add via `accounts add`.
+    return {
+      workspace: ws,
+      outcome: 'error',
+      error: `Account ${fallbackEmail} already exists for org `
+        + `${resolution.conflict.orgName ?? resolution.conflict.orgId}; refusing to overwrite`,
+    }
+  }
+  const existing = resolution.action === 'update' ? resolution.existing : null
   const meta: AccountMeta = {
-    id,
+    id: resolution.id,
     kind,
     email: fallbackEmail,
     externalId: auth.tokens?.account_id,
+    orgId,
     plan: plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : undefined,
     addedAt: existing?.addedAt ?? new Date().toISOString(),
     lastRefreshedAt: new Date().toISOString(),
@@ -208,11 +234,11 @@ async function importCodexWorkspace(ws: ImportedWorkspace): Promise<ImportResult
   }
   const secret: OpenAISecret = auth as OpenAISecret
   await saveAccount(meta, secret)
-  setActiveAccountId(ws.commandName, id)
+  setActiveAccountId(ws.commandName, resolution.id)
   return {
     workspace: ws,
     outcome: existing ? 'updated' : 'imported',
-    accountId: id,
+    accountId: resolution.id,
     email: fallbackEmail,
   }
 }
@@ -239,8 +265,8 @@ export async function importWorkspaces(workspaces?: ImportedWorkspace[]): Promis
         // Default `~/.claude` (and any workspace that hasn't surfaced an
         // oauthAccount block to .claude.json) has no email on disk. Probe
         // Anthropic's /oauth/profile endpoint with the keychain access
-        // token to backfill email + accountUuid + plan.
-        if (!ident.email && blob.accessToken) {
+        // token to backfill email + accountUuid + plan + org.
+        if ((!ident.email || !ident.organizationUuid) && blob.accessToken) {
           try {
             const { fetchAnthropicProfile } = require('./vaultAdd')
             const profile = await fetchAnthropicProfile(blob.accessToken)
@@ -249,6 +275,8 @@ export async function importWorkspaces(workspaces?: ImportedWorkspace[]): Promis
                 email: profile.email,
                 displayName: profile.displayName ?? ident.displayName,
                 accountUuid: profile.accountUuid ?? ident.accountUuid,
+                organizationUuid: profile.organizationUuid ?? ident.organizationUuid,
+                organizationName: profile.organizationName ?? ident.organizationName,
                 billingType: profile.subscriptionType ?? ident.billingType,
                 rateLimitTier: profile.rateLimitTier ?? ident.rateLimitTier,
               }
@@ -257,14 +285,25 @@ export async function importWorkspaces(workspaces?: ImportedWorkspace[]): Promis
         }
         const email = ident.email || `${ws.commandName}@unknown.local`
         const kind: AccountKind = 'anthropic'
-        const id = idFor(kind, email)
-        const existing = findAccountByEmail(kind, email)
+        const resolution = resolveAccountForImport(kind, email, ident.organizationUuid)
+        if (resolution.action === 'collision') {
+          results.push({
+            workspace: ws,
+            outcome: 'error',
+            error: `Account ${email} already exists for org `
+              + `${resolution.conflict.orgName ?? resolution.conflict.orgId}; refusing to overwrite`,
+          })
+          continue
+        }
+        const existing = resolution.action === 'update' ? resolution.existing : null
         const meta: AccountMeta = {
-          id,
+          id: resolution.id,
           kind,
           email,
           displayName: ident.displayName,
           externalId: ident.accountUuid,
+          orgId: ident.organizationUuid,
+          orgName: ident.organizationName,
           plan: planLabel(blob.rateLimitTier ?? ident.rateLimitTier, ident.billingType),
           rateLimitTier: blob.rateLimitTier ?? ident.rateLimitTier,
           addedAt: existing?.addedAt ?? new Date().toISOString(),
@@ -280,8 +319,13 @@ export async function importWorkspaces(workspaces?: ImportedWorkspace[]): Promis
           rateLimitTier: blob.rateLimitTier ?? ident.rateLimitTier,
         }
         await saveAccount(meta, secret)
-        setActiveAccountId(ws.commandName, id)
-        results.push({ workspace: ws, outcome: existing ? 'updated' : 'imported', accountId: id, email })
+        setActiveAccountId(ws.commandName, resolution.id)
+        results.push({
+          workspace: ws,
+          outcome: existing ? 'updated' : 'imported',
+          accountId: resolution.id,
+          email,
+        })
       } else {
         results.push(await importCodexWorkspace(ws))
       }
