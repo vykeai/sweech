@@ -458,7 +458,15 @@ export async function getAccountInfo(
     else if (liveStatus === 'forbidden') livePlanOverride = 'Forbidden'
     else if (liveStatus === 'unauthorized' || tokStatus === 'expired' || tokStatus === 'no_token') livePlanOverride = 'Re-login needed'
     const derivedPlan = livePlanOverride ?? derivePlanLabel(sub?.rateLimitTier, sub?.billingType, cliType)
-    const enrichedMeta = meta.plan ? meta : (derivedPlan ? { ...meta, plan: derivedPlan } : meta)
+    // Plan precedence:
+    //   1. derivedPlan when it's a livePlanOverride (org_disabled etc.)
+    //      — those are status-truths the user can't override.
+    //   2. derivedPlan from live rateLimitTier — the keychain is the
+    //      authoritative tier; a stale "Max 5x" manual override left in
+    //      subscriptions.json must not displace it.
+    //   3. user's manual meta.plan as a final fallback (used when live
+    //      data is unreachable or the profile has no OAuth at all).
+    const enrichedMeta = derivedPlan ? { ...meta, plan: derivedPlan } : meta
 
     // Vault: which account is currently mounted in this workspace?
     let activeAccount: AccountInfo['activeAccount']
