@@ -321,7 +321,26 @@ private struct AccountTile: View {
         if account.expiryLabel == "expired" { return true }
         if let s = account.status, ["expired", "unauthorized", "org_disabled"].contains(s) { return true }
         if mountedWorkspaces.contains(where: { $0.needsReauth == true }) { return true }
+        if liveProblemStatus != nil { return true }
         return false
+    }
+
+    /// Live status from any mounted workspace that supersedes the
+    /// vault's cached plan ("Max 20x" can be stale if the org later
+    /// disables OAuth — the live API returns 403, which liveUsage
+    /// surfaces as org_disabled. Detect that here and show the right
+    /// badge instead of the obsolete plan capsule).
+    private var liveProblemStatus: String? {
+        for ws in mountedWorkspaces {
+            switch ws.live?.status {
+            case "org_disabled":  return "OAuth disabled"
+            case "unauthorized":  return "Re-login needed"
+            case "forbidden":     return "Forbidden"
+            case "limit_reached": return "Limit reached"
+            default: continue
+            }
+        }
+        return nil
     }
 
     /// Reauth itself is only achievable for OAuth-backed accounts.
@@ -381,7 +400,18 @@ private struct AccountTile: View {
 
     private var badgesRow: some View {
         HStack(spacing: 4) {
-            if let plan = account.plan {
+            // When a live workspace probe contradicts the vault's stored
+            // plan (e.g. OAuth disabled by the org after the account was
+            // imported), show the live status as a warning capsule
+            // instead of the obsolete "Max 20x" / "Pro" plan.
+            if let liveStatus = liveProblemStatus {
+                Text(liveStatus)
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(Sweech.Color.danger.opacity(0.18))
+                    .clipShape(Capsule())
+                    .foregroundStyle(Sweech.Color.danger)
+            } else if let plan = account.plan {
                 Text(plan)
                     .font(.system(size: 9, weight: .bold))
                     .padding(.horizontal, 5).padding(.vertical, 1)

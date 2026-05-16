@@ -105,14 +105,25 @@ struct SweechAccount: Codable, Identifiable {
     var utilization7d: Double { live?.utilization7d ?? 0 }
 
     var liveStatus: String { live?.status ?? "unknown" }
-    /// Workspace plan label, with vault-derived fallback. The CLI's
-    /// per-workspace subscriptions.json (= meta.plan) only carries plans
-    /// the user explicitly set; the vault knows every OAuth identity's
-    /// rate-limit tier (Max 20x / Max 5x / Pro / …). When the workspace
-    /// has a vault account mounted, surface that plan so every workspace
-    /// shows its tier without the user having to run sweech usage set-plan.
+    /// Workspace plan label. Resolution order:
+    ///   1. live.planType         — codex returns it on every probe
+    ///   2. meta.plan             — user-set or CLI-derived (already
+    ///                              demoted to "OAuth disabled" /
+    ///                              "Re-login needed" when liveUsage
+    ///                              detects a 401/403 — so this is the
+    ///                              authoritative answer when present)
+    ///   3. activeAccount.plan    — vault snapshot, used only when the
+    ///                              workspace has no live probe yet
+    ///                              AND the live status is clean
     var planType: String? {
-        live?.planType ?? meta?.plan ?? activeAccount?.plan
+        if let p = live?.planType { return p }
+        if let p = meta?.plan { return p }
+        // Don't fall back to the vault's stored plan when live data
+        // indicates the OAuth identity is broken — the vault plan
+        // captured at import time would be misleadingly stale.
+        let badStatus: Set<String> = ["org_disabled", "unauthorized", "forbidden", "limit_reached"]
+        if let s = live?.status, badStatus.contains(s) { return nil }
+        return activeAccount?.plan
     }
 
     /// Display group for UI grouping: 'claude', 'codex', or provider display name.
