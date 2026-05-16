@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import OnlyMenuBarKit
 
 // MARK: - App Entry Point
 

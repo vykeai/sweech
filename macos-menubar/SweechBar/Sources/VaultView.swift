@@ -15,28 +15,45 @@ struct VaultView: View {
     /// When non-nil, the assignment sheet is showing for this account.
     @State private var assigningAccount: VaultAccount?
 
+    /// When both lists are empty, a brand-new user has nothing to look at —
+    /// two empty grids with no guidance. Surface an onboarding view that
+    /// points them at `sweech init` / `sweech accounts import` instead.
+    private var isUnconfigured: Bool {
+        service.vaultAccounts.isEmpty && service.accounts.isEmpty
+    }
+
     var body: some View {
         ZStack {
             Sweech.Gradient.backgroundRadial
 
             VStack(spacing: 0) {
                 header
-                tabBar
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
+                if isUnconfigured {
+                    // Keep the header (reload + key-refresh) so the user can
+                    // re-poll after running sweech init in Terminal without
+                    // quitting the menubar app.
+                    OnboardingView()
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    tabBar
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 10)
 
-                ScrollView(.vertical, showsIndicators: true) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if tab == "accounts" {
-                            AccountsTab(service: service, onAssign: { assigningAccount = $0 })
-                        } else {
-                            WorkspacesTab(service: service)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if tab == "accounts" {
+                                AccountsTab(service: service, onAssign: { assigningAccount = $0 })
+                            } else {
+                                WorkspacesTab(service: service)
+                            }
+                            errorFooter
                         }
-                        errorFooter
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -160,6 +177,122 @@ struct VaultView: View {
                 .foregroundStyle(Sweech.Color.textMuted)
         }
     }
+}
+
+// MARK: - Onboarding empty state
+
+/// Shown when a user opens SweechBar before running `sweech init`. Two
+/// empty grids tell the user nothing — this view names the next two
+/// commands and launches them in Terminal on tap.
+private struct OnboardingView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Spacer(minLength: 8)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Sweech.Color.core)
+                    Text("Welcome to sweech")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(Sweech.Color.textPrimary)
+                }
+                Text("No workspaces or accounts configured yet. Get started by running one of these:")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Sweech.Color.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(spacing: 10) {
+                onboardingRow(
+                    icon: "wand.and.stars",
+                    title: "sweech init",
+                    subtitle: "Interactive setup wizard — pick CLIs, mount accounts, name workspaces.",
+                    command: "sweech init"
+                )
+                onboardingRow(
+                    icon: "tray.and.arrow.down.fill",
+                    title: "sweech accounts import",
+                    subtitle: "Discover existing ~/.claude and ~/.codex installs already on this machine.",
+                    command: "sweech accounts import"
+                )
+            }
+
+            Text("After running either command, hit the reload button (⟳) in the header to refresh.")
+                .font(.system(size: 10))
+                .foregroundStyle(Sweech.Color.textMuted.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One row per command — title + helper text + a "Run in Terminal…"
+    /// button that hands off to `SweechService.launchInTerminal`.
+    private func onboardingRow(icon: String, title: String, subtitle: String, command: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Sweech.Color.core)
+                .frame(width: 22, height: 22)
+                .background(Sweech.Color.core.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Sweech.Color.textPrimary)
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Sweech.Color.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            Button(action: {
+                SweechService.launchInTerminal(commandName: command)
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "terminal.fill").font(.system(size: 10))
+                    Text("Run in Terminal…").font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(Sweech.Color.core)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Sweech.Color.core.opacity(0.18))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Sweech.Color.core.opacity(0.35), lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                // Whole capsule is the hit target, not just the glyphs.
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Opens Terminal.app with `\(command)` preloaded.")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Sweech.Color.surface.opacity(0.85))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Sweech.Color.core.opacity(0.25), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+#Preview("Onboarding") {
+    ZStack {
+        Sweech.Gradient.backgroundRadial
+        OnboardingView()
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+    }
+    .frame(width: 540, height: 720)
 }
 
 // MARK: - Accounts tab — grouped tile grid
