@@ -385,7 +385,8 @@ private struct AccountsTab: View {
                 addedAt: "",
                 lastRefreshedAt: nil,
                 expiresAt: nil,
-                status: nil
+                status: nil,
+                billing: nil
             ))
         }
         return tiles.sorted { $0.email < $1.email }
@@ -607,6 +608,26 @@ private struct AccountTile: View {
                     .background(Sweech.Color.warning.opacity(0.18))
                     .clipShape(Capsule())
                     .foregroundStyle(Sweech.Color.warning)
+            }
+            // Billing chip — appears when ~/.sweech/billing.json has an
+            // entry for (provider, email). Color reflects urgency:
+            // red for canceled/overdue, yellow for ≤7d or will_not_renew,
+            // neutral for healthy subscriptions. Tap-friendly chip per
+            // BillingSeverity (see SweechAPI.swift).
+            if let label = account.billingLabel {
+                let (bg, fg): (Color, Color) = {
+                    switch account.billingSeverity {
+                    case .critical: return (Sweech.Color.danger.opacity(0.18), Sweech.Color.danger)
+                    case .warning:  return (Sweech.Color.warning.opacity(0.18), Sweech.Color.warning)
+                    case .neutral:  return (Sweech.Color.textMuted.opacity(0.12), Sweech.Color.textMuted)
+                    }
+                }()
+                Text(label)
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(bg)
+                    .clipShape(Capsule())
+                    .foregroundStyle(fg)
             }
             Spacer(minLength: 0)
         }

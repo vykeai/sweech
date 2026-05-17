@@ -343,6 +343,22 @@ struct ProviderQuota: Codable, Hashable {
 }
 
 /// A row in the central credential vault (~/.sweech/accounts.json).
+/// Billing snapshot per vault account, populated server-side by the
+/// sweech CLI from ~/.sweech/billing.json. Optional — accounts with no
+/// billing data (vendor APIs don't expose expiry, so this requires
+/// either `sweech billing scan` from local mail or `sweech billing set`)
+/// arrive with billing == nil.
+struct VaultBilling: Codable, Hashable {
+    let status: String                  // "active" | "will_not_renew" | "canceled" | "unknown"
+    let plan: String?
+    let billingDay: Int?                // 1-31
+    let lastPaidAt: String?             // ISO-8601
+    let nextBillingAt: String?          // YYYY-MM-DD
+    let daysUntilNextBill: Int?
+    let source: String                  // "manual" | "mailscan"
+    let updatedAt: String
+}
+
 struct VaultAccount: Codable, Identifiable, Hashable {
     var id: String { accountId }
     let accountId: String      // 12-char vault id
@@ -356,10 +372,11 @@ struct VaultAccount: Codable, Identifiable, Hashable {
     let lastRefreshedAt: String?
     let expiresAt: Double?     // ms epoch
     let status: String?
+    let billing: VaultBilling?  // null when no billing data tracked for this account
 
     private enum CodingKeys: String, CodingKey {
         case accountId = "id"
-        case kind, provider, email, displayName, plan, rateLimitTier, addedAt, lastRefreshedAt, expiresAt, status
+        case kind, provider, email, displayName, plan, rateLimitTier, addedAt, lastRefreshedAt, expiresAt, status, billing
     }
 
     /// Effective auth-flavour tag. v2 entries arrive as `kind: "oauth"` with
@@ -392,6 +409,49 @@ struct VaultAccount: Codable, Identifiable, Hashable {
         if hours < 24 { return String(format: "%.0fh", hours) }
         return String(format: "%.0fd", hours / 24)
     }
+
+    /// Short label for the billing chip rendered next to the account
+    /// row. Returns nil when no billing data is tracked. Renders:
+    ///   active     · "next May 24 (6d)"
+    ///   will_not_renew · "won't renew" (no projection — period end unknown)
+    ///   canceled   · "canceled"
+    ///   active without nextBillingAt · "active"
+    var billingLabel: String? {
+        guard let b = billing else { return nil }
+        switch b.status {
+        case "canceled": return "canceled"
+        case "will_not_renew": return "won't renew"
+        case "active":
+            if let next = b.nextBillingAt, let days = b.daysUntilNextBill {
+                let when = days < 0 ? "\(-days)d ago" : "\(days)d"
+                // Trim the year for compactness in the menu bar — "May 24 (6d)"
+                let dateStr = String(next.dropFirst(5))   // "05-24"
+                return "next \(dateStr) (\(when))"
+            }
+            return "active"
+        default: return b.status
+        }
+    }
+
+    /// Color hint for the billing chip — yellow within 7d, red if overdue
+    /// or canceled, secondary otherwise. The caller maps these to SwiftUI
+    /// colors so the chip stays consistent with the rest of the row.
+    var billingSeverity: BillingSeverity {
+        guard let b = billing else { return .neutral }
+        if b.status == "canceled" { return .critical }
+        if b.status == "will_not_renew" { return .warning }
+        if let days = b.daysUntilNextBill {
+            if days < 0 { return .critical }
+            if days <= 7 { return .warning }
+        }
+        return .neutral
+    }
+}
+
+enum BillingSeverity {
+    case neutral    // active, > 7 days out — secondary color
+    case warning    // within 7 days OR will_not_renew — yellow
+    case critical   // overdue OR canceled — red
 }
 
 struct VaultListResponse: Codable {

@@ -5511,10 +5511,40 @@ program
         // The unified discriminated-union form. Enriched fields go on
         // top of the spec but never replace the typed core.
         const shape = buildAccountsListJson(selected);
+        // Load billing data once for the whole JSON build. SweechBar
+        // shells out to this command and reads `account.billing.*` to
+        // render the next-bill-day chip in the Vault tab — without
+        // joining here SweechBar would need a second shell-out per
+        // refresh. Best-effort: a missing/malformed billing.json
+        // yields a null billing field on every account.
+        const billingMap = (() => {
+          try {
+            const { readBillingFile, daysUntilNextBill, getEntry } = require('./billing') as typeof import('./billing');
+            const file = readBillingFile();
+            return (a: typeof shape.accounts[number]) => {
+              if (a.kind !== 'oauth' || !a.email) return null;
+              const entry = getEntry(file, a.provider, a.email);
+              if (!entry) return null;
+              return {
+                status: entry.status,
+                plan: entry.plan,
+                billingDay: entry.billingDay,
+                lastPaidAt: entry.lastPaidAt,
+                nextBillingAt: entry.nextBillingAt,
+                daysUntilNextBill: daysUntilNextBill(entry),
+                source: entry.source,
+                updatedAt: entry.updatedAt,
+              };
+            };
+          } catch {
+            return () => null;
+          }
+        })();
         const enrichedAccounts = shape.accounts.map(a => ({
           ...a,
           mountedWorkspaces: (wsByActive.get(a.id) ?? []).map(ws => ws.commandName),
           liveStatus: liveStatusOverride(a.id),
+          billing: billingMap(a),
         }));
         process.stdout.write(JSON.stringify({
           schemaVersion: shape.schemaVersion,
