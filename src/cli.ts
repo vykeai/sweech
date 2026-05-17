@@ -12,7 +12,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DEFAULT_DAEMON_PORT, envOrDefaultDaemonPort } from './constants';
 import { ConfigManager, resolveApiKey } from './config';
-import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider } from './providers';
+import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider, type CLIType } from './providers';
 import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
 import { logLaunch } from './launchLog';
@@ -1276,13 +1276,16 @@ program
 program
   .command('launch <command-name>')
   .alias('launch-profile')
-  .description('Launch a profile directly (no TUI). Flags: --yolo, --resume, --no-tmux')
+  .description('Launch a profile directly (no TUI). Flags: --yolo, --resume, --no-tmux, --budget')
   .option('-y, --yolo', 'Skip permission prompts (--dangerously-skip-permissions / equivalent)')
   .option('-r, --resume', 'Resume last session (--continue / equivalent)')
   .option('--no-tmux', 'Bypass tmux even if tmux is available')
   .option('--force', 'Skip model reachability check')
+  .option('--budget <usd>', 'Refuse to launch if the profile model exceeds this USD/call ceiling', parseFloat)
+  .option('--est-input <tokens>', 'Estimated input tokens for the budget projection (default 5000)', parseInt)
+  .option('--est-output <tokens>', 'Estimated output tokens for the budget projection (default 1500)', parseInt)
   .allowUnknownOption(true)
-  .action(async (commandName: string, opts: { yolo?: boolean; resume?: boolean; tmux?: boolean; force?: boolean }, cmd: any) => {
+  .action(async (commandName: string, opts: { yolo?: boolean; resume?: boolean; tmux?: boolean; force?: boolean; budget?: number; estInput?: number; estOutput?: number }, cmd: any) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     const aliasManager = new AliasManager();
@@ -1294,6 +1297,31 @@ program
     if (!profile && !cliConfig) {
       console.error(chalk.red(`Profile '${commandName}' not found`));
       process.exit(1);
+    }
+
+    // ── --budget guard: refuse to launch if the profile's model would
+    //    exceed the per-call USD ceiling. Same pricing source as
+    //    `sweech cost` and `routeWithinBudget`.
+    if (opts.budget !== undefined && Number.isFinite(opts.budget)) {
+      const { getModelPricing, estimateCostUsd } = require('./costs') as typeof import('./costs');
+      const { getProvider: providerLookup } = require('./providers') as typeof import('./providers');
+      const providerKey = profile?.provider ?? (cliConfig?.name === 'codex' ? 'openai' : 'anthropic');
+      const provider = providerLookup(providerKey);
+      const model = profile?.model ?? provider?.defaultModel ?? '';
+      const pricing = model ? getModelPricing(model) : null;
+      const estIn = opts.estInput ?? 5000;
+      const estOut = opts.estOutput ?? 1500;
+      if (!pricing) {
+        console.error(chalk.yellow(`WARN: model '${model}' has no pricing data — --budget cannot evaluate. Use --force to override.`));
+        if (!opts.force) process.exit(1);
+      } else {
+        const cost = estimateCostUsd(model, estIn, estOut);
+        if (cost > opts.budget) {
+          console.error(chalk.red(`Profile '${resolvedName}' would cost $${cost.toFixed(4)}/call (model ${model}), exceeds budget $${opts.budget.toFixed(4)}.`));
+          console.error(chalk.dim(`  Use 'sweech cost --budget ${opts.budget}' to list profiles that fit.`));
+          process.exit(1);
+        }
+      }
     }
 
     // Pre-launch reachability check (unless --force)
@@ -2069,6 +2097,188 @@ profileCmd
       if (opts.json) {
         process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
         console.error(msg);
+      } else {
+        console.error(chalk.red('Error:'), msg);
+      }
+      process.exit(1);
+    }
+  });
+
+// ── sweech profile audit ───────────────────────────────────────────────────
+// T-LU-008: flag dormant profiles + identity cross-bleed, propose prune.
+// Read-only by default. --prune walks each prunable finding interactively;
+// --prune --yes prunes everything without prompts (gated by confirmation
+// summary). Audit NEVER auto-deletes per CLAUDE.md safety rules.
+profileCmd
+  .command('audit')
+  .description('Audit profiles for dormancy + identity cross-bleed + orphan credentials')
+  .option('--json', 'Output machine-readable JSON')
+  .option('--dormancy-days <n>', 'Days of inactivity before a profile is flagged dormant', '30')
+  .option('--prune', 'Interactively remove profiles flagged with suggestion=prune')
+  .option('--yes', 'When combined with --prune, skip per-profile prompts')
+  .action(async (opts: { json?: boolean; dormancyDays?: string; prune?: boolean; yes?: boolean }) => {
+    try {
+      const { auditProfiles, prunableProfiles } = await import('./profileAudit');
+      const dormancyDays = opts.dormancyDays ? parseInt(opts.dormancyDays, 10) : 30;
+      if (Number.isNaN(dormancyDays) || dormancyDays < 0) {
+        console.error(chalk.red(`\nInvalid --dormancy-days: ${opts.dormancyDays}\n`));
+        process.exit(1);
+      }
+      const report = await auditProfiles({ dormancyDays });
+
+      // ── JSON output ───────────────────────────────────────────────
+      if (opts.json && !opts.prune) {
+        process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+        process.exit(report.summary.total_issues > 0 ? 1 : 0);
+      }
+
+      // ── Human-readable table ──────────────────────────────────────
+      if (!opts.prune) {
+        if (report.findings.length === 0) {
+          console.log(chalk.green(`\n✓ Audited ${report.scanned} profile(s). No issues found.\n`));
+          return;
+        }
+        console.log(chalk.bold(`\n  sweech profile audit · ${report.scanned} profile(s) scanned\n`));
+        for (const f of report.findings) {
+          const severityIcon = f.severity === 'critical'
+            ? chalk.red('●')
+            : f.severity === 'warn' ? chalk.yellow('●') : chalk.gray('●');
+          const sugg = f.suggestion ? chalk.dim(` [suggest: ${f.suggestion}]`) : '';
+          console.log(`  ${severityIcon} ${chalk.bold(f.profile)} ${chalk.dim(`(${f.cliType}/${f.provider})`)}  ${chalk.cyan(f.kind)}${sugg}`);
+          console.log(chalk.dim(`      ${f.detail}`));
+        }
+        console.log();
+        const { summary } = report;
+        const summaryParts = [
+          `${summary.dormant} dormant`,
+          `${summary.cross_bleed} cross-bleed`,
+          `${summary.orphan_credentials} orphan-cred`,
+          `${summary.missing_settings} missing-settings`,
+          `${summary.expired_token} expired-token`,
+        ];
+        console.log(chalk.dim(`  Summary: ${summaryParts.join(', ')} — ${summary.total_issues} issue(s), ${summary.prunable} prunable`));
+        if (summary.prunable > 0) {
+          console.log(chalk.dim(`  Run ${chalk.bold('sweech profile audit --prune')} to clean up.`));
+        }
+        console.log();
+        process.exit(summary.total_issues > 0 ? 1 : 0);
+      }
+
+      // ── --prune path ──────────────────────────────────────────────
+      const prunable = prunableProfiles(report);
+      if (prunable.length === 0) {
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: true, pruned: [], skipped: [], report }, null, 2) + '\n');
+        } else {
+          console.log(chalk.green(`\n✓ Nothing to prune. Audited ${report.scanned} profile(s).\n`));
+        }
+        return;
+      }
+
+      // Show the prune list BEFORE doing anything — per CLAUDE.md, the
+      // user must see what will be deleted before consenting. In --json
+      // mode the list goes to stderr so stdout stays machine-parseable.
+      const renderPruneList = (out: NodeJS.WriteStream): void => {
+        out.write(chalk.bold(`\n  Profiles flagged for prune (${prunable.length}):\n\n`));
+        for (const p of prunable) {
+          const reasons = p.reasons.map(r => r.kind).join(', ');
+          out.write(`  ${chalk.red('●')} ${chalk.bold(p.profile)} ${chalk.dim(`(${p.cliType}/${p.provider})`)}  ${chalk.cyan(reasons)}\n`);
+          for (const r of p.reasons) {
+            out.write(chalk.dim(`      ${r.detail}`) + '\n');
+          }
+        }
+        out.write('\n');
+      };
+      renderPruneList(opts.json ? process.stderr : process.stdout);
+
+      // Detect non-TTY: refuse to prune interactively without --yes.
+      const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+      if (!opts.yes && !isTTY) {
+        console.error(chalk.red('\n  Refusing to prune in non-interactive shell without --yes.\n'));
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: false, error: 'non-tty requires --yes', report }, null, 2) + '\n');
+        }
+        process.exit(1);
+      }
+
+      // --yes: gate behind a single confirmation summary.
+      const pruned: Array<{ profile: string; removedDependents: string[] }> = [];
+      const skipped: string[] = [];
+      const errors: Array<{ profile: string; error: string }> = [];
+
+      if (opts.yes) {
+        if (isTTY && !opts.json) {
+          const inquirer = (await import('inquirer')).default;
+          const { confirmAll } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'confirmAll',
+              message: `Delete ${prunable.length} profile(s) listed above? This is irreversible.`,
+              default: false,
+            },
+          ]);
+          if (!confirmAll) {
+            console.log(chalk.yellow('\n  Aborted. No profiles removed.\n'));
+            return;
+          }
+        }
+        for (const p of prunable) {
+          try {
+            const result = removeManagedProfile(p.profile, { forceDependents: true });
+            pruned.push({ profile: p.profile, removedDependents: result.removedDependents });
+          } catch (e: unknown) {
+            errors.push({
+              profile: p.profile,
+              error: scrubSecrets(e instanceof Error ? e.message : String(e)),
+            });
+          }
+        }
+      } else {
+        // Interactive per-profile prompt.
+        const inquirer = (await import('inquirer')).default;
+        for (const p of prunable) {
+          const reasons = p.reasons.map(r => r.kind).join(', ');
+          const { confirm } = await inquirer.prompt([
+            {
+              type: 'confirm',
+              name: 'confirm',
+              message: `Remove ${chalk.bold(p.profile)} (${reasons})?`,
+              default: false,
+            },
+          ]);
+          if (!confirm) {
+            skipped.push(p.profile);
+            continue;
+          }
+          try {
+            const result = removeManagedProfile(p.profile, { forceDependents: true });
+            pruned.push({ profile: p.profile, removedDependents: result.removedDependents });
+            console.log(chalk.green(`  ✓ Removed ${p.profile}`));
+          } catch (e: unknown) {
+            const msg = scrubSecrets(e instanceof Error ? e.message : String(e));
+            errors.push({ profile: p.profile, error: msg });
+            console.error(chalk.red(`  ✗ Failed to remove ${p.profile}: ${msg}`));
+          }
+        }
+      }
+
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({
+          ok: errors.length === 0,
+          pruned,
+          skipped,
+          errors,
+          report,
+        }, null, 2) + '\n');
+      } else {
+        console.log();
+        console.log(chalk.dim(`  Pruned: ${pruned.length}, Skipped: ${skipped.length}, Errors: ${errors.length}\n`));
+      }
+      if (errors.length > 0) process.exit(1);
+    } catch (error: unknown) {
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
       } else {
         console.error(chalk.red('Error:'), msg);
       }
@@ -4154,6 +4364,90 @@ program
     console.log();
   });
 
+// ── sweech cost ────────────────────────────────────────────────────────────
+// T-LU-007: $/Min · $/Mout · 7d spend table per profile + --budget filter.
+// Sourced from src/costs.ts (pricing table) and src/costCommand.ts (builders).
+program
+  .command('cost')
+  .description('Show USD/million tokens per profile + last-7d spend')
+  .option('--json', 'Machine-readable JSON output (stable shape)')
+  .option('--budget <usd>', 'Filter to profiles whose est cost per call fits this USD ceiling', parseFloat)
+  .option('--profile <name>', 'Detail mode — list every model the profile can use with cost projection')
+  .option('--est-input <tokens>', 'Estimated input tokens for cost projection (default 5000)', parseInt)
+  .option('--est-output <tokens>', 'Estimated output tokens for cost projection (default 1500)', parseInt)
+  .option('--cli <type>', 'Restrict to a specific CLI: claude | codex | kimi')
+  .action(async (opts: { json?: boolean; budget?: number; profile?: string; estInput?: number; estOutput?: number; cli?: string }) => {
+    const { buildCostTable, buildProfileDetail, formatPerMillion, formatSpend } = require('./costCommand') as typeof import('./costCommand');
+
+    // ── Detail mode: --profile <name> ──────────────────────────────
+    if (opts.profile) {
+      const detail = buildProfileDetail(opts.profile, opts.estInput ?? 5000, opts.estOutput ?? 1500);
+      if (!detail) {
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ error: 'profile not found', profile: opts.profile }) + '\n');
+        } else {
+          console.error(chalk.red(`\n  Profile '${opts.profile}' not found.\n`));
+        }
+        process.exit(1);
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(detail, null, 2) + '\n');
+        return;
+      }
+      console.log(chalk.bold(`\n  sweech · cost · ${detail.profile}\n`));
+      console.log(`  cli       : ${detail.cliType}`);
+      console.log(`  provider  : ${detail.provider}`);
+      console.log(`  default   : ${detail.defaultModel || chalk.dim('(none)')}`);
+      console.log(`  7d spend  : ${formatSpend(detail.spent7dUsd)}`);
+      console.log(`  est call  : ${opts.estInput ?? 5000}in / ${opts.estOutput ?? 1500}out`);
+      console.log();
+      const headerRow = `  ${'Model'.padEnd(36)}  ${'$/Min'.padStart(8)}  ${'$/Mout'.padStart(8)}  ${'$/call'.padStart(10)}`;
+      console.log(chalk.dim(headerRow));
+      console.log(chalk.dim(`  ${'─'.repeat(36)}  ${'─'.repeat(8)}  ${'─'.repeat(8)}  ${'─'.repeat(10)}`));
+      for (const m of detail.models) {
+        const line = `  ${m.model.padEnd(36)}  ${formatPerMillion(m.inputUsdPerMillion).padStart(8)}  ${formatPerMillion(m.outputUsdPerMillion).padStart(8)}  ${(m.estCostPerCallUsd !== null ? '$' + m.estCostPerCallUsd.toFixed(4) : '—').padStart(10)}`;
+        console.log(m.model === detail.defaultModel ? chalk.bold(line) : line);
+      }
+      console.log();
+      return;
+    }
+
+    // ── Table mode (default) ──────────────────────────────────────
+    const table = await buildCostTable({
+      budgetUsd: opts.budget,
+      estInputTokens: opts.estInput,
+      estOutputTokens: opts.estOutput,
+      cliType: opts.cli,
+    });
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(table, null, 2) + '\n');
+      return;
+    }
+
+    console.log(chalk.bold('\n  sweech · cost\n'));
+    if (opts.budget !== undefined) {
+      console.log(`  budget   : ${chalk.cyan('$' + opts.budget.toFixed(4))} per call`);
+    }
+    console.log(`  est call : ${table.estInputTokens}in / ${table.estOutputTokens}out`);
+    console.log();
+    const header = `  ${'Profile'.padEnd(18)}  ${'CLI'.padEnd(6)}  ${'Provider'.padEnd(14)}  ${'Model'.padEnd(28)}  ${'$/Min'.padStart(8)}  ${'$/Mout'.padStart(8)}  ${'7d spend'.padStart(10)}`;
+    console.log(chalk.dim(header));
+    console.log(chalk.dim(`  ${'─'.repeat(18)}  ${'─'.repeat(6)}  ${'─'.repeat(14)}  ${'─'.repeat(28)}  ${'─'.repeat(8)}  ${'─'.repeat(8)}  ${'─'.repeat(10)}`));
+    if (table.rows.length === 0) {
+      console.log(chalk.dim('  (no profiles match the current filter)'));
+    } else {
+      for (const r of table.rows) {
+        const line = `  ${r.profile.padEnd(18)}  ${r.cliType.padEnd(6)}  ${r.provider.padEnd(14)}  ${(r.model || '—').padEnd(28)}  ${formatPerMillion(r.inputUsdPerMillion).padStart(8)}  ${formatPerMillion(r.outputUsdPerMillion).padStart(8)}  ${formatSpend(r.spent7dUsd).padStart(10)}`;
+        console.log(line);
+      }
+    }
+    console.log();
+    console.log(chalk.dim('  Tip: sweech cost --profile <name>  → per-model breakdown for one profile'));
+    console.log(chalk.dim('  Tip: sweech cost --budget 0.05     → only profiles that fit under 5¢/call'));
+    console.log();
+  });
+
 // ── sweech auto ────────────────────────────────────────────────────────────
 // Pick the highest-scoring account across all CLIs (or filter by --cli) and
 // either print `sweech use X` or spawn the CLI directly with --exec.
@@ -4165,9 +4459,70 @@ program
   .option('--cli <type>', 'Restrict to a specific CLI: claude | codex | kimi')
   .option('--json', 'Machine-readable output (for scripts)')
   .option('--exec', 'Spawn the CLI directly instead of printing the command')
-  .action(async (opts: { cli?: string; json?: boolean; exec?: boolean }) => {
+  .option('--budget <usd>', 'Reject candidates whose estimated cost per call exceeds this USD ceiling', parseFloat)
+  .option('--est-input <tokens>', 'Estimated input tokens for the budget projection (default 5000)', parseInt)
+  .option('--est-output <tokens>', 'Estimated output tokens for the budget projection (default 1500)', parseInt)
+  .action(async (opts: { cli?: string; json?: boolean; exec?: boolean; budget?: number; estInput?: number; estOutput?: number }) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
+
+    // ── --budget path: delegate to routeWithinBudget so the dollar
+    //    ceiling is the source of truth for the pick. Without --budget
+    //    the original quota-based scoring stays as-is.
+    if (opts.budget !== undefined && Number.isFinite(opts.budget)) {
+      const cliType = (opts.cli ?? 'claude') as CLIType;
+      const { routeWithinBudget } = require('./budgetRouter') as typeof import('./budgetRouter');
+      const result = await routeWithinBudget({
+        cliType,
+        maxCostPerCallUsd: opts.budget,
+        estInputTokens: opts.estInput,
+        estOutputTokens: opts.estOutput,
+      });
+      if (!result) {
+        const message = `no profile fits budget $${opts.budget.toFixed(4)}/call`;
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ error: message, budgetUsd: opts.budget }) + '\n');
+        } else {
+          console.error(chalk.red(`\n  ${message}\n`));
+        }
+        process.exit(1);
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({
+          profile: result.account,
+          cliType: result.cliType,
+          model: result.model,
+          provider: result.provider,
+          estimatedCostUsd: result.estimatedCostUsd,
+          budgetUsd: opts.budget,
+          score: result.score,
+          command: `sweech use ${result.account}`,
+        }, null, 2) + '\n');
+        return;
+      }
+      const dir = path.join(os.homedir(), `.${result.account}`);
+      if (opts.exec) {
+        const cli = getCLI(result.cliType);
+        if (!cli) {
+          console.error(chalk.red(`Unknown cliType '${result.cliType}' — cannot --exec`));
+          process.exit(1);
+        }
+        const { spawn } = require('child_process');
+        const settingsEnv = readSettingsEnv(dir);
+        const env = buildAutoExecEnv(cli, dir, process.env, settingsEnv);
+        const child = spawn(cli.command, [], { env, stdio: 'inherit' });
+        child.on('exit', (code: number) => process.exit(code ?? 0));
+        return;
+      }
+      console.log(chalk.bold('\n  sweech · auto (budget-aware)\n'));
+      console.log(`  profile  : ${chalk.bold(result.account)}`);
+      console.log(`  cli      : ${result.cliType}`);
+      console.log(`  model    : ${result.model}`);
+      console.log(`  cost     : ${chalk.green('$' + result.estimatedCostUsd.toFixed(4))} (budget $${opts.budget.toFixed(4)})`);
+      console.log(`  launch   : ${chalk.cyan('sweech use ' + result.account)}\n`);
+      return;
+    }
+
     const recommendation = await suggestBestAccount(opts.cli, profiles);
 
     if (!recommendation) {
