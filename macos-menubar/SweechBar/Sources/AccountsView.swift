@@ -122,8 +122,28 @@ struct AccountsView: View {
         return result
     }
 
+    /// Build the per-section list for external providers. Rule: a provider
+    /// with 2+ workspaces earns its own section; singletons get folded into
+    /// one "Others" section so the popover stays scannable.
+    private var externalSections: [GroupedColumnSection<SweechAccount>] {
+        var sections: [GroupedColumnSection<SweechAccount>] = []
+        var singletons: [SweechAccount] = []
+        for name in externalGroupNames {
+            let items = sortedForGroup(name)
+            if items.count >= 2 {
+                sections.append(GroupedColumnSection(title: name, items: items))
+            } else {
+                singletons.append(contentsOf: items)
+            }
+        }
+        if !singletons.isEmpty {
+            sections.append(GroupedColumnSection(title: "Others", items: singletons))
+        }
+        return sections
+    }
+
     private var hasMultipleGroups: Bool {
-        let groupCount = (rawClaude.isEmpty ? 0 : 1) + (rawCodex.isEmpty ? 0 : 1) + externalGroupNames.count
+        let groupCount = (rawClaude.isEmpty ? 0 : 1) + (rawCodex.isEmpty ? 0 : 1) + externalSections.count
         return groupCount > 1
     }
 
@@ -277,9 +297,7 @@ struct AccountsView: View {
         GroupedColumnLayout.buildColumns(
             claude: sortedClaude,
             codex: sortedCodex,
-            externalGroups: externalGroupNames.map { name in
-                GroupedColumnSection(title: name, items: sortedForGroup(name))
-            }
+            externalGroups: externalSections
         )
         .map { column in
             column.map { (title: $0.title, accounts: $0.items) }
