@@ -82,7 +82,7 @@ struct VaultView: View {
             tabButton(
                 id: "accounts",
                 icon: "person.crop.circle.fill",
-                title: "Accounts",
+                title: "Providers",
                 count: service.vaultAccounts.count
             )
         }
@@ -317,17 +317,17 @@ private struct AccountsTab: View {
             // taking a full row.
             let external = externalTiles()
             if !external.isEmpty {
-                providerSection(key: "__providers__", accounts: external, header: "Providers")
+                providerSection(key: "__providers__", accounts: external, header: "Other")
             }
         }
     }
 
     private func oauthGroups() -> [(String, [VaultAccount])] {
         var groups: [(String, [VaultAccount])] = []
-        let anthropic = service.vaultAccounts.filter { $0.kind == "anthropic" }
+        let anthropic = service.vaultAccounts.filter { $0.effectiveKind == "anthropic" }
             .sorted { $0.email < $1.email }
         if !anthropic.isEmpty { groups.append(("anthropic", anthropic)) }
-        let openai = service.vaultAccounts.filter { $0.kind == "openai" }
+        let openai = service.vaultAccounts.filter { $0.effectiveKind == "openai" }
             .sorted { $0.email < $1.email }
         if !openai.isEmpty { groups.append(("openai", openai)) }
         return groups
