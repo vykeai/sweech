@@ -46,14 +46,19 @@ export class MacOSKeychainStore implements CredentialStore {
   }
 
   async set(service: string, account: string, password: string): Promise<void> {
-    try {
-      execSync(
-        `security add-generic-password -U -s ${escapeShellArg(service)} -a ${escapeShellArg(account)} -w ${escapeShellArg(password)}`,
-        { stdio: 'ignore' },
-      )
-    } catch {
-      // add-generic-password can fail if the keychain is locked; callers
-      // should handle the rejected promise.
+    // Security review (HIGH): the previous shell-based exec put the
+    // password in argv where any concurrent `ps auxe` / EDR / audit
+    // tool could harvest it. spawnSync with the password on stdin
+    // keeps the secret bytes out of the process listing entirely.
+    // The `-w` flag with no inline argument makes `security` read the
+    // password from stdin (followed by a newline).
+    const { spawnSync } = require('node:child_process') as typeof import('node:child_process')
+    const r = spawnSync(
+      'security',
+      ['add-generic-password', '-U', '-s', service, '-a', account, '-w'],
+      { input: password + '\n', stdio: ['pipe', 'ignore', 'pipe'] },
+    )
+    if (r.status !== 0) {
       throw new Error(`Failed to write credential for service="${service}" account="${account}" to macOS Keychain`)
     }
   }

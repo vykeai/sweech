@@ -139,6 +139,9 @@ export function validateApiKeyProvider(providerId: string): string | null {
   if (p.kind === 'local') {
     return `provider "${providerId}" is local — no api key required`
   }
+  if (p.kind === 'subscription') {
+    return `provider "${providerId}" uses OAuth — use \`sweech accounts import\` or \`sweech accounts add --kind anthropic|openai\` instead`
+  }
   return null
 }
 
@@ -194,25 +197,30 @@ export async function addApiKeyAccount(
     }
   }
 
-  const existing = listAccountsV2().find(a => a.kind === 'apikey' && a.id === id)
-  const account: ApiKeyAccount = {
-    kind: 'apikey',
-    provider: opts.provider,
-    id,
-    label: opts.label?.trim() || undefined,
-    addedAt: existing?.addedAt ?? new Date().toISOString(),
-    keyRef: {
-      service: KEYCHAIN_SERVICE,
-      account: id,
-    },
-  }
+  // Code-review (MUST-FIX): single read-then-write inside the vault
+  // lock so two concurrent `sweech accounts add` calls can't produce
+  // duplicate rows / lose entries via the previous unlocked
+  // listAccountsV2 → ...mutate... → saveAccountsV2 dance.
+  const { withVaultLockForExternalCallers } = require('./vault') as typeof import('./vault')
+  const result = withVaultLockForExternalCallers(() => {
+    const all = listAccountsV2()
+    const existing = all.find(a => a.kind === 'apikey' && a.id === id)
+    const account: ApiKeyAccount = {
+      kind: 'apikey',
+      provider: opts.provider,
+      id,
+      label: opts.label?.trim() || undefined,
+      addedAt: existing?.addedAt ?? new Date().toISOString(),
+      keyRef: {
+        service: KEYCHAIN_SERVICE,
+        account: id,
+      },
+    }
+    const others = all.filter(a => !(a.kind === 'apikey' && a.id === id))
+    const next: Account[] = [...others, account]
+    saveAccountsV2(next)
+    return { account, alreadyExisted: !!existing }
+  })
 
-  // Merge into the v2 vault, replacing any pre-existing row with the
-  // same id (key rotation in place when label is stable).
-  const all = listAccountsV2()
-  const others = all.filter(a => !(a.kind === 'apikey' && a.id === id))
-  const next: Account[] = [...others, account]
-  saveAccountsV2(next)
-
-  return { ok: true, account, alreadyExisted: !!existing }
+  return { ok: true, account: result.account, alreadyExisted: result.alreadyExisted }
 }

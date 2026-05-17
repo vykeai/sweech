@@ -66,6 +66,10 @@ export function logAudit(entry: AuditEntry): void {
 
   const line = JSON.stringify(record) + '\n';
   fs.appendFileSync(AUDIT_FILE, line, 'utf-8');
+  // Security review (MEDIUM): default umask leaves audit.jsonl
+  // world-readable. The file may accumulate vault mutation history;
+  // restrict to owner-only.
+  try { fs.chmodSync(AUDIT_FILE, 0o600); } catch {}
 }
 
 /**
