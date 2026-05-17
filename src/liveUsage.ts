@@ -18,6 +18,13 @@ import { isMacOS } from './platform'
 import { readCredential, computeKeychainServiceName } from './credentialStore'
 import { getAnthropicClientId } from './anthropicAuth'
 import { atomicWriteFileSync } from './atomicWrite'
+import {
+  parseKimiRateLimitHeaders,
+  parseQwenRateLimitHeaders,
+  parseDeepSeekRateLimitHeaders,
+  parseZaiRateLimitHeaders,
+  PROVIDER_PROBE_URLS,
+} from './providerRateLimitParsers'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,6 +64,13 @@ export interface LiveRateLimitData {
 
   /** Representative claim from anthropic-ratelimit-unified-representative-claim header. */
   representativeClaim?: string
+
+  /**
+   * Provider that produced this snapshot, when known. Optional for backwards
+   * compatibility — cached entries written before this field existed simply
+   * lack it. Values: 'anthropic' | 'kimi' | 'qwen' | 'deepseek' | 'zai' | 'codex'.
+   */
+  provider?: string
 }
 
 // ── Bucket accessors ──────────────────────────────────────────────────────────
@@ -424,6 +438,7 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
         status: isOrgDisabled ? 'org_disabled' : (res.status === 401 ? 'unauthorized' : 'forbidden'),
         tokenStatus: res.status === 401 ? 'expired' : 'valid',
         forbiddenReason: errMsg || undefined,
+        provider: 'anthropic',
       }
     }
 
@@ -455,11 +470,80 @@ async function fetchRateLimitHeaders(accessToken: string): Promise<LiveRateLimit
       status: get('anthropic-ratelimit-unified-status') ?? undefined,
       capturedAt: Date.now(),
       representativeClaim: get('anthropic-ratelimit-unified-representative-claim') ?? undefined,
+      provider: 'anthropic',
     }
   } catch {
     return null
   }
 }
+
+// ── OpenAI-compat provider fetchers ──────────────────────────────────────────
+
+/**
+ * Generic OpenAI-compat fetcher. Issues a GET against the provider's cheapest
+ * probe endpoint (`/v1/models` or equivalent) using the supplied API key,
+ * then hands the response to the supplied parser.
+ *
+ * Returns `null` on transport failure (DNS, timeout, etc.) so callers can
+ * fall through to the stale cache, mirroring `fetchRateLimitHeaders`.
+ */
+async function fetchOpenAICompatProbe(
+  url: string,
+  apiKey: string,
+  parser: (h: Headers, status: number, errMsg?: string) => LiveRateLimitData,
+): Promise<LiveRateLimitData | null> {
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Accept': 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    })
+
+    let errMsg: string | undefined
+    if (!res.ok && (res.status === 401 || res.status === 403)) {
+      try {
+        const body = await res.json() as any
+        errMsg = body?.error?.message ?? body?.message ?? undefined
+      } catch { /* body parse failure is fine */ }
+    }
+
+    return parser(res.headers, res.status, errMsg)
+  } catch {
+    return null
+  }
+}
+
+/** Probe Moonshot Kimi for rate-limit headers. */
+export async function fetchKimiRateLimit(apiKey: string): Promise<LiveRateLimitData | null> {
+  return fetchOpenAICompatProbe(PROVIDER_PROBE_URLS.kimi, apiKey, parseKimiRateLimitHeaders)
+}
+
+/** Probe Alibaba DashScope (Qwen) for rate-limit headers. */
+export async function fetchQwenRateLimit(apiKey: string): Promise<LiveRateLimitData | null> {
+  return fetchOpenAICompatProbe(PROVIDER_PROBE_URLS.qwen, apiKey, parseQwenRateLimitHeaders)
+}
+
+/** Probe DeepSeek for rate-limit headers. */
+export async function fetchDeepSeekRateLimit(apiKey: string): Promise<LiveRateLimitData | null> {
+  return fetchOpenAICompatProbe(PROVIDER_PROBE_URLS.deepseek, apiKey, parseDeepSeekRateLimitHeaders)
+}
+
+/** Probe Z.ai (Zhipu GLM) for rate-limit headers. */
+export async function fetchZaiRateLimit(apiKey: string): Promise<LiveRateLimitData | null> {
+  return fetchOpenAICompatProbe(PROVIDER_PROBE_URLS.zai, apiKey, parseZaiRateLimitHeaders)
+}
+
+// Re-export parsers for callers that already have headers in hand.
+export {
+  parseKimiRateLimitHeaders,
+  parseQwenRateLimitHeaders,
+  parseDeepSeekRateLimitHeaders,
+  parseZaiRateLimitHeaders,
+  parseProviderRateLimitHeaders,
+} from './providerRateLimitParsers'
 
 // ── Codex app-server rate limits ──────────────────────────────────────────────
 
@@ -539,6 +623,7 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
               status: mainStatus,
               planType: mainPlanType,
               capturedAt: Date.now(),
+              provider: 'codex',
             })
           }
         } catch {}
