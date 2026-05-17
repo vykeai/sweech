@@ -76,7 +76,7 @@ Common workflows:
   sweech list                  every workspace + status
   sweech use <workspace>       spawn the CLI for that workspace
   sweech check <workspace>     reachability probe (model + latency)
-  sweech accounts list         OAuth identities in the vault
+  sweech accounts list         every account in the vault (OAuth + API key + Local)
   sweech assign <ws> [email]   mount a vault account into a workspace
   sweech providers quota       third-party balance / rate-limit table
   sweech code-review           pick the best codex profile for review work
@@ -4214,22 +4214,45 @@ program
 
 program
   .command('accounts [action]')
-  .description('Manage credential vault (list, import, remove)')
-  .option('--kind <kind>', 'Filter by account kind: anthropic, openai')
-  .option('--email <email>', 'Target a specific account by email')
+  .description('Manage credential vault (list, import, add, remove, refresh)')
+  .option('--kind <kind>', 'Filter / select kind. list: oauth|apikey|local|all (default all). add: apikey|anthropic|openai. remove: anthropic|openai (legacy).')
+  .option('--provider <name>', 'Filter (list) or target (add) a provider id (e.g. kimi, dashscope, glm)')
+  .option('--email <email>', 'Target a specific account by email (remove)')
+  .option('--key <source>', 'API key source for `add --kind apikey`: an env-var name (e.g. KIMI_API_KEY), `-` to read stdin, or omit for an interactive prompt')
+  .option('--label <label>', 'Human label for the new apikey account (optional)')
   .option('--json', 'Machine-readable output')
-  .action(async (action: string | undefined, opts: { kind?: string; email?: string; json?: boolean }) => {
-    const { listAccounts, findAccountByEmail, removeAccount, getAccount, AccountKind } = require('./vault');
+  .action(async (action: string | undefined, opts: { kind?: string; provider?: string; email?: string; key?: string; label?: string; json?: boolean }) => {
+    const { listAccounts, findAccountByEmail, removeAccount, listAccountsV2 } = require('./vault') as typeof import('./vault');
     const { importWorkspaces, discoverWorkspaces } = require('./vaultImport');
     const act = action || 'list';
 
     if (act === 'list') {
-      // Mirrors SweechBar's Accounts tab: Anthropic + OpenAI sections
-      // from the vault, plus a Providers section for API-key vendors
-      // (synthetic one tile per provider derived from the workspace
-      // config + provider quota cache).
-      const filterKind = opts.kind as 'anthropic' | 'openai' | undefined;
-      const accounts = listAccounts(filterKind);
+      // Wave-6: the vault now contains OAuth + API-key + local accounts.
+      // Default surface shows every kind; --kind/--provider filter the
+      // unified discriminated union from `listAccountsV2()`.
+      //
+      // The legacy synthetic "Providers" tiles (API-key tiles built by
+      // walking the workspace list) remain so users with a fresh vault
+      // — e.g. before the v1→v2 migration writes a row — still see
+      // their workspace-mounted keys. After migration both the vault
+      // rows and the legacy tiles describe the same provider; the
+      // renderer de-duplicates by provider id below.
+      const {
+        filterAccountsForList,
+        sortAccountsForList,
+        normalizeKindFilter,
+        normalizeProviderFilter,
+        buildAccountsListJson,
+      } = require('./accountsList') as typeof import('./accountsList');
+
+      const kindFilter = normalizeKindFilter(opts.kind);
+      const providerFilter = normalizeProviderFilter(opts.provider);
+
+      const allAccountsV2 = listAccountsV2();
+      const selected = sortAccountsForList(
+        filterAccountsForList(allAccountsV2, { kind: kindFilter, provider: providerFilter }),
+      );
+
       const { effectiveProvider } = require('./providers');
       const { getCachedQuota } = require('./providerQuotas');
       const config = new ConfigManager();
@@ -4260,7 +4283,10 @@ program
         return undefined;
       };
 
-      // Synthetic provider tiles for the Providers section.
+      // Synthetic provider tiles — only emit for providers that don't
+      // already have a vault row in `selected`. After full migration
+      // every workspace has a row, so this set becomes empty.
+      const providersInVault = new Set(selected.map(a => a.provider));
       const seenProviders = new Set<string>();
       const providerTiles: Array<{ key: string; label: string; workspaces: string[]; quota: any }> = [];
       const providerLabels: Record<string, string> = {
@@ -4272,51 +4298,87 @@ program
         deepseek: 'DeepSeek', qwen: 'Qwen', 'local-proxy': 'Local Proxy',
         'local-ollama': 'Ollama (Local)',
       };
-      for (const p of profiles) {
-        const eff = effectiveProvider(p.provider, p.baseUrl);
-        if (!eff || eff === 'anthropic' || eff === 'openai') continue;
-        if (seenProviders.has(eff)) {
-          providerTiles.find(t => t.key === eff)!.workspaces.push(p.commandName);
-          continue;
+      // Provider-tile filter parity with the new --provider flag.
+      const showProviderTile = (id: string): boolean => (
+        !providerFilter || providerFilter === id
+      );
+      // Provider tiles are API-key-shaped, so hide them when the user
+      // asks for --kind oauth or --kind local only.
+      const showProviderTiles = kindFilter === 'all' || kindFilter === 'apikey';
+      if (showProviderTiles) {
+        for (const p of profiles) {
+          const eff = effectiveProvider(p.provider, p.baseUrl);
+          if (!eff || eff === 'anthropic' || eff === 'openai') continue;
+          if (!showProviderTile(eff)) continue;
+          if (providersInVault.has(eff)) continue; // vault row covers this
+          if (seenProviders.has(eff)) {
+            providerTiles.find(t => t.key === eff)!.workspaces.push(p.commandName);
+            continue;
+          }
+          seenProviders.add(eff);
+          providerTiles.push({
+            key: eff,
+            label: providerLabels[eff] ?? eff,
+            workspaces: [p.commandName],
+            quota: getCachedQuota(eff),
+          });
         }
-        seenProviders.add(eff);
-        providerTiles.push({
-          key: eff,
-          label: providerLabels[eff] ?? eff,
-          workspaces: [p.commandName],
-          quota: getCachedQuota(eff),
-        });
       }
 
       if (opts.json) {
-        // Enrich vault accounts with mountedWorkspaces + liveStatus for
-        // machine consumers (parity with SweechBar's JSON shape).
-        const enrichedAccounts = accounts.map((a: any) => ({
+        // Wave-6 JSON shape: { schemaVersion: 1, accounts: Account[] }.
+        // The unified discriminated-union form. Enriched fields go on
+        // top of the spec but never replace the typed core.
+        const shape = buildAccountsListJson(selected);
+        const enrichedAccounts = shape.accounts.map(a => ({
           ...a,
           mountedWorkspaces: (wsByActive.get(a.id) ?? []).map(ws => ws.commandName),
           liveStatus: liveStatusOverride(a.id),
         }));
-        process.stdout.write(JSON.stringify({ accounts: enrichedAccounts, providers: providerTiles }, null, 2) + '\n');
+        process.stdout.write(JSON.stringify({
+          schemaVersion: shape.schemaVersion,
+          accounts: enrichedAccounts,
+          providers: providerTiles,
+          filters: {
+            kind: kindFilter,
+            provider: providerFilter ?? null,
+          },
+        }, null, 2) + '\n');
         return;
       }
 
-      if (accounts.length === 0 && providerTiles.length === 0) {
-        console.log(chalk.dim('\n  No accounts in vault. Run: sweech accounts import\n'));
+      if (selected.length === 0 && providerTiles.length === 0) {
+        const filterDesc = (kindFilter !== 'all' || providerFilter)
+          ? chalk.dim(`  No accounts match filter (kind=${kindFilter}${providerFilter ? `, provider=${providerFilter}` : ''}).\n`)
+          : chalk.dim('\n  No accounts in vault. Run: sweech accounts import\n');
+        console.log(filterDesc);
         return;
       }
 
       console.log(chalk.bold('\n  sweech · accounts\n'));
+      if (kindFilter !== 'all' || providerFilter) {
+        const bits: string[] = [];
+        if (kindFilter !== 'all') bits.push(`kind=${kindFilter}`);
+        if (providerFilter) bits.push(`provider=${providerFilter}`);
+        console.log(chalk.dim(`  filter: ${bits.join(' · ')}\n`));
+      }
 
-      const byKind: Record<string, any[]> = {};
-      for (const a of accounts) (byKind[a.kind] ||= []).push(a);
-      const kindOrder = ['anthropic', 'openai', ...Object.keys(byKind).filter(k => k !== 'anthropic' && k !== 'openai')];
+      // Render OAuth section (split by anthropic/openai for parity
+      // with the pre-wave-6 layout).
+      const oauthAccounts = selected.filter(a => a.kind === 'oauth') as Array<typeof selected[number] & { kind: 'oauth' }>;
+      const apikeyAccounts = selected.filter(a => a.kind === 'apikey') as Array<typeof selected[number] & { kind: 'apikey' }>;
+      const localAccounts  = selected.filter(a => a.kind === 'none')   as Array<typeof selected[number] & { kind: 'none' }>;
 
-      for (const kind of kindOrder) {
-        const list = byKind[kind];
+      const byOauthProvider: Record<string, typeof oauthAccounts> = {};
+      for (const a of oauthAccounts) (byOauthProvider[a.provider] ||= []).push(a);
+
+      const oauthOrder = ['anthropic', 'openai'];
+      for (const provId of oauthOrder) {
+        const list = byOauthProvider[provId];
         if (!list || list.length === 0) continue;
-        const header = kind === 'anthropic' ? 'Anthropic' : kind === 'openai' ? 'OpenAI' : kind;
-        console.log(chalk.bold.cyan(`  ── ${header} (${list.length}) ──`));
-        for (const a of list.sort((x: any, y: any) => x.email.localeCompare(y.email))) {
+        const header = provId === 'anthropic' ? 'Anthropic' : 'OpenAI';
+        console.log(chalk.bold.cyan(`  ── ${header} ${chalk.dim('(OAuth subscription)')} (${list.length}) ──`));
+        for (const a of list.sort((x, y) => x.email.localeCompare(y.email))) {
           const liveOverride = liveStatusOverride(a.id);
           const planStr = liveOverride
             ? chalk.red(` [${liveOverride}]`)
@@ -4339,8 +4401,48 @@ program
         console.log();
       }
 
+      if (apikeyAccounts.length > 0) {
+        console.log(chalk.bold.cyan(`  ── API keys (${apikeyAccounts.length}) ──`));
+        const byProv: Record<string, typeof apikeyAccounts> = {};
+        for (const a of apikeyAccounts) (byProv[a.provider] ||= []).push(a);
+        const provIds = Object.keys(byProv).sort();
+        for (const provId of provIds) {
+          const list = byProv[provId];
+          const label = providerLabels[provId] ?? provId;
+          for (const a of list.sort((x, y) => (x.label ?? x.id).localeCompare(y.label ?? y.id))) {
+            const mountedWs = wsByActive.get(a.id) ?? [];
+            const mountedStr = mountedWs.length > 0
+              ? chalk.dim(`  📦 ${mountedWs.map(w => w.commandName).join(', ')}`)
+              : chalk.dim('  📦 not in any workspace');
+            const labelStr = a.label ? chalk.bold(a.label) : chalk.bold(a.id);
+            console.log(`  ${labelStr} ${chalk.cyan(`[${label}]`)} ${chalk.dim(`(API key · id=${a.id})`)}${mountedStr}`);
+          }
+        }
+        console.log();
+      }
+
+      if (localAccounts.length > 0) {
+        console.log(chalk.bold.cyan(`  ── Local endpoints (${localAccounts.length}) ──`));
+        const byProv: Record<string, typeof localAccounts> = {};
+        for (const a of localAccounts) (byProv[a.provider] ||= []).push(a);
+        const provIds = Object.keys(byProv).sort();
+        for (const provId of provIds) {
+          const list = byProv[provId];
+          const label = providerLabels[provId] ?? provId;
+          for (const a of list.sort((x, y) => (x.label ?? x.id).localeCompare(y.label ?? y.id))) {
+            const mountedWs = wsByActive.get(a.id) ?? [];
+            const mountedStr = mountedWs.length > 0
+              ? chalk.dim(`  📦 ${mountedWs.map(w => w.commandName).join(', ')}`)
+              : chalk.dim('  📦 not in any workspace');
+            const labelStr = a.label ? chalk.bold(a.label) : chalk.bold(a.id);
+            console.log(`  ${labelStr} ${chalk.green(`[${label}]`)} ${chalk.dim('(Local · no auth)')}${mountedStr}`);
+          }
+        }
+        console.log();
+      }
+
       if (providerTiles.length > 0) {
-        console.log(chalk.bold.cyan(`  ── Providers (${providerTiles.length}) ──`));
+        console.log(chalk.bold.cyan(`  ── Providers ${chalk.dim('(unvaulted)')} (${providerTiles.length}) ──`));
         for (const tile of providerTiles.sort((a, b) => a.label.localeCompare(b.label))) {
           const q = tile.quota;
           let quotaStr = chalk.dim('  no quota probed');
@@ -4385,14 +4487,105 @@ program
     }
 
     if (act === 'add') {
-      const requestedKind = opts.kind as 'anthropic' | 'openai' | undefined;
+      const requestedKind = opts.kind as string | undefined;
       if (!requestedKind) {
-        console.error(chalk.red('--kind <anthropic|openai> required'));
+        console.error(chalk.red('--kind <anthropic|openai|apikey> required'));
+        console.error(chalk.dim('  anthropic — fresh OAuth flow against claude.ai'));
+        console.error(chalk.dim('  openai    — instructions to run `codex login` + `sweech accounts import`'));
+        console.error(chalk.dim('  apikey    — bring-your-own-key for any provider (--provider <name> --key <env-var-or-stdin>)'));
         process.exit(1);
       }
+
+      if (requestedKind === 'apikey') {
+        if (!opts.provider) {
+          console.error(chalk.red('--provider <name> required for --kind apikey'));
+          const { PROVIDER_CATALOG } = require('./providerModel') as typeof import('./providerModel');
+          const choices = PROVIDER_CATALOG
+            .filter(p => p.kind === 'apikey')
+            .map(p => p.id)
+            .sort()
+            .join(', ');
+          console.error(chalk.dim(`  options: ${choices}`));
+          process.exit(1);
+        }
+
+        const { addApiKeyAccount, validateApiKeyProvider } = require('./vaultAddApiKey') as typeof import('./vaultAddApiKey');
+        const validationError = validateApiKeyProvider(opts.provider);
+        if (validationError) {
+          console.error(chalk.red(`✗ ${validationError}`));
+          process.exit(1);
+        }
+
+        // Resolve key source. Three shapes:
+        //   --key SOME_VAR  → env var
+        //   --key -         → stdin
+        //   --key omitted   → interactive prompt (TTY) or hard error (non-TTY)
+        let keySource: import('./vaultAddApiKey').ApiKeySource;
+        let promptForKey: (() => Promise<string>) | undefined;
+
+        const keyArg = opts.key;
+        if (keyArg === '-') {
+          keySource = { type: 'stdin' };
+        } else if (keyArg && keyArg.trim().length > 0) {
+          keySource = { type: 'env', envVar: keyArg.trim() };
+        } else if (process.stdin.isTTY) {
+          // Interactive prompt via inquirer (matches addAnthropicAccount UX).
+          keySource = { type: 'literal', value: '' };
+          promptForKey = async () => {
+            const inquirer = (await import('inquirer')).default;
+            const { getProviderById } = require('./providerModel') as typeof import('./providerModel');
+            const labelHint = getProviderById(opts.provider!)?.displayName ?? opts.provider!;
+            const { key } = await inquirer.prompt([{
+              type: 'password',
+              name: 'key',
+              message: `Paste API key for ${labelHint}:`,
+              mask: '*',
+              validate: (s: string) => s.trim().length > 0 || 'Key required',
+            }]);
+            return String(key);
+          };
+        } else {
+          console.error(chalk.red('No --key supplied and stdin is not a TTY.'));
+          console.error(chalk.dim('  Provide one of:'));
+          console.error(chalk.dim('    --key SOME_ENV_VAR     # read from env'));
+          console.error(chalk.dim('    --key -                # read one line from stdin'));
+          console.error(chalk.dim('    (run from a terminal)  # interactive prompt'));
+          process.exit(1);
+        }
+
+        const result = await addApiKeyAccount({
+          provider: opts.provider,
+          label: opts.label,
+          keySource,
+          promptForKey,
+        });
+
+        if (opts.json) {
+          process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+          process.exit(result.ok ? 0 : 1);
+        }
+        if (!result.ok) {
+          console.error(chalk.red(`\n  ✗ ${result.reason}\n`));
+          process.exit(1);
+        }
+        const verb = result.alreadyExisted ? 'updated' : 'added';
+        const labelStr = result.account.label ? ` "${result.account.label}"` : '';
+        console.log(chalk.green(`\n  ✓ ${verb} ${chalk.bold(result.account.provider)}${labelStr} (api key)\n`));
+        console.log(chalk.dim(`    id=${result.account.id}\n`));
+        console.log(chalk.dim(`    Mount it into a workspace:\n      sweech assign <workspace> --account-id ${result.account.id}\n`));
+        // Print the id on its own line so callers can capture it.
+        process.stdout.write(result.account.id + '\n');
+        return;
+      }
+
       if (requestedKind === 'openai') {
         const { codexAddInstructions } = require('./vaultAdd');
         console.log('\n' + codexAddInstructions() + '\n');
+        process.exit(1);
+      }
+      if (requestedKind !== 'anthropic') {
+        console.error(chalk.red(`Unknown --kind value: ${requestedKind}`));
+        console.error(chalk.dim('  expected: anthropic, openai, or apikey'));
         process.exit(1);
       }
       const { addAnthropicAccount } = require('./vaultAdd');
