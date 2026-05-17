@@ -468,6 +468,22 @@ export class ConfigManager {
       Object.assign(settings.env, envOverrides);
     }
 
+    // Validate settings.env values before write — the codex wrapper hoists
+    // them into the shell with `export "$_key=$_val"`, and an embedded
+    // newline / NUL would split the value across `IFS='=' read -r` lines
+    // and either truncate the API key or smuggle an extra export. The
+    // values today come from sweech-controlled fields (api key, base url,
+    // model id) so this is defence-in-depth against future regressions.
+    if (settings.env && typeof settings.env === 'object') {
+      for (const [k, v] of Object.entries(settings.env)) {
+        if (typeof v === 'string' && /[\n\r\0]/.test(v)) {
+          throw new Error(
+            `settings.env.${k} contains a newline/NUL byte — refusing to write ${path.join(profileDir, 'settings.json')}`
+          );
+        }
+      }
+    }
+
     const settingsPath = path.join(profileDir, 'settings.json');
     fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 

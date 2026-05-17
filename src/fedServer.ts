@@ -21,6 +21,11 @@ import { recommendRoute, suggestBestAccount, type RouteRecommendationRequest } f
 import { summarizeAccountsForTelemetry } from './usage'
 import { readAuditLog } from './auditLog'
 import { LogRotator, getServeLogPath } from './logRotator'
+import { scrubSecrets } from './scrubSecrets'
+// `tokenRefresh` (via `oauth`) transitively pulls in `inquirer`, which is
+// an ESM-only package that jest can't load when test suites simply import
+// fedServer. The daemon-only callsite below uses a lazy require so the
+// transitive ESM load is deferred until `sweech serve` actually runs.
 
 const packageJsonPath = path.join(__dirname, '../package.json')
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8')) as { version: string }
@@ -306,10 +311,31 @@ export async function startSweechFedServerWithShutdown(port: number): Promise<ht
     logRotator = null
   }
 
+  // T-LU-006 wiring: start the OAuth token-refresh loop alongside the log
+  // rotator. Without this, refreshExpiringTokens() never fires in production
+  // — tokens silently expire even though the 24h window + audit log are
+  // implemented. We pass the current profile list from disk; if a new
+  // profile is added later the daemon restart picks it up (the loop
+  // captures the list by reference so config edits during a long-running
+  // daemon don't propagate, which is a known limitation accepted as a
+  // restart-on-add policy for now).
+  let stopTokenRefresh: (() => void) | null = null
+  try {
+    const profiles = new ConfigManager().getProfiles()
+    const { startTokenRefreshLoop } = require('./tokenRefresh') as typeof import('./tokenRefresh')
+    stopTokenRefresh = startTokenRefreshLoop(profiles)
+  } catch (err) {
+    const message = scrubSecrets(err instanceof Error ? err.message : String(err))
+    process.stderr.write(`[sweech serve] failed to start token-refresh loop: ${message}\n`)
+    stopTokenRefresh = null
+  }
+
   const shutdown = () => {
     console.error('[sweech serve] shutting down...')
     logRotator?.stop()
     logRotator = null
+    stopTokenRefresh?.()
+    stopTokenRefresh = null
     server.close(() => {
       process.exit(0)
     })

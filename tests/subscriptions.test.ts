@@ -32,7 +32,7 @@ describe('subscriptions', () => {
   test('getAccountInfo uses cached live usage by default', async () => {
     const accounts = await getAccountInfo([{ name: 'codex', commandName: 'codex', cliType: 'codex' }])
 
-    expect(liveUsage.getLiveUsage).toHaveBeenCalledWith(expect.stringMatching(/\.codex$/), 'codex')
+    expect(liveUsage.getLiveUsage).toHaveBeenCalledWith(expect.stringMatching(/\.codex$/), 'codex', undefined)
     expect(liveUsage.refreshLiveUsage).not.toHaveBeenCalled()
     expect(accounts[0].cliType).toBe('codex')
     expect(accounts[0].live?.capturedAt).toBe(1)
@@ -44,7 +44,7 @@ describe('subscriptions', () => {
       { refresh: true },
     )
 
-    expect(liveUsage.refreshLiveUsage).toHaveBeenCalledWith(expect.stringMatching(/\.claude-pole$/), 'claude')
+    expect(liveUsage.refreshLiveUsage).toHaveBeenCalledWith(expect.stringMatching(/\.claude-pole$/), 'claude', undefined)
     expect(liveUsage.getLiveUsage).not.toHaveBeenCalled()
     expect(accounts[0].cliType).toBe('claude')
     expect(accounts[0].live?.capturedAt).toBe(2)

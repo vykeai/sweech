@@ -31,8 +31,18 @@ jest.mock('fs', () => {
     existsSync: jest.fn(),
     readFileSync: jest.fn(),
     writeFileSync: jest.fn(),
+    chmodSync: jest.fn(),
+    renameSync: jest.fn(),
+    mkdirSync: jest.fn(),
   };
 });
+
+// atomicWriteFileSync (tokenRefresh now uses this instead of plain writeFileSync)
+// resolves via the same fs mock under the hood, but we stub it directly so the
+// test doesn't depend on the temp-file dance.
+jest.mock('../src/atomicWrite', () => ({
+  atomicWriteFileSync: jest.fn(),
+}));
 
 import * as fs from 'fs';
 import {
@@ -78,10 +88,13 @@ beforeEach(() => {
   mockedFs.existsSync.mockReset();
   mockedFs.readFileSync.mockReset();
   mockedFs.writeFileSync.mockReset();
+  (mockedFs.chmodSync as jest.Mock).mockReset();
 
-  // Default: settings.json doesn't exist — we still want the refresh path
-  // exercised, just without touching disk.
-  mockedFs.existsSync.mockReturnValue(false);
+  // Default: settings.json exists with valid JSON so the happy-path tests
+  // can persist the refresh result. Tests that need the "no settings"
+  // failure path override existsSync.mockReturnValueOnce(false).
+  mockedFs.existsSync.mockReturnValue(true);
+  mockedFs.readFileSync.mockReturnValue(JSON.stringify({ env: {} }));
 
   jest.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -212,6 +225,44 @@ describe('refreshExpiringTokens — audit log', () => {
     expect(entry.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(entry.details.newExpiresAt).toBe(new Date(newExpiry).toISOString());
     expect(entry.details.refreshedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  test('audits failure (not success) when settings.json is unreadable after upstream refresh', async () => {
+    // Upstream refresh succeeds, but the on-disk settings.json is missing —
+    // persisting the new token isn't possible, so this MUST audit as
+    // failure and skip the in-memory update. Treating it as success would
+    // silently lose the new access token: in-memory profile.oauth would
+    // hold it, but after restart the CLI re-reads the missing/stale file
+    // and the (already-rotated upstream) refresh token is gone too.
+    const profile = makeProfile({
+      name: 'settings-missing',
+      oauth: makeOAuth({ expiresAt: Date.now() + HOUR_MS }),
+    });
+
+    mockedFs.existsSync.mockReturnValue(false); // settings.json missing
+
+    mockRefreshOAuthToken.mockResolvedValueOnce({
+      accessToken: 'access-new',
+      refreshToken: 'refresh-new',
+      tokenType: 'Bearer',
+      provider: 'anthropic',
+      expiresAt: Date.now() + 30 * 24 * HOUR_MS,
+    });
+
+    const originalOauth = profile.oauth;
+    await refreshExpiringTokens([profile]);
+
+    // Upstream WAS called (the refresh round-trip happened) ...
+    expect(mockRefreshOAuthToken).toHaveBeenCalledTimes(1);
+    // ... but we MUST audit failure, not success ...
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    const entry = mockLogAudit.mock.calls[0][0];
+    expect(entry.action).toBe('token_refresh_failed');
+    expect(entry.account).toBe('settings-missing');
+    expect(entry.details.error).toMatch(/settings\.json unreadable/);
+    // ... and we MUST leave the in-memory profile untouched so the next
+    // poll retries instead of trusting a token we couldn't persist.
+    expect(profile.oauth).toBe(originalOauth);
   });
 
   test('writes a token_refresh_failed audit entry on error', async () => {

@@ -48,9 +48,16 @@ export function toHeadersLike(input: Headers | Record<string, string | undefined
  * Parse a numeric header value safely. Returns `undefined` on `null`, empty,
  * or non-finite values -- never throws and never returns NaN.
  */
+// Header values come from arbitrary HTTP responses — a custom provider could
+// emit a pathological multi-megabyte digit string and force the JS engine
+// to spend hundreds of ms in Number()/regex on every score refresh, blocking
+// the event loop. Real rate-limit headers are ≤ 32 chars; 64 is generous.
+const MAX_HEADER_VALUE_LENGTH = 64
+
 function readNumber(h: HeadersLike, key: string): number | undefined {
   const raw = h.get(key)
   if (raw === null || raw === '') return undefined
+  if (raw.length > MAX_HEADER_VALUE_LENGTH) return undefined
   const n = Number(raw)
   return Number.isFinite(n) ? n : undefined
 }
@@ -66,6 +73,8 @@ function readNumber(h: HeadersLike, key: string): number | undefined {
 function parseResetHeader(h: HeadersLike, key: string, nowSeconds: number): number | undefined {
   const raw = h.get(key)
   if (raw === null || raw === '') return undefined
+  // Same DoS cap as readNumber — bound the input before any regex/Number work.
+  if (raw.length > MAX_HEADER_VALUE_LENGTH) return undefined
 
   // Bare number -- could be seconds-from-now OR epoch seconds.
   const asNum = Number(raw)
@@ -91,7 +100,9 @@ function parseResetHeader(h: HeadersLike, key: string, nowSeconds: number): numb
       case 'd':  totalMs += v * 86_400_000; break
     }
   }
-  if (!matched || totalMs === 0) return undefined
+  // `0s` is a valid duration (window just reset) — accept it.
+  // Only reject when no duration token matched at all.
+  if (!matched) return undefined
   return Math.floor(nowSeconds + totalMs / 1_000)
 }
 

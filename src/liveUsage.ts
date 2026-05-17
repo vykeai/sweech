@@ -638,6 +638,64 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
   })
 }
 
+// ── Provider-aware dispatch ───────────────────────────────────────────────────
+//
+// Maps a sweech `profile.provider` value to the SupportedProvider + the
+// settings.env key that holds the API key. The codex wrapper hoists every
+// settings.env entry into the child process; for non-codex CLIs the key is
+// still written here by createProfileConfig (config.ts:393-435).
+
+type DispatchEntry = { supported: 'kimi' | 'qwen' | 'deepseek' | 'zai'; envKeys: string[] }
+
+const PROVIDER_DISPATCH: Record<string, DispatchEntry> = {
+  // Kimi family (both the consumer-plan profile and the coding-plan variant
+  // share the same Moonshot rate-limit endpoint).
+  'kimi':         { supported: 'kimi',     envKeys: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'] },
+  'kimi-coding':  { supported: 'kimi',     envKeys: ['KIMI_CODING_API_KEY', 'KIMI_API_KEY', 'MOONSHOT_API_KEY'] },
+  // Z.ai / Zhipu GLM — provider id is `glm` in providers.ts.
+  'glm':          { supported: 'zai',      envKeys: ['GLM_API_KEY', 'ZHIPU_API_KEY', 'ZAI_API_KEY'] },
+  'zai':          { supported: 'zai',      envKeys: ['ZAI_API_KEY', 'GLM_API_KEY'] },
+  // DeepSeek native.
+  'deepseek':     { supported: 'deepseek', envKeys: ['DEEPSEEK_API_KEY'] },
+  // Qwen on Alibaba DashScope — the provider id is `dashscope`; `qwen` kept
+  // as an alias because earlier profiles used that name.
+  'dashscope':    { supported: 'qwen',     envKeys: ['DASHSCOPE_API_KEY', 'QWEN_API_KEY'] },
+  'qwen':         { supported: 'qwen',     envKeys: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY'] },
+}
+
+/**
+ * Best-effort read of an API key from a profile's settings.json env block.
+ * The codex wrapper hoists this block into the child process at launch
+ * (config.ts:641-660), so reading the same place keeps the daemon in sync
+ * with what the CLI actually runs with.
+ */
+function readApiKeyFromSettings(configDir: string, envKeys: string[]): string | null {
+  try {
+    const settingsPath = path.join(configDir, 'settings.json')
+    const raw = fs.readFileSync(settingsPath, 'utf-8')
+    const settings = JSON.parse(raw) as { env?: Record<string, unknown> }
+    const env = settings?.env ?? {}
+    for (const key of envKeys) {
+      const value = env[key]
+      if (typeof value === 'string' && value.length > 0) return value
+    }
+  } catch { /* settings.json missing/unreadable — fall through */ }
+  return null
+}
+
+async function fetchProviderRateLimit(provider: string, configDir: string): Promise<LiveRateLimitData | null> {
+  const entry = PROVIDER_DISPATCH[provider.toLowerCase()]
+  if (!entry) return null
+  const apiKey = readApiKeyFromSettings(configDir, entry.envKeys)
+  if (!apiKey) return null
+  switch (entry.supported) {
+    case 'kimi':     return fetchKimiRateLimit(apiKey)
+    case 'qwen':     return fetchQwenRateLimit(apiKey)
+    case 'deepseek': return fetchDeepSeekRateLimit(apiKey)
+    case 'zai':      return fetchZaiRateLimit(apiKey)
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -645,14 +703,32 @@ async function fetchCodexRateLimits(configDir: string): Promise<LiveRateLimitDat
  * otherwise fetches from the API (requires Keychain access on macOS).
  *
  * Returns null if no valid token is available or on any error.
+ *
+ * The `provider` parameter (when non-anthropic/non-openai) routes to the
+ * OpenAI-compat parsers in providerRateLimitParsers.ts — required for
+ * Kimi/Qwen/DeepSeek/GLM accounts to surface real rate-limit data instead
+ * of always reporting "unknown".
  */
-export async function getLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
+export async function getLiveUsage(
+  configDir: string,
+  cliType?: string,
+  provider?: string,
+): Promise<LiveRateLimitData | null> {
   const cached = getCached(configDir)
   if (cached) return cached
 
   // Codex: use app-server JSON-RPC
   if (cliType === 'codex') {
     const data = await fetchCodexRateLimits(configDir)
+    if (data) { setCached(configDir, data); return data }
+    return getStaleCache(configDir)
+  }
+
+  // Non-Anthropic OpenAI-compat providers (kimi, qwen, deepseek, glm/zai).
+  // Dispatched before the Anthropic OAuth path so profiles configured for
+  // these providers don't fall through to a useless OAuth read attempt.
+  if (provider && PROVIDER_DISPATCH[provider.toLowerCase()]) {
+    const data = await fetchProviderRateLimit(provider, configDir)
     if (data) { setCached(configDir, data); return data }
     return getStaleCache(configDir)
   }
@@ -680,9 +756,19 @@ export async function getLiveUsage(configDir: string, cliType?: string): Promise
 /**
  * Force-refresh live rate limit data, bypassing the cache.
  */
-export async function refreshLiveUsage(configDir: string, cliType?: string): Promise<LiveRateLimitData | null> {
+export async function refreshLiveUsage(
+  configDir: string,
+  cliType?: string,
+  provider?: string,
+): Promise<LiveRateLimitData | null> {
   if (cliType === 'codex') {
     const data = await fetchCodexRateLimits(configDir)
+    if (data) { setCached(configDir, data); return data }
+    return getStaleCache(configDir)
+  }
+
+  if (provider && PROVIDER_DISPATCH[provider.toLowerCase()]) {
+    const data = await fetchProviderRateLimit(provider, configDir)
     if (data) { setCached(configDir, data); return data }
     return getStaleCache(configDir)
   }

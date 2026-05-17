@@ -391,7 +391,10 @@ export async function getAccountInfo(
       live = (getCached(configDir) ?? getStaleCache(configDir)) ?? undefined
     } else {
       const usageFn = options.refresh ? refreshLiveUsage : getLiveUsage
-      const usagePromise = usageFn(configDir, cliType).catch(() => undefined)
+      // T-LU-004 wiring: pass `provider` so non-Anthropic profiles (kimi,
+      // qwen, deepseek, glm) route through the OpenAI-compat header parsers
+      // instead of falling through to the Anthropic OAuth path.
+      const usagePromise = usageFn(configDir, cliType, p.provider).catch(() => undefined)
       live = ((options.timeoutMs
         ? await Promise.race<LiveRateLimitData | null | undefined>([
             usagePromise,

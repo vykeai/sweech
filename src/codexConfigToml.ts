@@ -259,13 +259,13 @@ export function writeCodexProviderToml(opts: WriteCodexProviderTomlOptions): voi
     envKey: providerEnvKey(opts.providerName),
   });
 
-  // Replace or insert the [model_providers.<name>] section.
-  if (parsed.sections.has(sectionName)) {
-    parsed.sections.set(sectionName, blockBody);
-  } else {
-    parsed.sections.set(sectionName, blockBody);
+  // Replace or insert the [model_providers.<name>] section. sectionOrder is
+  // a positional log of section appearance; only push when this is genuinely
+  // new so re-writes don't duplicate the header in the emitted file.
+  if (!parsed.sections.has(sectionName)) {
     parsed.sectionOrder.push(sectionName);
   }
+  parsed.sections.set(sectionName, blockBody);
 
   // Set top-level model_provider so codex actually uses it by default.
   parsed.topLines = setTopLevelString(parsed.topLines, 'model_provider', safeName);

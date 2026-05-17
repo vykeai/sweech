@@ -13,10 +13,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { ProfileConfig } from './config';
-import { refreshOAuthToken, OAuthToken } from './oauth';
+import { refreshOAuthToken } from './oauth';
 import { sweechEvents } from './events';
 import { scrubSecrets } from './scrubSecrets';
 import { logAudit } from './auditLog';
+import { atomicWriteFileSync } from './atomicWrite';
 
 /**
  * T-LU-006: refresh OAuth tokens 24h before expiry (was 10 minutes).
@@ -50,9 +51,15 @@ function readSettings(settingsPath: string): Record<string, any> | null {
 
 /**
  * Write settings back to the profile's settings.json.
+ *
+ * Atomic write (temp file + rename) — concurrent readers (the wrapper
+ * script's python3 hoist, getCurrentApiKey, peer sweech invocations)
+ * never observe a truncated half-written file. chmod 0600 because the
+ * file holds the refresh token + access token after this rewrite.
  */
 function writeSettings(settingsPath: string, settings: Record<string, any>): void {
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  atomicWriteFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  try { fs.chmodSync(settingsPath, 0o600); } catch { /* best-effort */ }
 }
 
 /**
@@ -145,27 +152,47 @@ export async function refreshExpiringTokens(profiles: ProfileConfig[]): Promise<
       const settingsPath = getSettingsPath(profile);
       const settings = readSettings(settingsPath);
 
-      if (settings) {
-        // Update the stored OAuth metadata
-        settings.oauth = {
-          provider: newToken.provider,
-          refreshToken: newToken.refreshToken,
-          expiresAt: newToken.expiresAt,
-        };
-
-        // Update the auth env var with the fresh access token
-        if (!settings.env) settings.env = {};
-
-        if (profile.cliType === 'codex') {
-          settings.env.OPENAI_API_KEY = `sk-oauth-${newToken.accessToken}`;
-        } else if (profile.cliType === 'kimi') {
-          settings.env.KIMI_API_KEY = `bearer_${newToken.accessToken}`;
-        } else {
-          settings.env.ANTHROPIC_AUTH_TOKEN = `bearer_${newToken.accessToken}`;
-        }
-
-        writeSettings(settingsPath, settings);
+      if (!settings) {
+        // The refresh succeeded against the upstream OAuth server but the
+        // on-disk settings.json is missing/unreadable, so persisting the new
+        // access token isn't possible. Treating this as success would leak:
+        // in-memory profile.oauth would be updated, but after restart the
+        // CLI re-reads the (stale or empty) file and the new token is
+        // silently lost — and the old refresh token, having been used once,
+        // may already be rotated by the upstream server, locking the user
+        // out. Audit as failure and skip the in-memory update so the next
+        // poll retries instead of believing the refresh is good.
+        const msg = `settings.json unreadable at ${settingsPath} — refresh discarded`;
+        console.error(`[sweech] token refresh failed for ${profile.name}:`, msg);
+        logAudit({
+          timestamp: new Date().toISOString(),
+          action: 'token_refresh_failed',
+          account: profile.name,
+          details: { error: msg },
+        });
+        sweechEvents.emit('token_expired', { account: profile.name });
+        continue;
       }
+
+      // Update the stored OAuth metadata
+      settings.oauth = {
+        provider: newToken.provider,
+        refreshToken: newToken.refreshToken,
+        expiresAt: newToken.expiresAt,
+      };
+
+      // Update the auth env var with the fresh access token
+      if (!settings.env) settings.env = {};
+
+      if (profile.cliType === 'codex') {
+        settings.env.OPENAI_API_KEY = `sk-oauth-${newToken.accessToken}`;
+      } else if (profile.cliType === 'kimi') {
+        settings.env.KIMI_API_KEY = `bearer_${newToken.accessToken}`;
+      } else {
+        settings.env.ANTHROPIC_AUTH_TOKEN = `bearer_${newToken.accessToken}`;
+      }
+
+      writeSettings(settingsPath, settings);
 
       // Update the in-memory profile reference
       profile.oauth = newToken;
