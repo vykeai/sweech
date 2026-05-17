@@ -18,6 +18,7 @@ import { CLIConfig } from './clis';
 import { OAuthToken } from './oauth';
 import { getCredentialStore } from './credentialStore';
 import { atomicWriteFileSync } from './atomicWrite';
+import { providerEnvKey as providerEnvKeyForCodex, writeCodexProviderTomlForProfile } from './codexConfigToml';
 
 export interface ProfileConfig {
   name: string;
@@ -384,6 +385,15 @@ export class ConfigManager {
         if (provider.smallFastModel) {
           settings.env.OPENAI_SMALL_FAST_MODEL = provider.smallFastModel;
         }
+
+        // Custom codex providers go through a [model_providers.<name>]
+        // block whose `env_key` references a provider-specific env var
+        // (e.g. KIMI_API_KEY, CUSTOM_API_KEY). Mirror the auth token under
+        // that key so the wrapper script can export it for codex.
+        if (authToken && provider.name && provider.name !== 'openai') {
+          const codexEnvKey = providerEnvKeyForCodex(provider.name);
+          settings.env[codexEnvKey] = authToken;
+        }
       } else if (cliType === 'kimi') {
         // Kimi CLI — configure via config.toml env overrides.
         // The CLI reads provider settings from ~/.kimi/config.toml;
@@ -500,6 +510,20 @@ export class ConfigManager {
       }
     }
 
+    // Codex CLI: write [model_providers.<name>] config.toml block for
+    // custom providers so codex actually routes to them instead of
+    // falling through to ChatGPT OAuth. The official openai provider is
+    // skipped (codex handles it natively).
+    if (cliType === 'codex' && !useNativeAuth) {
+      writeCodexProviderTomlForProfile(
+        commandName,
+        provider,
+        cliType,
+        baseUrlOverride,
+        modelOverride,
+      );
+    }
+
     // Only create .claude.json to skip onboarding for external providers (Claude/Codex)
     // For official Anthropic/OpenAI with native auth, let the CLI's onboarding flow run
     // Kimi CLI does its own onboarding via config.toml
@@ -614,6 +638,30 @@ while [ $# -gt 0 ]; do
 done
 
 export ${eConfigDirEnvVar}="${eProfileDir}"
+
+# Codex CLI does NOT read env vars from settings.json the way Claude Code
+# does — it consults process.env at runtime via env_key entries in
+# config.toml. For codex wrappers, hoist every key in settings.env into
+# the environment before launching so the API key referenced by
+# [model_providers.<name>].env_key actually resolves. Other CLIs read
+# settings.json themselves, so we skip this for them.
+if [ "${eCliCommand}" = "codex" ]; then
+  SETTINGS_JSON="${eProfileDir}/settings.json"
+  if [ -f "\$SETTINGS_JSON" ] && command -v python3 &>/dev/null; then
+    while IFS='=' read -r _key _val; do
+      [ -z "\$_key" ] && continue
+      export "\$_key=\$_val"
+    done < <(python3 -c "import json,sys
+try:
+  d=json.load(open(sys.argv[1]))
+  for k,v in (d.get('env') or {}).items():
+    if isinstance(v,(str,int,float,bool)):
+      print(f'{k}={v}')
+except Exception:
+  pass" "\$SETTINGS_JSON")
+  fi
+fi
+
 exec "${eCliCommand}" "\${ARGS[@]}"
 `;
 
