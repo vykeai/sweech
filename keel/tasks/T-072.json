@@ -1,0 +1,40 @@
+{
+  "id": "T-072",
+  "title": "sweech accounts list shows all account kinds + accounts add apikey",
+  "wave": "wave-6",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "high",
+  "platform": null,
+  "assignee": "claude",
+  "description": "`sweech accounts list` shows OAuth + API-key + local entries by default. New filters: `--kind oauth|apikey|local|all`, `--provider <name>`. New flow: `sweech accounts add --kind apikey --provider <name> --key <env-or-stdin> --label <label?>` creates a vault entry independent of any workspace.",
+  "createdAt": "2026-05-17T00:10:00Z",
+  "updatedAt": "2026-05-17T01:55:00Z",
+  "completedAt": "2026-05-17T01:55:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": ["T-070"],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-17T01:55:00Z",
+      "by": "claude",
+      "text": "Shipped via commit 565ed15 (worktree T-072) + merge 4afe9bf + restore-merge 56bc563. +218 src/vaultAddApiKey.ts new, +279/-43 src/cli.ts (accounts region only), +534 tests/cli-accounts.test.ts. 30 new tests. Verified --kind / --provider filters + env+stdin+literal+prompt API key sources."
+    }
+  ],
+  "acceptanceCriteria": [
+    "sweech accounts list shows OAuth + API-key + local entries by default ✓",
+    "--kind <oauth|apikey|local|all> filter ✓",
+    "--provider <name> filter ✓",
+    "sweech accounts add --kind apikey creates a vault entry independent of any workspace ✓",
+    "--json reflects the unified shape ✓"
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "id": "T-073",
+  "title": "SweechBar AccountsView single provider-tree rebuild",
+  "wave": "wave-6",
+  "space": "space-bar",
+  "status": "deferred",
+  "priority": "high",
+  "platform": "macos",
+  "assignee": null,
+  "description": "Drop the three hard-coded sections (Claude / Codex / External) in AccountsView and rebuild as a single collapsible provider tree. NOT SHIPPED — user explicitly told the agent to STOP this redesign mid-flight (\"I did not ask you to redesign the whole THING\"). Branch preserved at tag wave6/T-073-keep (commit a5a3f34). Replaced by T-075 (surgical regrouping only, no UI rebuild).",
+  "createdAt": "2026-05-17T00:10:00Z",
+  "updatedAt": "2026-05-17T10:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": ["T-070", "T-071"],
+  "runStatus": null,
+  "size": "L",
+  "context": [
+    {
+      "at": "2026-05-17T10:00:00Z",
+      "by": "claude",
+      "text": "Implementation complete at tag wave6/T-073-keep: provider-tree AccountsView with seeded preview window for proof capture before T-071 lands. Light + dark mode screenshots saved at ~/Desktop/screenshots/sweech/t073-light-final.png and t073-dark-final.png. Deferred because the user only wanted cosmetic regrouping in the existing two-tab layout — that landed via T-075 instead."
+    }
+  ],
+  "acceptanceCriteria": [
+    "AccountsView renders one section per provider; legacy Claude/Codex/External hard-coded sections gone",
+    "Each provider row shows its kind (OAuth subscription / API-key / Local) as a badge",
+    "Each account row shows its credential kind, expiry (if OAuth), and the workspaces it powers",
+    "Sort, filter, search, grouping affordances all preserved (no feature drops)",
+    "swift build clean; visual proof screenshot saved to PROJECT_SCREENSHOT_DIR after rebuild",
+    "Light AND dark mode screenshots both captured"
+  ]
+}

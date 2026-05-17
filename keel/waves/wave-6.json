@@ -1,0 +1,9 @@
+{
+  "id": "wave-6",
+  "name": "Provider → Account → Workspace unification (partial ship)",
+  "description": "Conceptual model: every workspace lives under a Provider (Anthropic, OpenAI, Alibaba, GLM, Kimi, ...); each provider holds Accounts (OAuth identity OR API key); each account mounts into 0+ Workspaces. ORIGINAL plan was a full overhaul (vault rewrite + JSON contract v3 + full SweechBar UI rebuild + widget migration). What ACTUALLY shipped — by user direction after they stopped an over-reach — is the data-model + cosmetic SweechBar regrouping only. JSON contract on the CLI is unchanged; SweechBar's existing two-tab structure is preserved.",
+  "status": "done",
+  "createdAt": "2026-05-17T00:10:00Z",
+  "completedAt": "2026-05-17T10:05:00Z",
+  "scopeNote": "T-070 + T-072 + T-075 shipped to main. T-071 / T-073 / T-074 deferred and preserved at tags wave6/T-071-keep, wave6/T-073-keep, wave6/T-074-keep — they reflect a more ambitious redesign the user explicitly declined."
+}

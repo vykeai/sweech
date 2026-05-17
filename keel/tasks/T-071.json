@@ -1,0 +1,39 @@
+{
+  "id": "T-071",
+  "title": "sweech list/usage --json schemaVersion 3 with top-level providers tree",
+  "wave": "wave-6",
+  "space": "space-cli",
+  "status": "deferred",
+  "priority": "high",
+  "platform": null,
+  "assignee": null,
+  "description": "Replace the flat top-level `accounts: [...]` array in `sweech list --json` and `sweech usage --json` with `{schemaVersion: 3, providers: [{accounts: [{workspaces: [...]}]}]}`. NOT SHIPPED — the user stopped wave-6 mid-flight after a redesign over-reach. The branch is preserved at tag wave6/T-071-keep (commit cc2a24c) for future revival. Picking this up will also require T-073 + T-074 in lockstep (SwiftBar + widget consumers).",
+  "createdAt": "2026-05-17T00:10:00Z",
+  "updatedAt": "2026-05-17T10:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": ["T-070"],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-17T10:00:00Z",
+      "by": "claude",
+      "text": "Implementation already exists at tag wave6/T-071-keep: +1639/-221 lines, 16 new tests, schema-v3 envelope sample documented in commit cc2a24c. Deferred because reviving requires also reviving T-073 (SwiftBar consumer) and T-074 (widget consumer) — user explicitly didn't want that scope."
+    }
+  ],
+  "acceptanceCriteria": [
+    "sweech list text output groups by provider; accounts shown as sub-headers; workspaces as rows",
+    "sweech list --json emits {providers: [...]} top-level; no legacy `accounts: [...]` field",
+    "schemaVersion: 3 on the JSON payload",
+    "Regression tests lock the new shape (snapshot + @ts-expect-error type lock)",
+    "Default text output for `sweech list` (no flags) preserves utilization bars and reset-window readout"
+  ]
+}

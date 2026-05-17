@@ -1,0 +1,40 @@
+{
+  "id": "T-070",
+  "title": "Unified Provider / Account / Workspace data model + vault schema v2",
+  "wave": "wave-6",
+  "space": "space-cli",
+  "status": "done",
+  "priority": "critical",
+  "platform": null,
+  "assignee": "claude",
+  "description": "Introduce canonical Provider/Account/Workspace types. accounts.json schemaVersion bumps from v1 (bare array) to v2 ({schemaVersion: 2, accounts: Account[]}). Account becomes a discriminated union: {kind: 'oauth' | 'apikey' | 'none'}. One-shot migration runs on first load: every workspace (OAuth + API-key + local) gets a vault entry. Per-workspace 'sweech-api-key' keychain entries are retained as legacy mirrors — the underlying CLI binaries (claude, codex) read them.",
+  "createdAt": "2026-05-17T00:10:00Z",
+  "updatedAt": "2026-05-17T01:30:00Z",
+  "completedAt": "2026-05-17T01:30:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": [],
+  "runStatus": null,
+  "size": "L",
+  "context": [
+    {
+      "at": "2026-05-17T01:30:00Z",
+      "by": "claude",
+      "text": "Shipped via commit e1cfdf8 (worktree T-070) + merge 09dff54 + restore-merge 366115f. +442 lines src/providerModel.ts, +467/-6 src/vault.ts, +605 tests/providerModel.test.ts. 26 new tests. Migration verified intact against backup at ~/sweech-backups/pre-provider-unification-20260517-010713."
+    }
+  ],
+  "acceptanceCriteria": [
+    "src/providerModel.ts exports Provider, Account (oauth | apikey | none), Workspace types ✓",
+    "accounts.json schemaVersion bumped (was 1, now 2); migration on load converts old shape + API-key keychain entries to new shape ✓",
+    "Vault: getAccountsByProvider(provider) helper; getProvidersForCli(cliType) helper ✓",
+    "Resolver: collectProviderTree() returns Provider[] with nested accounts and workspaces ✓",
+    "Unit tests cover the migration path on a fixture accounts.json + mocked keychain entries ✓ (26 tests)"
+  ]
+}

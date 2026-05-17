@@ -1,0 +1,38 @@
+{
+  "id": "T-074",
+  "title": "SwiftBar widget + SWEECH_GUIDE.md migrated to provider-tree JSON contract",
+  "wave": "wave-6",
+  "space": "space-bar",
+  "status": "deferred",
+  "priority": "high",
+  "platform": "macos",
+  "assignee": null,
+  "description": "Widget (notification-center extension) parses `sweech usage --json`. Migrate from flat `accounts: [...]` shape to the schema-v3 provider tree. Update SWEECH_GUIDE.md JSON-contract section. NOT SHIPPED — depends on T-071's JSON contract change, which the user declined. Branch preserved at tag wave6/T-074-keep (commit 460bae9).",
+  "createdAt": "2026-05-17T00:10:00Z",
+  "updatedAt": "2026-05-17T10:00:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": ["T-071"],
+  "runStatus": null,
+  "size": "S",
+  "context": [
+    {
+      "at": "2026-05-17T10:00:00Z",
+      "by": "claude",
+      "text": "Implementation complete at tag wave6/T-074-keep: widget walker rewritten + SWEECH_GUIDE.md gains 'JSON contract — provider tree (schemaVersion 3)' section. Deferred because T-071's contract change wasn't shipped. The widget continues consuming the old v2 schema cache on main."
+    }
+  ],
+  "acceptanceCriteria": [
+    "SweechWidget reads providers[].accounts[].workspaces[]",
+    "SWEECH_GUIDE.md JSON-contract section replaces the bucket-only shape with the provider-tree shape",
+    "Widget timeline still updates within 10 min of a sweech usage shift",
+    "swift build clean (widget extension target)"
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "id": "T-075",
+  "title": "SweechBar surgical v2 vault fixes + cosmetic regrouping + forceRefresh",
+  "wave": "wave-6",
+  "space": "space-bar",
+  "status": "done",
+  "priority": "high",
+  "platform": "macos",
+  "assignee": "claude",
+  "description": "Land the user-visible wave-6 cosmetic changes WITHOUT the full T-073 AccountsView rebuild: 1) VaultAccount Codable accepts v2 vault shape (kind=oauth + provider field) via new effectiveKind computed property; 2) every kind-based filter in VaultView migrated to effectiveKind (fixes 'no account' bug on every workspace card); 3) Workspaces tab labels: Claude→Anthropic, Codex→OpenAI; 4) Providers section split per-provider for multi-workspace, fold singletons into 'Other'; 5) 'Accounts' tab pill renamed 'Providers'; 6) new SweechService.forceRefresh() runs `sweech usage --refresh` for manual refresh button + popover-open >30s stale, 30s timer poll stays cache-only.",
+  "createdAt": "2026-05-17T10:00:00Z",
+  "updatedAt": "2026-05-17T10:05:00Z",
+  "completedAt": "2026-05-17T10:05:00Z",
+  "product": null,
+  "lane": null,
+  "stage": null,
+  "stageHistory": [],
+  "recurring": null,
+  "attachments": [],
+  "validationOverrides": null,
+  "executionMode": null,
+  "statusHistory": [],
+  "dependsOn": ["T-070"],
+  "runStatus": null,
+  "size": "M",
+  "context": [
+    {
+      "at": "2026-05-17T10:05:00Z",
+      "by": "claude",
+      "text": "Shipped across commits 33d62a4 (VaultAccount v2 decoder), a71b077 (Claude/Codex→Anthropic/OpenAI in GroupedColumnLayout), 2afe433 (Others fold in AccountsView.swift externalSections — note: AccountsView.swift is NOT actually wired into the popover; the popover uses VaultView's private WorkspacesTab. Edits there were leftover from an over-reach that the user stopped), e8871a7 (the ACTUAL fix in VaultView.swift WorkspacesTab.grouped + compatibleAccounts), 07e037f (VaultView AccountsTab effectiveKind + 'Other' rename + 'Providers' tab pill), 0312696 (forceRefresh + popover-open trigger). 12 commits in total since 78378d1. Replaces the unshipped T-073 with a smaller surgical patch."
+    }
+  ],
+  "acceptanceCriteria": [
+    "Bar renders correctly post-v2-migration: every workspace card shows its assigned account email (not 'no account') ✓",
+    "Workspaces tab section headers: 'Anthropic' (claude CLI) + 'OpenAI' (codex CLI) + per-provider multi-workspace sections + 'Other' for singletons ✓",
+    "Providers tab (formerly 'Accounts'): Anthropic + OpenAI OAuth sections + 'Other' for API-key/local providers ✓",
+    "Manual refresh button forces a real API fetch (bypasses 5-min cache) ✓",
+    "Popover open forces a real API fetch when lastFetched > 30s ✓",
+    "30s timer poll stays cache-only — no API hammering ✓",
+    "swift build clean ✓"
+  ]
+}
