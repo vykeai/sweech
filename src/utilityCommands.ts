@@ -400,41 +400,29 @@ export async function runDoctor(): Promise<void> {
     }
   }
 
-  // Billing section — surface upcoming charges + lapsed subscriptions
-  // so the user can spot "claude-ted is canceled but still mounted"
-  // type problems. Billing data is populated by `sweech billing scan`
-  // (auto-discovered from local mail via mailscan) and/or `sweech
-  // billing set` for manual overrides. Skipped silently if no entries.
+  // Billing section — surface upcoming user-entered bill dates only.
+  // Manual data only (no scan integration); date computed at request
+  // time from billingDay against today.
   try {
-    const { readBillingFile, daysUntilNextBill, compareByNextBilling } = require('./billing') as typeof import('./billing');
+    const { readBillingFile, daysUntilNextBill, nextBillingDate, compareByNextBilling } = require('./billing') as typeof import('./billing');
     const billing = readBillingFile();
-    const entries = Object.values(billing.entries).sort(compareByNextBilling);
+    const entries = Object.values(billing.entries)
+      .filter(e => e.billingDay != null)
+      .sort((a, b) => compareByNextBilling(a, b));
     if (entries.length > 0) {
       console.log(chalk.bold('\nBilling:'));
       for (const entry of entries) {
         const days = daysUntilNextBill(entry);
-        if (entry.status === 'canceled') {
-          console.log(chalk.red(`  ✗ ${entry.vendor} ${entry.email}: canceled`));
-          severities.push('warn');
-        } else if (entry.status === 'will_not_renew') {
-          console.log(chalk.yellow(`  ⚠ ${entry.vendor} ${entry.email}: will not renew`));
-          severities.push('warn');
-        } else if (days !== null && days < 0) {
-          console.log(chalk.red(`  ✗ ${entry.vendor} ${entry.email}: bill overdue by ${-days}d (next ${entry.nextBillingAt})`));
-          severities.push('warn');
-        } else if (days !== null && days <= 7) {
-          console.log(chalk.yellow(`  ⚠ ${entry.vendor} ${entry.email}: bills in ${days}d (${entry.nextBillingAt})`));
-          severities.push('ok');
-        } else if (entry.nextBillingAt) {
-          console.log(chalk.green(`  ✓ ${entry.vendor} ${entry.email}: bills in ${days}d (${entry.nextBillingAt})`));
-          severities.push('ok');
+        const next = nextBillingDate(entry);
+        if (days === null || !next) continue;
+        if (days === 0) {
+          console.log(chalk.yellow(`  ⚠ ${entry.vendor} ${entry.email}: bills today (${next})`));
+        } else if (days > 0 && days <= 7) {
+          console.log(chalk.yellow(`  ⚠ ${entry.vendor} ${entry.email}: bills in ${days}d (${next})`));
         } else {
-          console.log(chalk.dim(`  · ${entry.vendor} ${entry.email}: ${entry.status}`));
-          severities.push('ok');
+          console.log(chalk.green(`  ✓ ${entry.vendor} ${entry.email}: bills in ${days}d (${next})`));
         }
-      }
-      if (billing.lastScannedAt) {
-        console.log(chalk.dim(`    last scan: ${billing.lastScannedAt}`));
+        severities.push('ok');
       }
     }
   } catch (err) {

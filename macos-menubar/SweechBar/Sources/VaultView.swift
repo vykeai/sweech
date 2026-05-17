@@ -617,9 +617,8 @@ private struct AccountTile: View {
             if let label = account.billingLabel {
                 let (bg, fg): (Color, Color) = {
                     switch account.billingSeverity {
-                    case .critical: return (Sweech.Color.danger.opacity(0.18), Sweech.Color.danger)
-                    case .warning:  return (Sweech.Color.warning.opacity(0.18), Sweech.Color.warning)
-                    case .neutral:  return (Sweech.Color.textMuted.opacity(0.12), Sweech.Color.textMuted)
+                    case .warning: return (Sweech.Color.warning.opacity(0.18), Sweech.Color.warning)
+                    case .neutral: return (Sweech.Color.textMuted.opacity(0.12), Sweech.Color.textMuted)
                     }
                 }()
                 Text(label)
@@ -941,6 +940,14 @@ private struct WorkspaceTile: View {
     private var tint: Color { TileStyle.tint(kind: kind) }
     private var glyph: String { TileStyle.glyph(kind: kind) }
     private var activeId: String? { ws.activeAccount?.id }
+    /// The full VaultAccount currently mounted in this workspace,
+    /// pulled from compatibleAccounts (which the CLI joined with
+    /// billing data). nil for unassigned workspaces and external
+    /// (API-key) workspaces.
+    private var mountedVaultAccount: VaultAccount? {
+        guard let id = activeId else { return nil }
+        return compatibleAccounts.first { $0.accountId == id }
+    }
 
     /// Workspace status problems we want loud in the badge row.
     /// Order matters — first match wins so we don't stack three red capsules.
@@ -1003,6 +1010,24 @@ private struct WorkspaceTile: View {
                         .background(Sweech.Color.core.opacity(0.15))
                         .clipShape(Capsule())
                         .foregroundStyle(Sweech.Color.core)
+                }
+                // Billing chip — joined from the mounted vault account.
+                // Same source as the Vault tab; sweech CLI projects the
+                // next-bill date from `billingDay` at request time so
+                // the displayed countdown is always against today.
+                if let mounted = mountedVaultAccount, let label = mounted.billingLabel {
+                    let (bg, fg): (Color, Color) = {
+                        switch mounted.billingSeverity {
+                        case .warning: return (Sweech.Color.warning.opacity(0.18), Sweech.Color.warning)
+                        case .neutral: return (Sweech.Color.textMuted.opacity(0.12), Sweech.Color.textMuted)
+                        }
+                    }()
+                    Text(label)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(bg)
+                        .clipShape(Capsule())
+                        .foregroundStyle(fg)
                 }
                 Spacer(minLength: 0)
             }

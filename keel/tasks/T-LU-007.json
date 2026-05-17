@@ -6,7 +6,7 @@
   "lane": null,
   "wave": null,
   "space": null,
-  "status": "active",
+  "status": "done",
   "priority": "medium",
   "platform": null,
   "assignee": null,
@@ -24,6 +24,11 @@
       "at": "2026-05-03T20:06:23.796Z",
       "by": "human",
       "text": "v3.2 EXTENSION (from requestor pushback). S6 must expose 'route_within_budget(profile, tier, max_cost_per_call_usd) -> {account, model}' API. requestor's pre-plan cost forecast (T-LU-100) is decorative without this — requestor estimates, but if sweech can't constrain model selection by USD/call, sweech routes to cheapest-by-quota and the budget cap gets ignored. AC: S6 ships both the user-facing 'sweech cost' command AND the route_within_budget() API used by callers."
+    },
+    {
+      "ts": "2026-05-17T15:16:44.000Z",
+      "text": "Shipped in 6ae65c2 + a1a5952 (codex fix). costs.ts pricing table + budgetRouter (routeWithinBudget) + costCommand (sweech cost). 7d spend reads token_usage AND launches.log estimates. 132 tests.",
+      "by": "human"
     }
   ],
   "acceptanceCriteria": [],
@@ -36,6 +41,10 @@
     {
       "status": "active",
       "ts": "2026-05-17T14:09:26.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-17T15:16:29.000Z"
     }
   ],
   "attachments": [],
@@ -44,7 +53,7 @@
   "stageHistory": [],
   "recurring": null,
   "createdAt": "2026-05-03T19:51:37.852Z",
-  "updatedAt": "2026-05-17T14:09:26.000Z",
+  "updatedAt": "2026-05-17T15:16:29.000Z",
   "validationOverrides": null,
   "executionMode": null,
   "cloudyTaskGraph": null,

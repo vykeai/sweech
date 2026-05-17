@@ -1,25 +1,26 @@
 /**
- * Sweech billing data — per-account next-billing-day storage.
+ * Sweech billing data — per-account billing-day storage.
  *
  * Vendor APIs (Anthropic, OpenAI, …) do not expose subscription
- * expiry. We persist the answer locally at `~/.sweech/billing.json`,
- * populated either:
- *   - automatically by `sweech accounts billing scan` which shells out
- *     to the `mailscan` CLI (sibling tool at ~/dev/onlytools/mailscan)
- *   - manually via `sweech accounts billing set` for users who don't
- *     run a local mail client or whose subscription does not generate
- *     a billing email matched by the catalog
+ * expiry. Sweech tracks ONLY the day-of-month the user is billed —
+ * a fact the user enters manually via `sweech billing set`.
+ *
+ * Sweech does NOT scan email, infer status (canceled / will_not_renew),
+ * or pull billing data from any other source. The user is the source
+ * of truth. If you want automatic email-scanning, run the standalone
+ * `mailscan` CLI yourself and feed its output into `sweech billing set`.
+ *
+ * Display contract: every surface shows ONLY the projected next-bill
+ * date (computed from billingDay against today). Status fields (kept
+ * in storage for backwards-compat with billing.json files populated
+ * by earlier versions) NEVER appear in CLI/SweechBar UI.
  *
  * The storage is intentionally a separate file from the vault
- * (`accounts.json`) so:
- *   - the vault stays auth-only — easier to reason about
- *   - billing data can be regenerated from scratch without touching
- *     credentials
- *   - the gitignore rule for `~/.sweech/` keeps both private
+ * (`accounts.json`) so the vault stays auth-only.
  *
- * Schema: `sweech.billing.v1`. The key for each entry is
- * `<vendor>:<email>` lowercased — one user may have separate
- * subscriptions to Anthropic + OpenAI on the same email.
+ * Schema: `sweech.billing.v1`. The only load-bearing field is
+ * `billingDay` (1-31); everything else is diagnostic or legacy.
+ * Key: `<vendor>:<email>` lowercased.
  */
 
 import * as fs from 'fs';
@@ -44,26 +45,35 @@ export type BillingStatus =
   | 'unknown';
 
 export interface BillingEntry {
-  /** Lowercased vendor id matching the mailscan catalog (e.g. 'anthropic'). */
+  /** Lowercased vendor id (e.g. 'anthropic'). */
   vendor: string;
   /** Lowercased recipient email. */
   email: string;
-  /** Subscription status — single source of truth for "is this account paying?". */
-  status: BillingStatus;
-  /** Best-effort plan label ("Max", "Pro", "Plus", null). */
-  plan: string | null;
-  /** Day-of-month (1-31) the user gets charged. */
+  /**
+   * Day-of-month (1-31) the user gets charged. **The single load-bearing
+   * field** — every display projects the next-bill date from this against
+   * today's calendar. Required for any meaningful display.
+   */
   billingDay: number | null;
-  /** ISO-8601 of the most recent receipt. */
-  lastPaidAt: string | null;
-  /** `YYYY-MM-DD` of the projected next charge, or null when canceled / unknown. */
-  nextBillingAt: string | null;
-  /** Where this entry came from. */
-  source: 'mailscan' | 'manual' | 'merged';
   /** ISO-8601 when this entry was last written. */
   updatedAt: string;
-  /** Optional free-text note (manual entries can carry annotations). */
+  /** Optional free-text note. */
   note?: string;
+
+  // ── Legacy / diagnostic fields ───────────────────────────────────
+  // Populated by the (now-removed) email scan integration. Kept in
+  // storage for backwards-compat with older billing.json files but
+  // NEVER displayed — see file header for the reasoning.
+  /** @deprecated UI does not render status — user manages subscription state out-of-band. */
+  status?: BillingStatus;
+  /** @deprecated UI does not render plan from billing — vault carries plan label. */
+  plan?: string | null;
+  /** @deprecated UI computes next-bill from billingDay; lastPaidAt is informational only. */
+  lastPaidAt?: string | null;
+  /** @deprecated stored value can drift; UI computes from billingDay + today. */
+  nextBillingAt?: string | null;
+  /** @deprecated sweech only writes 'manual' now; old entries may carry 'mailscan'. */
+  source?: 'mailscan' | 'manual' | 'merged';
 }
 
 export interface BillingFile {
@@ -157,49 +167,38 @@ export function removeEntry(file: BillingFile, vendor: string, email: string): B
   return { ...file, entries: next };
 }
 
-// ── Mailscan integration ─────────────────────────────────────────────
-
-export interface MailscanVendorEntry {
-  vendor: string;
-  status: BillingStatus;
-  plan: string | null;
-  lastPaidAt: string | null;
-  billingDay: number | null;
-  nextBillingEstimate: string | null;
-}
-
-export interface MailscanBillingReport {
-  schemaVersion: 'mailscan.billing.v1';
-  producer: 'mailscan';
-  scannedAt: string;
-  email: string;
-  vendors: Record<string, MailscanVendorEntry>;
-}
+// ── Date math (computed from billingDay) ─────────────────────────────
 
 /**
- * Merge a mailscan billing report into the billing file. Existing
- * manual entries are preserved (per `preserveManual: true`); existing
- * scan entries for the same vendor+email are overwritten.
+ * Project the next occurrence of `billingDay` against the supplied
+ * "now" timestamp. Returns YYYY-MM-DD UTC. Day 31 in months with fewer
+ * days clamps to the last day of that month (Anthropic/OpenAI's
+ * actual Stripe behavior).
+ *
+ * Always projects FORWARD: if today is the 25th and billingDay is the
+ * 15th, returns the 15th of NEXT month. If today is the 15th and
+ * billingDay is 15, returns today.
  */
-export function mergeMailscanReport(file: BillingFile, report: MailscanBillingReport): BillingFile {
-  let next = file;
-  for (const v of Object.values(report.vendors)) {
-    // Skip vendors that have no signal — don't store unknowns; they
-    // bloat the file and provide no useful info.
-    if (v.status === 'unknown' && v.lastPaidAt === null) continue;
-    next = upsertEntry(next, {
-      vendor: v.vendor,
-      email: report.email,
-      status: v.status,
-      plan: v.plan,
-      billingDay: v.billingDay,
-      lastPaidAt: v.lastPaidAt,
-      nextBillingAt: v.nextBillingEstimate,
-      source: 'mailscan',
-      updatedAt: new Date().toISOString(),
-    }, { preserveManual: true });
+export function projectNextBillingDate(billingDay: number, now: number = Date.now()): string | null {
+  if (!Number.isInteger(billingDay) || billingDay < 1 || billingDay > 31) return null;
+  const today = new Date(now);
+  const year = today.getUTCFullYear();
+  const month = today.getUTCMonth();
+  const dom = today.getUTCDate();
+
+  const daysInMonth = (y: number, m: number) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  const clamp = (y: number, m: number) => Math.min(billingDay, daysInMonth(y, m));
+
+  // Candidate 1: this month's billing day
+  const thisMonthDay = clamp(year, month);
+  if (dom <= thisMonthDay) {
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(thisMonthDay).padStart(2, '0')}`;
   }
-  return { ...next, lastScannedAt: report.scannedAt };
+  // Candidate 2: next month's billing day (wrap year if December)
+  const nextMonth = (month + 1) % 12;
+  const nextYear = month === 11 ? year + 1 : year;
+  const nextMonthDay = clamp(nextYear, nextMonth);
+  return `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(nextMonthDay).padStart(2, '0')}`;
 }
 
 // ── Convenience reads for display ────────────────────────────────────
@@ -212,23 +211,41 @@ export function getEntry(file: BillingFile, vendor: string, email: string): Bill
 }
 
 /**
- * Sort key for displaying "next bill" most-urgent-first. Entries with
- * no `nextBillingAt` go to the end.
+ * Sort key for "next bill" displays — entries with no billingDay go
+ * to the end. Among entries with a billingDay, sort by the projected
+ * next-bill date.
  */
-export function compareByNextBilling(a: BillingEntry, b: BillingEntry): number {
-  const av = a.nextBillingAt ?? '￿';
-  const bv = b.nextBillingAt ?? '￿';
+export function compareByNextBilling(a: BillingEntry, b: BillingEntry, now: number = Date.now()): number {
+  const av = a.billingDay ? projectNextBillingDate(a.billingDay, now) ?? '￿' : '￿';
+  const bv = b.billingDay ? projectNextBillingDate(b.billingDay, now) ?? '￿' : '￿';
   return av.localeCompare(bv);
 }
 
 /**
- * Compute days-until-next-bill from today. Returns null when no
- * `nextBillingAt` is known. Negative values mean the projected date
- * is in the past (subscription should have rolled or lapsed).
+ * Compute days-until-next-bill from today, projected freshly from
+ * `billingDay`. Returns null when no billingDay is set. The stored
+ * `nextBillingAt` field (if present from legacy entries) is ignored
+ * — it can drift; this computation always reflects the current month.
  */
 export function daysUntilNextBill(entry: BillingEntry, now: number = Date.now()): number | null {
-  if (!entry.nextBillingAt) return null;
-  const target = Date.parse(entry.nextBillingAt + 'T00:00:00Z');
+  if (entry.billingDay == null) return null;
+  const next = projectNextBillingDate(entry.billingDay, now);
+  if (!next) return null;
+  const target = Date.parse(next + 'T00:00:00Z');
   if (!Number.isFinite(target)) return null;
-  return Math.floor((target - now) / (24 * 60 * 60 * 1000));
+  const startOfToday = Date.UTC(
+    new Date(now).getUTCFullYear(),
+    new Date(now).getUTCMonth(),
+    new Date(now).getUTCDate(),
+  );
+  return Math.floor((target - startOfToday) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Compute the next-bill date as a YYYY-MM-DD string. Convenience
+ * wrapper around `projectNextBillingDate` that takes the whole entry.
+ */
+export function nextBillingDate(entry: BillingEntry, now: number = Date.now()): string | null {
+  if (entry.billingDay == null) return null;
+  return projectNextBillingDate(entry.billingDay, now);
 }

@@ -344,18 +344,19 @@ struct ProviderQuota: Codable, Hashable {
 
 /// A row in the central credential vault (~/.sweech/accounts.json).
 /// Billing snapshot per vault account, populated server-side by the
-/// sweech CLI from ~/.sweech/billing.json. Optional — accounts with no
-/// billing data (vendor APIs don't expose expiry, so this requires
-/// either `sweech billing scan` from local mail or `sweech billing set`)
-/// arrive with billing == nil.
+/// sweech CLI from ~/.sweech/billing.json (manual entries only — sweech
+/// doesn't scan email or any other source). Optional — accounts with no
+/// billing data arrive with billing == nil.
+///
+/// Display contract: only `billingDay` is durable. `nextBillingDate` and
+/// `daysUntilNextBill` are RECOMPUTED by the CLI against today on every
+/// emit, so the UI just renders them. We never display inferred status
+/// (canceled / will_not_renew) — those are unsafe judgements from
+/// incomplete data.
 struct VaultBilling: Codable, Hashable {
-    let status: String                  // "active" | "will_not_renew" | "canceled" | "unknown"
-    let plan: String?
-    let billingDay: Int?                // 1-31
-    let lastPaidAt: String?             // ISO-8601
-    let nextBillingAt: String?          // YYYY-MM-DD
+    let billingDay: Int                 // 1-31
+    let nextBillingDate: String?        // YYYY-MM-DD, projected against today
     let daysUntilNextBill: Int?
-    let source: String                  // "manual" | "mailscan"
     let updatedAt: String
 }
 
@@ -410,48 +411,52 @@ struct VaultAccount: Codable, Identifiable, Hashable {
         return String(format: "%.0fd", hours / 24)
     }
 
-    /// Short label for the billing chip rendered next to the account
-    /// row. Returns nil when no billing data is tracked. Renders:
-    ///   active     · "next May 24 (6d)"
-    ///   will_not_renew · "won't renew" (no projection — period end unknown)
-    ///   canceled   · "canceled"
-    ///   active without nextBillingAt · "active"
+    /// Short label for the billing chip — manually-entered billing day
+    /// projected against today. We never infer status from absence-of-
+    /// signal (canceled / will_not_renew) because that requires data
+    /// we don't have.
+    ///
+    /// Returns nil when no billing day is tracked for this account.
+    /// Renders: "bills 24th (6d)" — day-of-month + days-until.
     var billingLabel: String? {
         guard let b = billing else { return nil }
-        switch b.status {
-        case "canceled": return "canceled"
-        case "will_not_renew": return "won't renew"
-        case "active":
-            if let next = b.nextBillingAt, let days = b.daysUntilNextBill {
-                let when = days < 0 ? "\(-days)d ago" : "\(days)d"
-                // Trim the year for compactness in the menu bar — "May 24 (6d)"
-                let dateStr = String(next.dropFirst(5))   // "05-24"
-                return "next \(dateStr) (\(when))"
-            }
-            return "active"
-        default: return b.status
+        let dayStr = ordinalDay(b.billingDay)
+        if let days = b.daysUntilNextBill {
+            let when = days == 0 ? "today" : (days < 0 ? "\(-days)d ago" : "\(days)d")
+            return "bills \(dayStr) (\(when))"
         }
+        return "bills \(dayStr)"
     }
 
-    /// Color hint for the billing chip — yellow within 7d, red if overdue
-    /// or canceled, secondary otherwise. The caller maps these to SwiftUI
-    /// colors so the chip stays consistent with the rest of the row.
-    var billingSeverity: BillingSeverity {
-        guard let b = billing else { return .neutral }
-        if b.status == "canceled" { return .critical }
-        if b.status == "will_not_renew" { return .warning }
-        if let days = b.daysUntilNextBill {
-            if days < 0 { return .critical }
-            if days <= 7 { return .warning }
+    private func ordinalDay(_ day: Int) -> String {
+        let suffix: String
+        switch day % 100 {
+        case 11, 12, 13: suffix = "th"
+        default:
+            switch day % 10 {
+            case 1: suffix = "st"
+            case 2: suffix = "nd"
+            case 3: suffix = "rd"
+            default: suffix = "th"
+            }
         }
+        return "\(day)\(suffix)"
+    }
+
+    /// Color hint for the billing chip — yellow within 7d, otherwise
+    /// muted. No critical/red path: status-based urgency is exactly
+    /// the kind of inference we promised not to show. The chip is
+    /// strictly a calendar projection from observed receipts.
+    var billingSeverity: BillingSeverity {
+        guard let b = billing, let days = b.daysUntilNextBill else { return .neutral }
+        if days <= 7 { return .warning }
         return .neutral
     }
 }
 
 enum BillingSeverity {
-    case neutral    // active, > 7 days out — secondary color
-    case warning    // within 7 days OR will_not_renew — yellow
-    case critical   // overdue OR canceled — red
+    case neutral    // > 7 days to next billing date — muted
+    case warning    // within 7 days — yellow heads-up
 }
 
 struct VaultListResponse: Codable {

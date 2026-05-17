@@ -319,17 +319,23 @@ program
         return null;
       }
     })();
+    /**
+     * Decorate a workspace row with its billing-day projection.
+     * Renders the next-bill date computed from `billingDay` against
+     * today — manual data only, no scan-derived inference. Shows
+     * nothing when no billing day is set for the account.
+     */
     const fmtWsBilling = (provider: string | undefined, email?: string): string => {
       if (!billingFile || !provider) return '';
-      const { getEntry, daysUntilNextBill } = require('./billing') as typeof import('./billing');
+      const { getEntry, daysUntilNextBill, nextBillingDate } = require('./billing') as typeof import('./billing');
       const entry = email ? getEntry(billingFile, provider, email) : null;
-      if (!entry) return '';
-      if (entry.status === 'canceled') return chalk.red(' · billing: canceled');
-      if (!entry.nextBillingAt) return '';
+      if (!entry || entry.billingDay == null) return '';
+      const next = nextBillingDate(entry);
       const days = daysUntilNextBill(entry);
-      const dayStr = days === null ? '' : (days < 0 ? `${-days}d ago` : `${days}d`);
-      const color = days !== null && days <= 7 ? chalk.yellow : (days !== null && days < 0 ? chalk.red : chalk.dim);
-      return color(` · next bill ${entry.nextBillingAt} (${dayStr})`);
+      if (!next || days === null) return '';
+      const dayStr = days === 0 ? 'today' : (days < 0 ? `${-days}d ago` : `${days}d`);
+      const color = days >= 0 && days <= 7 ? chalk.yellow : chalk.dim;
+      return color(` · next bill ${next} (${dayStr})`);
     };
 
     const renderProfiles = (accountInfoMap?: Map<string, Awaited<ReturnType<typeof getAccountInfo>>[number]>): number => {
@@ -2946,200 +2952,48 @@ usageCmd
   });
 
 // ── sweech billing ────────────────────────────────────────────────────────────
-// Per-account next-billing-day tracking. The vendor APIs do not expose
-// subscription expiry, so sweech stores it locally — populated either
-// by `billing scan` (shells out to mailscan, sibling CLI tool) or by
-// `billing set` for manual overrides. Stored at ~/.sweech/billing.json,
-// separate from the auth vault.
+// Per-account billing-day tracking. The vendor APIs do not expose
+// subscription expiry, so sweech keeps a tiny local store at
+// ~/.sweech/billing.json keyed by (vendor, email) → billing day.
+// USER ENTRY ONLY — sweech does not scan email or any other source.
+// If you want auto-discovery, the standalone `mailscan` CLI prints
+// the billing day; copy it into `sweech billing set`.
 const billingCmd = program
   .command('billing')
-  .description('Per-account next-billing-day tracking (scan from local mail or set manually)');
+  .description('Track billing day per account (manual entry only — no email scanning)');
 
 billingCmd
-  .command('scan [email]')
-  .description('Scan local mail (via mailscan) for billing events. With no arg, scans every vault OAuth email.')
-  .option('--vendor <id>', 'Restrict to a single vendor id (e.g. anthropic)')
-  .option('--source <name>', 'spark | apple-mail | all (default: all)')
-  .option('--mailscan-bin <path>', 'Override the path to the mailscan binary (default: looks up via PATH or sibling repo)')
-  .option('--dry-run', 'Print what would be merged without writing billing.json')
-  .option('--json', 'Machine-readable summary')
-  .action(async (email: string | undefined, opts: { vendor?: string; source?: string; mailscanBin?: string; dryRun?: boolean; json?: boolean }) => {
-    const { readBillingFile, writeBillingFile, mergeMailscanReport } = require('./billing') as typeof import('./billing');
-    const { spawnSync } = require('child_process') as typeof import('child_process');
-
-    // Discover the set of emails to scan. Explicit arg wins; otherwise
-    // enumerate every OAuth identity in the vault. ApiKey accounts have
-    // no email — those must be filled in via `billing set`. Dedup
-    // because the same email appears in BOTH Anthropic and OpenAI
-    // identity rows when the user has one address per provider.
-    const targetSet = new Set<string>();
-    if (email) {
-      targetSet.add(email.toLowerCase());
-    } else {
-      const { listAccountsV2 } = require('./vault') as typeof import('./vault');
-      for (const acc of listAccountsV2()) {
-        if (acc.kind === 'oauth' && acc.email) targetSet.add(acc.email.toLowerCase());
-      }
-    }
-    const targets = [...targetSet];
-    if (targets.length === 0) {
-      console.error(chalk.red('No emails to scan. Pass an email arg or add an OAuth identity to the vault first.'));
-      process.exit(1);
-    }
-
-    // Find mailscan. Order of resolution:
-    //   1. explicit --mailscan-bin flag
-    //   2. MAILSCAN_BIN env var
-    //   3. sibling repo at ../mailscan/dist/cli.js (most common dev setup)
-    //   4. `mailscan` on $PATH (npm-link'd)
-    const fs = require('fs') as typeof import('fs');
-    const pathMod = require('path') as typeof import('path');
-    const siblingBin = pathMod.resolve(__dirname, '..', '..', 'mailscan', 'dist', 'cli.js');
-    let mailscanCmd: string[];
-    if (opts.mailscanBin) {
-      mailscanCmd = [opts.mailscanBin];
-    } else if (process.env.MAILSCAN_BIN) {
-      mailscanCmd = [process.env.MAILSCAN_BIN];
-    } else if (fs.existsSync(siblingBin)) {
-      mailscanCmd = [process.execPath, siblingBin];
-    } else {
-      // Defer existence check to spawnSync — if it's on PATH we get a clean error.
-      mailscanCmd = ['mailscan'];
-    }
-
-    let file = readBillingFile();
-    const summary: Array<{ email: string; vendors: string[]; error?: string }> = [];
-
-    for (const target of targets) {
-      const args = ['billing', target, '--json'];
-      if (opts.vendor) args.push('--vendor', opts.vendor);
-      if (opts.source) args.push('--source', opts.source);
-      const child = spawnSync(mailscanCmd[0], [...mailscanCmd.slice(1), ...args], {
-        encoding: 'utf-8',
-        env: process.env,
-        timeout: 30_000,
-      });
-      if (child.error) {
-        summary.push({ email: target, vendors: [], error: `mailscan not runnable: ${child.error.message}` });
-        continue;
-      }
-      if (child.status !== 0) {
-        const stderr = (child.stderr || '').trim() || `exit code ${child.status}`;
-        summary.push({ email: target, vendors: [], error: `mailscan failed: ${stderr}` });
-        continue;
-      }
-      try {
-        const report = JSON.parse(child.stdout) as Parameters<typeof mergeMailscanReport>[1];
-        const vendorIds = Object.keys(report.vendors).filter(v => {
-          const r = report.vendors[v];
-          return !(r.status === 'unknown' && r.lastPaidAt === null);
-        });
-        summary.push({ email: target, vendors: vendorIds });
-        if (!opts.dryRun) file = mergeMailscanReport(file, report);
-      } catch (e) {
-        summary.push({ email: target, vendors: [], error: `parse failed: ${e instanceof Error ? e.message : String(e)}` });
-      }
-    }
-
-    if (!opts.dryRun) writeBillingFile(file);
-
-    if (opts.json) {
-      process.stdout.write(JSON.stringify({
-        schemaVersion: 'sweech.billing-scan.v1',
-        producer: 'sweech',
-        dryRun: !!opts.dryRun,
-        scannedAt: new Date().toISOString(),
-        summary,
-      }, null, 2) + '\n');
-      return;
-    }
-
-    console.log(chalk.bold('\n  sweech · billing scan\n'));
-    for (const s of summary) {
-      if (s.error) {
-        console.log(`  ${chalk.red('✗')} ${s.email}  ${chalk.dim(s.error)}`);
-        continue;
-      }
-      const vendors = s.vendors.length ? s.vendors.join(', ') : chalk.dim('(no billing events)');
-      console.log(`  ${chalk.green('✓')} ${s.email}  → ${vendors}`);
-    }
-    console.log();
-    if (opts.dryRun) console.log(chalk.yellow('  (dry-run — nothing written)\n'));
-    else console.log(chalk.dim(`  Saved to ~/.sweech/billing.json\n`));
-  });
-
-billingCmd
-  .command('set <vendor> <email>')
-  .description('Manually set billing data for a vendor/email pair (overrides scan results)')
-  .option('--billing-day <n>', 'Day-of-month for the next charge (1-31)', (v) => parseInt(v, 10))
-  .option('--status <s>', 'active | will_not_renew | canceled | unknown')
-  .option('--plan <s>', 'Plan label (e.g. Max, Pro, Plus)')
-  .option('--last-paid <date>', 'YYYY-MM-DD of the most recent successful charge')
-  .option('--note <text>', 'Free-text annotation')
+  .command('set <vendor> <email> <day>')
+  .description('Set the billing day-of-month (1-31) for an account. Example: sweech billing set anthropic luke@example.com 24')
+  .option('--note <text>', 'Optional free-text annotation')
   .option('--json', 'Machine-readable output')
-  .action((vendor: string, email: string, opts: { billingDay?: number; status?: string; plan?: string; lastPaid?: string; note?: string; json?: boolean }) => {
-    const { readBillingFile, writeBillingFile, upsertEntry } = require('./billing') as typeof import('./billing');
-    const validStatus = new Set(['active', 'will_not_renew', 'canceled', 'unknown']);
-    if (opts.status && !validStatus.has(opts.status)) {
-      console.error(chalk.red(`Invalid --status '${opts.status}': must be one of ${[...validStatus].join(' | ')}`));
+  .action((vendor: string, email: string, day: string, opts: { note?: string; json?: boolean }) => {
+    const { readBillingFile, writeBillingFile, upsertEntry, projectNextBillingDate } = require('./billing') as typeof import('./billing');
+    const billingDay = parseInt(day, 10);
+    if (!Number.isInteger(billingDay) || billingDay < 1 || billingDay > 31) {
+      console.error(chalk.red(`Invalid billing day '${day}': must be an integer 1-31.`));
       process.exit(1);
-    }
-    if (opts.billingDay !== undefined && (!Number.isFinite(opts.billingDay) || opts.billingDay < 1 || opts.billingDay > 31)) {
-      console.error(chalk.red(`Invalid --billing-day '${opts.billingDay}': must be 1-31`));
-      process.exit(1);
-    }
-    if (opts.lastPaid && !/^\d{4}-\d{2}-\d{2}/.test(opts.lastPaid)) {
-      console.error(chalk.red(`Invalid --last-paid '${opts.lastPaid}': use YYYY-MM-DD`));
-      process.exit(1);
-    }
-
-    // Compute nextBillingAt from billing day + lastPaid when possible —
-    // manual entries are most useful when they answer "when does this
-    // recur?" so don't require the user to compute it.
-    let nextBillingAt: string | null = null;
-    if (opts.lastPaid) {
-      const d = new Date(opts.lastPaid + 'T00:00:00Z');
-      if (!Number.isNaN(d.getTime())) {
-        d.setUTCDate(d.getUTCDate() + 30);
-        nextBillingAt = d.toISOString().slice(0, 10);
-      }
-    } else if (opts.billingDay !== undefined) {
-      // No lastPaid known — project the next occurrence of billingDay
-      // from today. This is a coarse guess; the scanner will refine it
-      // once a real receipt arrives.
-      const now = new Date();
-      const candidate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), opts.billingDay));
-      if (candidate.getTime() < now.getTime()) {
-        candidate.setUTCMonth(candidate.getUTCMonth() + 1);
-      }
-      nextBillingAt = candidate.toISOString().slice(0, 10);
     }
 
     const file = readBillingFile();
     const entry = {
       vendor: vendor.toLowerCase(),
       email: email.toLowerCase(),
-      status: (opts.status as 'active' | 'will_not_renew' | 'canceled' | 'unknown') ?? 'active',
-      plan: opts.plan ?? null,
-      billingDay: opts.billingDay ?? null,
-      lastPaidAt: opts.lastPaid ? new Date(opts.lastPaid + 'T00:00:00Z').toISOString() : null,
-      nextBillingAt,
-      source: 'manual' as const,
+      billingDay,
       updatedAt: new Date().toISOString(),
       note: opts.note,
     };
-    const next = upsertEntry(file, entry);
-    writeBillingFile(next);
+    writeBillingFile(upsertEntry(file, entry));
 
+    const projected = projectNextBillingDate(billingDay);
     if (opts.json) {
-      process.stdout.write(JSON.stringify(entry, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ ...entry, nextBillingDate: projected }, null, 2) + '\n');
       return;
     }
-    console.log(chalk.green(`\n  ✓ saved billing entry for ${vendor}:${email}`));
-    if (entry.billingDay) console.log(`    billing day : ${entry.billingDay}`);
-    if (entry.plan) console.log(`    plan        : ${entry.plan}`);
-    console.log(`    status      : ${entry.status}`);
-    if (entry.nextBillingAt) console.log(`    next bill   : ${entry.nextBillingAt}`);
+    console.log(chalk.green(`\n  ✓ ${vendor}:${email}`));
+    console.log(`    billing day : ${billingDay}`);
+    if (projected) console.log(`    next bill   : ${projected}`);
+    if (opts.note) console.log(`    note        : ${opts.note}`);
     console.log();
   });
 
@@ -3148,39 +3002,44 @@ billingCmd
   .description('Print stored billing entries (all, or for one email)')
   .option('--json', 'Machine-readable output')
   .action((email: string | undefined, opts: { json?: boolean }) => {
-    const { readBillingFile, daysUntilNextBill, compareByNextBilling } = require('./billing') as typeof import('./billing');
+    const { readBillingFile, daysUntilNextBill, compareByNextBilling, nextBillingDate } = require('./billing') as typeof import('./billing');
     const file = readBillingFile();
     let entries = Object.values(file.entries);
     if (email) {
       const filterEmail = email.toLowerCase();
       entries = entries.filter(e => e.email === filterEmail);
     }
-    entries.sort(compareByNextBilling);
+    entries.sort((a, b) => compareByNextBilling(a, b));
 
     if (opts.json) {
+      // Enrich each entry with the freshly-projected next-bill date
+      // and days-until so consumers don't have to recompute it.
+      const enriched = entries.map(e => ({
+        ...e,
+        nextBillingDate: nextBillingDate(e),
+        daysUntilNextBill: daysUntilNextBill(e),
+      }));
       process.stdout.write(JSON.stringify({
         schemaVersion: 'sweech.billing.v1',
         producer: 'sweech',
-        lastScannedAt: file.lastScannedAt ?? null,
-        entries,
+        entries: enriched,
       }, null, 2) + '\n');
       return;
     }
     if (entries.length === 0) {
-      console.log(chalk.dim('\n  No billing entries yet. Run `sweech billing scan` or `sweech billing set`.\n'));
+      console.log(chalk.dim('\n  No billing entries yet. Add one with: sweech billing set <vendor> <email> <day>\n'));
       return;
     }
     console.log(chalk.bold('\n  sweech · billing\n'));
-    if (file.lastScannedAt) console.log(chalk.dim(`  last scan: ${file.lastScannedAt}\n`));
     const fmt = (n: number) => n >= 0 ? `${n}d` : `${-n}d ago`;
     for (const e of entries) {
       const days = daysUntilNextBill(e);
-      const urgency = days !== null && days >= 0 && days <= 7 ? chalk.yellow : (days !== null && days < 0 ? chalk.red : (x: string) => x);
-      const nextStr = e.nextBillingAt ? `${e.nextBillingAt} (${days !== null ? urgency(fmt(days)) : '—'})` : chalk.dim('—');
-      const planStr = e.plan ? ` · ${e.plan}` : '';
-      const sourceStr = chalk.dim(`[${e.source}]`);
-      console.log(`  ${e.vendor.padEnd(12)}  ${e.email.padEnd(28)}  ${e.status.padEnd(16)}${planStr}`);
-      console.log(`    next bill : ${nextStr}    ${sourceStr}`);
+      const next = nextBillingDate(e);
+      const urgency = days !== null && days >= 0 && days <= 7 ? chalk.yellow : (x: string) => x;
+      const nextStr = next && days !== null ? `${next} (${urgency(fmt(days))})` : chalk.dim('— (no billing day set)');
+      const dayStr = e.billingDay ? `day ${e.billingDay}` : chalk.dim('—');
+      console.log(`  ${e.vendor.padEnd(12)}  ${e.email.padEnd(30)}  ${dayStr}`);
+      console.log(`    next bill : ${nextStr}`);
       if (e.note) console.log(`    note      : ${chalk.dim(e.note)}`);
     }
     console.log();
@@ -5513,26 +5372,25 @@ program
         const shape = buildAccountsListJson(selected);
         // Load billing data once for the whole JSON build. SweechBar
         // shells out to this command and reads `account.billing.*` to
-        // render the next-bill-day chip in the Vault tab — without
-        // joining here SweechBar would need a second shell-out per
-        // refresh. Best-effort: a missing/malformed billing.json
-        // yields a null billing field on every account.
+        // render the next-bill chip in the Vault tab. Best-effort: a
+        // missing/malformed billing.json yields a null billing field
+        // on every account.
+        //
+        // Display contract: only `billingDay` is durable. Next-bill
+        // date + days-until are RECOMPUTED here against today, never
+        // read from the (potentially stale) stored fields.
         const billingMap = (() => {
           try {
-            const { readBillingFile, daysUntilNextBill, getEntry } = require('./billing') as typeof import('./billing');
+            const { readBillingFile, daysUntilNextBill, nextBillingDate, getEntry } = require('./billing') as typeof import('./billing');
             const file = readBillingFile();
             return (a: typeof shape.accounts[number]) => {
               if (a.kind !== 'oauth' || !a.email) return null;
               const entry = getEntry(file, a.provider, a.email);
-              if (!entry) return null;
+              if (!entry || entry.billingDay == null) return null;
               return {
-                status: entry.status,
-                plan: entry.plan,
                 billingDay: entry.billingDay,
-                lastPaidAt: entry.lastPaidAt,
-                nextBillingAt: entry.nextBillingAt,
+                nextBillingDate: nextBillingDate(entry),
                 daysUntilNextBill: daysUntilNextBill(entry),
-                source: entry.source,
                 updatedAt: entry.updatedAt,
               };
             };
@@ -5585,24 +5443,29 @@ program
           return null;
         }
       })();
+      /**
+       * Decorate an account row with its billing-day projection.
+       * Manual data only — sweech doesn't scan email and never
+       * displays inferred status. Shows nothing when no billing day
+       * is set for the account.
+       */
       const fmtBilling = (vendor: string, email?: string): string => {
         if (!billingFile) return '';
-        const { getEntry, daysUntilNextBill } = require('./billing') as typeof import('./billing');
+        const { getEntry, daysUntilNextBill, nextBillingDate } = require('./billing') as typeof import('./billing');
         // OAuth: vendor + email key. API key (no email): try every
         // entry with matching vendor and surface the soonest next-bill.
         let entry = email ? getEntry(billingFile, vendor, email) : null;
         if (!entry && !email) {
-          const matches = Object.values(billingFile.entries).filter(e => e.vendor === vendor.toLowerCase());
-          // Pick the most-recently-updated entry (most informative)
+          const matches = Object.values(billingFile.entries).filter(e => e.vendor === vendor.toLowerCase() && e.billingDay != null);
           entry = matches.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null;
         }
-        if (!entry) return '';
-        if (entry.status === 'canceled') return chalk.red(' · billing: canceled');
-        if (!entry.nextBillingAt) return chalk.dim(` · billing: ${entry.status}`);
+        if (!entry || entry.billingDay == null) return '';
+        const next = nextBillingDate(entry);
         const days = daysUntilNextBill(entry);
-        const dayStr = days === null ? '' : (days < 0 ? `${-days}d ago` : `${days}d`);
-        const color = days !== null && days <= 7 ? chalk.yellow : (days !== null && days < 0 ? chalk.red : chalk.dim);
-        return color(` · next bill ${entry.nextBillingAt} (${dayStr})`);
+        if (!next || days === null) return '';
+        const dayStr = days === 0 ? 'today' : (days < 0 ? `${-days}d ago` : `${days}d`);
+        const color = days >= 0 && days <= 7 ? chalk.yellow : chalk.dim;
+        return color(` · next bill ${next} (${dayStr})`);
       };
 
       // Render OAuth section (split by anthropic/openai for parity
