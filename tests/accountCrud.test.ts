@@ -80,6 +80,16 @@ function isolateHome(): string {
   setHomedir(home);
   process.env.SWEECH_HOME = home;
   fs.mkdirSync(path.join(home, '.sweech'), { recursive: true, mode: 0o700 });
+  // Hard safety check — see matching note in tests/workspaceCrud.test.ts.
+  // The incident damaged ~/.claude-ted via vault.workspaceMarkerPath().
+  // Refuse to run if homedir resolves outside tmpdir; better a noisy
+  // failure than silent corruption of real workspace files.
+  if (!os.homedir().startsWith(os.tmpdir()) || !os.homedir().includes('sweech-acct-test-')) {
+    throw new Error(
+      `isolateHome safety check failed: os.homedir()=${os.homedir()} is not under ${os.tmpdir()}. ` +
+      `Refusing to run — tests would corrupt the real home directory.`
+    );
+  }
   return home;
 }
 
@@ -177,20 +187,20 @@ describe('logoutAccount — decoupling contract', () => {
 
   test('drops keychain secret + clears markers + sets status=unauthorized', async () => {
     const a = await seedAnthropic('a@b.c');
-    const workspaces = [{ commandName: 'claude-ted' }];
+    const workspaces = [{ commandName: 'test-ted' }];
 
     // Mount the account into the workspace so logout has something to clear.
-    const wsDir = path.join(home, '.claude-ted');
+    const wsDir = path.join(home, '.test-ted');
     fs.mkdirSync(wsDir, { recursive: true, mode: 0o700 });
-    setActiveAccountId('claude-ted', a.id);
-    expect(getActiveAccountId('claude-ted')).toBe(a.id);
+    setActiveAccountId('test-ted', a.id);
+    expect(getActiveAccountId('test-ted')).toBe(a.id);
 
     const result = await logoutAccount('a@b.c', workspaces);
     expect(result.hadSecret).toBe(true);
-    expect(result.unmountedWorkspaces).toEqual(['claude-ted']);
+    expect(result.unmountedWorkspaces).toEqual(['test-ted']);
 
     // Marker is gone.
-    expect(getActiveAccountId('claude-ted')).toBeNull();
+    expect(getActiveAccountId('test-ted')).toBeNull();
     // Workspace data dir is intact — that's the load-bearing decoupling.
     expect(fs.existsSync(wsDir)).toBe(true);
     // Account row is intact, but status flipped.
@@ -216,24 +226,24 @@ describe('deleteAccount — decoupling contract', () => {
 
   test('removes account row + secret; clears markers; LEAVES workspace dir intact', async () => {
     const a = await seedAnthropic('ted@anthropic.test');
-    const workspaces = [{ commandName: 'claude-ted' }];
+    const workspaces = [{ commandName: 'test-ted' }];
 
     // Mount + seed workspace data.
-    const wsDir = path.join(home, '.claude-ted');
+    const wsDir = path.join(home, '.test-ted');
     fs.mkdirSync(wsDir, { recursive: true, mode: 0o700 });
-    setActiveAccountId('claude-ted', a.id);
+    setActiveAccountId('test-ted', a.id);
     fs.writeFileSync(path.join(wsDir, 'history.jsonl'), '{"session":"important"}\n');
 
     const result = await deleteAccount('ted@anthropic.test', workspaces);
     expect(result.hadSecret).toBe(true);
-    expect(result.unmountedWorkspaces).toEqual(['claude-ted']);
+    expect(result.unmountedWorkspaces).toEqual(['test-ted']);
 
     // Account row gone.
     expect(listAccounts().find(x => x.id === a.id)).toBeUndefined();
     // Keychain entry gone.
     expect(credStore.size).toBe(0);
     // Marker gone.
-    expect(fs.existsSync(workspaceMarkerPath('claude-ted'))).toBe(false);
+    expect(fs.existsSync(workspaceMarkerPath('test-ted'))).toBe(false);
     // *** Critical: workspace data dir + history are intact ***
     expect(fs.existsSync(wsDir)).toBe(true);
     expect(fs.readFileSync(path.join(wsDir, 'history.jsonl'), 'utf-8')).toContain('important');
@@ -241,14 +251,14 @@ describe('deleteAccount — decoupling contract', () => {
 
   test('--keep-workspace-markers preserves the .sweech-account file', async () => {
     const a = await seedAnthropic('a@b.c');
-    const workspaces = [{ commandName: 'claude-x' }];
-    fs.mkdirSync(path.join(home, '.claude-x'), { recursive: true, mode: 0o700 });
-    setActiveAccountId('claude-x', a.id);
+    const workspaces = [{ commandName: 'test-x' }];
+    fs.mkdirSync(path.join(home, '.test-x'), { recursive: true, mode: 0o700 });
+    setActiveAccountId('test-x', a.id);
 
     const result = await deleteAccount('a@b.c', workspaces, { keepWorkspaceMarkers: true });
     expect(result.unmountedWorkspaces).toEqual([]);
     // Marker survives — even though the account it points to is gone.
-    expect(getActiveAccountId('claude-x')).toBe(a.id);
+    expect(getActiveAccountId('test-x')).toBe(a.id);
   });
 
   test('refuses on ambiguous email and surfaces hint', async () => {
