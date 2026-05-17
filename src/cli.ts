@@ -37,6 +37,17 @@ import { kickBackgroundRefresh } from './backgroundRefresh';
 import { recommendRoute, suggestBestAccount } from './accountSelector';
 import { buildAutoCommandJson, buildAutoExecEnv, noProfileErrorMessage, readSettingsEnv } from './autoCommand';
 import {
+  findProjectPin,
+  readProjectPin,
+  writeProjectPin,
+  removeProjectPin,
+  PIN_FILENAME,
+  type ProjectPin,
+  type ProjectPinCliType,
+  type ProjectPinTier,
+  type ProjectPinResolved,
+} from './projectConfig';
+import {
   clearAllCooldowns,
   clearCooldown,
   getActiveCooldowns,
@@ -1456,6 +1467,8 @@ program
   }) => {
     if (opts.route) {
       try {
+        // T-LU-009: ambient project pin applies to every route check.
+        const projectPin = findProjectPin();
         const recommendation = await recommendRoute({
           taskType: opts.taskType,
           repo: opts.repo,
@@ -1464,7 +1477,7 @@ program
           preferredProvider: opts.preferredProvider,
           preferredModel: opts.preferredModel,
           preferredProfile: profileName,
-        });
+        }, undefined, projectPin);
         const selected = recommendation.selected;
         const blocked = !selected
           ? recommendation.candidates.find(candidate => (
@@ -1487,6 +1500,9 @@ program
         } else if (selected) {
           console.log(chalk.green(`✓ ${selected.route.commandName}`));
           console.log(chalk.gray(`  ${selected.route.launch.mode}: ${selected.route.launch.command}`));
+          if (recommendation.pinApplied) {
+            console.log(chalk.gray(`  pinned from ${recommendation.pinApplied.source}`));
+          }
         } else {
           const guidance = blocked?.route.launch.installGuidance;
           console.log(chalk.yellow('No route available'));
@@ -2441,6 +2457,8 @@ program
     json?: boolean;
   }) => {
     try {
+      // T-LU-009: ambient project pin overrides cliType / preferred-profile.
+      const projectPin = findProjectPin();
       const recommendation = await recommendRoute({
         taskType: opts.taskType,
         repo: opts.repo,
@@ -2449,7 +2467,7 @@ program
         preferredProvider: opts.preferredProvider,
         preferredModel: opts.preferredModel,
         preferredProfile: opts.preferredProfile,
-      });
+      }, undefined, projectPin);
 
       if (opts.json !== false) {
         process.stdout.write(JSON.stringify(recommendation, null, 2) + '\n');
@@ -2458,12 +2476,18 @@ program
 
       if (!recommendation.selected) {
         console.log(chalk.yellow('No route available'));
+        if (recommendation.pinApplied) {
+          console.log(chalk.gray(`  pin: ${recommendation.pinApplied.source}`));
+        }
         process.exitCode = 1;
         return;
       }
 
       const selected = recommendation.selected.route;
       console.log(`${selected.commandName} ${chalk.dim(`[${selected.cliType}/${selected.provider}/${selected.model ?? 'default'}] ${selected.launch.mode} ${selected.launch.command}`)}`);
+      if (recommendation.pinApplied) {
+        console.log(chalk.dim(`  pinned from ${recommendation.pinApplied.source}`));
+      }
     } catch (error: unknown) {
       const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
       console.error(chalk.red('Recommendation failed:'), msg);
@@ -4497,11 +4521,22 @@ program
     const config = new ConfigManager();
     const profiles = config.getProfiles();
 
+    // T-LU-009: pick up a `.sweech.json` from the cwd upward so projects
+    // can pin routing. The pin overrides cliType/profile/maxTier — see
+    // src/projectConfig.ts. Surface the source path so the user knows
+    // the routing decision was project-driven, never magic. Computed
+    // before the budget branch so its source path can decorate the
+    // budget-path JSON output too.
+    const projectPin = findProjectPin();
+
     // ── --budget path: delegate to routeWithinBudget so the dollar
     //    ceiling is the source of truth for the pick. Without --budget
-    //    the original quota-based scoring stays as-is.
+    //    the original quota-based scoring stays as-is. The project pin
+    //    is surfaced in output but does NOT short-circuit budget — a
+    //    pinned profile that exceeds budget is still rejected so the
+    //    user gets honest signal.
     if (opts.budget !== undefined && Number.isFinite(opts.budget)) {
-      const cliType = (opts.cli ?? 'claude') as CLIType;
+      const cliType = (opts.cli ?? projectPin?.pin.cliType ?? 'claude') as CLIType;
       const { routeWithinBudget } = require('./budgetRouter') as typeof import('./budgetRouter');
       const result = await routeWithinBudget({
         cliType,
@@ -4512,9 +4547,16 @@ program
       if (!result) {
         const message = `no profile fits budget $${opts.budget.toFixed(4)}/call`;
         if (opts.json) {
-          process.stdout.write(JSON.stringify({ error: message, budgetUsd: opts.budget }) + '\n');
+          process.stdout.write(JSON.stringify({
+            error: message,
+            budgetUsd: opts.budget,
+            ...(projectPin ? { pinApplied: { source: projectPin.source, pin: projectPin.pin } } : {}),
+          }) + '\n');
         } else {
           console.error(chalk.red(`\n  ${message}\n`));
+          if (projectPin) {
+            console.error(chalk.gray(`  (Pin in effect: ${projectPin.source})`));
+          }
         }
         process.exit(1);
       }
@@ -4528,6 +4570,7 @@ program
           budgetUsd: opts.budget,
           score: result.score,
           command: `sweech use ${result.account}`,
+          ...(projectPin ? { pinApplied: { source: projectPin.source, pin: projectPin.pin } } : {}),
         }, null, 2) + '\n');
         return;
       }
@@ -4550,18 +4593,28 @@ program
       console.log(`  cli      : ${result.cliType}`);
       console.log(`  model    : ${result.model}`);
       console.log(`  cost     : ${chalk.green('$' + result.estimatedCostUsd.toFixed(4))} (budget $${opts.budget.toFixed(4)})`);
-      console.log(`  launch   : ${chalk.cyan('sweech use ' + result.account)}\n`);
+      console.log(`  launch   : ${chalk.cyan('sweech use ' + result.account)}`);
+      if (projectPin) {
+        console.log(`  pinned   : ${chalk.yellow(projectPin.source)}`);
+      }
+      console.log();
       return;
     }
 
-    const recommendation = await suggestBestAccount(opts.cli, profiles);
+    const recommendation = await suggestBestAccount(opts.cli, profiles, projectPin);
 
     if (!recommendation) {
       const message = noProfileErrorMessage(opts.cli);
       if (opts.json) {
-        process.stdout.write(JSON.stringify({ error: message }) + '\n');
+        process.stdout.write(JSON.stringify({
+          error: message,
+          ...(projectPin ? { pinApplied: { source: projectPin.source, pin: projectPin.pin } } : {}),
+        }) + '\n');
       } else {
         console.error(chalk.red(`\n  No available profile${opts.cli ? ` for --cli ${opts.cli}` : ''} (all rate-limited or need re-auth).\n`));
+        if (projectPin) {
+          console.error(chalk.gray(`  (Pin in effect: ${projectPin.source})`));
+        }
       }
       process.exit(1);
     }
@@ -4570,7 +4623,15 @@ program
     const json = buildAutoCommandJson(recommendation);
 
     if (opts.json) {
-      process.stdout.write(JSON.stringify(json, null, 2) + '\n');
+      const payload: Record<string, unknown> = { ...json };
+      if (recommendation.pinApplied) {
+        payload.pinApplied = {
+          source: recommendation.pinApplied.source,
+          projectRoot: recommendation.pinApplied.projectRoot,
+          pin: recommendation.pinApplied.pin,
+        };
+      }
+      process.stdout.write(JSON.stringify(payload, null, 2) + '\n');
       return;
     }
 
@@ -4595,7 +4656,13 @@ program
     console.log(`  profile  : ${chalk.bold(pick.commandName)}`);
     console.log(`  cli      : ${pick.cliType}`);
     console.log(`  reason   : ${chalk.dim(recommendation.reason)}`);
-    console.log(`  launch   : ${chalk.cyan(json.command)}\n`);
+    console.log(`  launch   : ${chalk.cyan(json.command)}`);
+    if (recommendation.pinApplied) {
+      // The user must always be told when a project pin influenced the
+      // outcome — never magic. T-LU-009 acceptance.
+      console.log(`  pinned   : ${chalk.yellow(recommendation.pinApplied.source)}`);
+    }
+    console.log();
     console.log(chalk.dim('  Tip: sweech auto --exec  → spawn the CLI directly.'));
     console.log();
   });
@@ -4723,6 +4790,170 @@ program
       console.log(chalk.dim('  Tip: sweech failover --exec  → spawn the CLI + record the rotation.'));
       console.log();
     }
+  });
+
+// ── sweech pin ──────────────────────────────────────────────────────────────
+// T-LU-009: project-aware routing. `.sweech.json` at the project root
+// pins the profile/cliType/maxTier for everything inside. The CLI walks
+// upward from cwd looking for the nearest pin so monorepos pin once.
+//
+// Subcommands:
+//   sweech pin show          → print active pin (cwd-relative search)
+//   sweech pin set …flags    → write ./.sweech.json
+//   sweech pin unset         → delete ./.sweech.json
+//   sweech pin --json        → JSON of active pin (combine with show/set/unset)
+program
+  .command('pin [action]')
+  .description('Project-aware routing pin (.sweech.json). Actions: show (default), set, unset')
+  .option('--profile <profile>', 'Pin a profile commandName (set)')
+  .option('--cli <type>', 'Pin a CLI type: claude | codex | kimi (set)')
+  .option('--max-tier <tier>', 'Cap routing tier: free | pro | max | team | enterprise (set)')
+  .option('--model <id>', 'Pin a preferred model id (set)')
+  .option('--dir <path>', 'Write/remove the pin at this directory instead of cwd (set, unset)')
+  .option('--json', 'Machine-readable JSON output')
+  .action(async (action: string | undefined, opts: {
+    profile?: string;
+    cli?: string;
+    maxTier?: string;
+    model?: string;
+    dir?: string;
+    json?: boolean;
+  }) => {
+    const sub = (action || 'show').toLowerCase();
+
+    // ── show: dump the resolved pin from the current cwd upward walk ──
+    if (sub === 'show') {
+      const resolved = findProjectPin();
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(
+          resolved
+            ? { pin: resolved.pin, source: resolved.source, projectRoot: resolved.projectRoot }
+            : { pin: null, source: null, projectRoot: null, searchRoot: process.cwd() },
+          null,
+          2,
+        ) + '\n');
+        return;
+      }
+      if (!resolved) {
+        console.log(chalk.gray(`\n  No ${PIN_FILENAME} found above ${process.cwd()}\n`));
+        return;
+      }
+      console.log(chalk.bold('\n  sweech · pin (active)\n'));
+      console.log(`  source       : ${chalk.cyan(resolved.source)}`);
+      console.log(`  project root : ${resolved.projectRoot}`);
+      if (resolved.pin.profile) console.log(`  profile      : ${chalk.bold(resolved.pin.profile)}`);
+      if (resolved.pin.cliType) console.log(`  cliType      : ${resolved.pin.cliType}`);
+      if (resolved.pin.maxTier) console.log(`  maxTier      : ${resolved.pin.maxTier}`);
+      if (resolved.pin.model)   console.log(`  model        : ${resolved.pin.model}`);
+      console.log();
+      return;
+    }
+
+    // ── set: write ./.sweech.json (or --dir) ──
+    if (sub === 'set') {
+      if (!opts.profile && !opts.cli && !opts.maxTier && !opts.model) {
+        const msg = 'sweech pin set requires at least one of: --profile, --cli, --max-tier, --model';
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+        } else {
+          console.error(chalk.red(`\n  ${msg}\n`));
+        }
+        process.exit(1);
+      }
+      const dir = path.resolve(opts.dir || process.cwd());
+      try {
+        if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+          const msg = `target directory does not exist: ${dir}`;
+          if (opts.json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+          else console.error(chalk.red(`\n  ${msg}\n`));
+          process.exit(1);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (opts.json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+        else console.error(chalk.red(`\n  ${msg}\n`));
+        process.exit(1);
+      }
+
+      // Validate values up front so we fail loudly instead of writing an
+      // invalid pin that readProjectPin would then silently drop. Mirrors
+      // projectConfig.validatePin (intentionally — both gates exist).
+      if (opts.cli && !['claude', 'codex', 'kimi'].includes(opts.cli)) {
+        const msg = `--cli must be one of: claude, codex, kimi`;
+        if (opts.json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+        else console.error(chalk.red(`\n  ${msg}\n`));
+        process.exit(1);
+      }
+      if (opts.maxTier && !['free', 'pro', 'max', 'team', 'enterprise'].includes(opts.maxTier)) {
+        const msg = `--max-tier must be one of: free, pro, max, team, enterprise`;
+        if (opts.json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+        else console.error(chalk.red(`\n  ${msg}\n`));
+        process.exit(1);
+      }
+
+      // Merge into any existing pin at this directory so partial updates
+      // preserve unrelated fields (e.g. `set --profile X` shouldn't blow
+      // away a previously-pinned maxTier).
+      const target = path.join(dir, PIN_FILENAME);
+      const existing = fs.existsSync(target) ? (readProjectPin(target) ?? {}) : {};
+      const next: ProjectPin = {
+        ...existing,
+        ...(opts.profile !== undefined ? { profile: opts.profile } : {}),
+        ...(opts.cli !== undefined ? { cliType: opts.cli as ProjectPinCliType } : {}),
+        ...(opts.maxTier !== undefined ? { maxTier: opts.maxTier as ProjectPinTier } : {}),
+        ...(opts.model !== undefined ? { model: opts.model } : {}),
+      };
+      let written: string;
+      try {
+        written = writeProjectPin(dir, next);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (opts.json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+        else console.error(chalk.red(`\n  failed to write pin: ${msg}\n`));
+        process.exit(1);
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ ok: true, source: written, pin: next }, null, 2) + '\n');
+        return;
+      }
+      console.log(chalk.green(`\n  ✓ wrote ${written}`));
+      if (next.profile) console.log(`    profile : ${next.profile}`);
+      if (next.cliType) console.log(`    cliType : ${next.cliType}`);
+      if (next.maxTier) console.log(`    maxTier : ${next.maxTier}`);
+      if (next.model)   console.log(`    model   : ${next.model}`);
+      console.log();
+      return;
+    }
+
+    // ── unset: delete ./.sweech.json (or --dir) ──
+    if (sub === 'unset') {
+      const dir = path.resolve(opts.dir || process.cwd());
+      let removed = false;
+      try {
+        removed = removeProjectPin(dir);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (opts.json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+        else console.error(chalk.red(`\n  failed to remove pin: ${msg}\n`));
+        process.exit(1);
+      }
+      const target = path.join(dir, PIN_FILENAME);
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ ok: true, removed, source: target }) + '\n');
+        return;
+      }
+      if (removed) {
+        console.log(chalk.green(`\n  ✓ removed ${target}\n`));
+      } else {
+        console.log(chalk.gray(`\n  no ${PIN_FILENAME} at ${dir}\n`));
+      }
+      return;
+    }
+
+    const msg = `unknown action '${action}' — expected: show | set | unset`;
+    if (opts.json) process.stdout.write(JSON.stringify({ ok: false, error: msg }) + '\n');
+    else console.error(chalk.red(`\n  ${msg}\n`));
+    process.exit(1);
   });
 
 // ── sweech code-review ─────────────────────────────────────────────────────

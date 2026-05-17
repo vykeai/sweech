@@ -23,6 +23,7 @@ jest.mock('../src/subscriptions', () => ({
 }));
 jest.mock('../src/auditLog', () => ({
   readAuditLog: jest.fn(() => []),
+  logAudit: jest.fn(),
 }));
 
 import {
@@ -36,7 +37,8 @@ import {
 import { getAccountInfo, getKnownAccounts } from '../src/subscriptions';
 import * as fs from 'fs';
 import { getCLI, SUPPORTED_CLIS } from '../src/clis';
-import { readAuditLog } from '../src/auditLog';
+import { readAuditLog, logAudit } from '../src/auditLog';
+import type { ProjectPinResolved } from '../src/projectConfig';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -772,5 +774,280 @@ describe('recommendRoute', () => {
       installGuidance: null,
     });
     expect(result.selected!.capabilities).toContain('launch:native-cli-profile');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T-LU-009: project-pin integration with recommendRoute / suggestBestAccount
+// ---------------------------------------------------------------------------
+
+function makeResolvedPin(pin: ProjectPinResolved['pin']): ProjectPinResolved {
+  return {
+    pin,
+    source: '/tmp/test-project/.sweech.json',
+    projectRoot: '/tmp/test-project',
+  };
+}
+
+describe('recommendRoute with projectPin', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (fs.statSync as jest.Mock).mockReturnValue({ mode: 0o755 });
+    (readAuditLog as jest.Mock).mockReturnValue([]);
+    (logAudit as jest.Mock).mockClear();
+  });
+
+  test('echoes pinApplied back on the response', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.2 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const pin = makeResolvedPin({ profile: 'claude-a' });
+    const result = await recommendRoute({}, profiles as any, pin);
+
+    expect(result.pinApplied).toEqual(pin);
+    expect(result.selected!.route.commandName).toBe('claude-a');
+  });
+
+  test('pin.cliType overrides the request cliType', async () => {
+    const profiles = [
+      { name: 'c', commandName: 'claude-c', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+      { name: 'd', commandName: 'codex-d', cliType: 'codex' as const, provider: 'openai', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'c', commandName: 'claude-c', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.3 }),
+      }),
+      makeAccountInfo({
+        name: 'd', commandName: 'codex-d', cliType: 'codex',
+        live: makeLive({ status: 'allowed', utilization7d: 0.9 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    // Request asks for codex, pin says claude — pin wins.
+    const pin = makeResolvedPin({ cliType: 'claude' });
+    const result = await recommendRoute({ cliType: 'codex' }, profiles as any, pin);
+
+    expect(result.selected!.route.cliType).toBe('claude');
+    expect(result.selected!.route.commandName).toBe('claude-c');
+  });
+
+  test('pin.profile becomes preferredProfile (caller override wins)', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+      { name: 'b', commandName: 'claude-b', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.4 }),
+      }),
+      makeAccountInfo({
+        name: 'b', commandName: 'claude-b', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.1 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    // Caller passed preferredProfile=claude-b — pin's profile=claude-a is overridden.
+    const pin = makeResolvedPin({ profile: 'claude-a' });
+    const result = await recommendRoute(
+      { preferredProfile: 'claude-b' },
+      profiles as any,
+      pin,
+    );
+    // Caller wins: preferredProfile=claude-b => only claude-b is unrejected.
+    expect(result.selected!.route.commandName).toBe('claude-b');
+  });
+
+  test('pin with profile that does not exist falls through to ranking (warn)', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.3 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const pin = makeResolvedPin({ profile: 'ghost-profile' });
+    const result = await recommendRoute({}, profiles as any, pin);
+
+    // The pin's profile doesn't match → preferredProfile filter rejects claude-a → selected is null.
+    // Then the stderr warning informs the user.
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("'ghost-profile'"));
+    errSpy.mockRestore();
+  });
+
+  test('pin.maxTier filters out candidates whose tier exceeds the cap', async () => {
+    const profiles = [
+      { name: 'pro', commandName: 'claude-pro', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+      { name: 'max', commandName: 'claude-max', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'pro', commandName: 'claude-pro', cliType: 'claude',
+        rateLimitTier: 'pro',
+        live: makeLive({ status: 'allowed', utilization7d: 0.5 }),
+      }),
+      makeAccountInfo({
+        name: 'max', commandName: 'claude-max', cliType: 'claude',
+        rateLimitTier: 'default_claude_max_20x',
+        live: makeLive({ status: 'allowed', utilization7d: 0.5 }),
+        hoursUntilWeeklyReset: 1, // would otherwise win
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    // Cap at pro — claude-max should get the pin-max-tier-exceeded reason.
+    const pin = makeResolvedPin({ maxTier: 'pro' });
+    const result = await recommendRoute({}, profiles as any, pin);
+
+    const maxCandidate = result.candidates.find(c => c.route.commandName === 'claude-max');
+    expect(maxCandidate!.reasons.some(r => r.startsWith('pin-max-tier-exceeded'))).toBe(true);
+    // pro candidate is the selected one.
+    expect(result.selected!.route.commandName).toBe('claude-pro');
+  });
+
+  test('writes an audit log entry when a pin is applied and a route is selected', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.2 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const pin = makeResolvedPin({ profile: 'claude-a', cliType: 'claude' });
+    await recommendRoute({}, profiles as any, pin);
+
+    expect(logAudit).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'route_pin_applied',
+      account: 'claude-a',
+      details: expect.objectContaining({
+        source: pin.source,
+        projectRoot: pin.projectRoot,
+        pin: pin.pin,
+      }),
+    }));
+  });
+
+  test('does NOT write an audit entry when no pin is applied', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.2 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    await recommendRoute({}, profiles as any);
+    expect(logAudit).not.toHaveBeenCalled();
+  });
+
+  test('pinApplied is null when no pin is passed', async () => {
+    (getKnownAccounts as jest.Mock).mockReturnValue([]);
+    (getAccountInfo as jest.Mock).mockResolvedValue([]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const result = await recommendRoute({}, [] as any);
+    expect(result.pinApplied).toBeNull();
+  });
+
+  test('pin.model becomes preferredModel hint', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', model: 'claude-opus-4-7', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.2 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const pin = makeResolvedPin({ model: 'claude-opus-4-7' });
+    const result = await recommendRoute({}, profiles as any, pin);
+    // Score is bumped by 20 for preferred-model match (see requestedTaskBonus).
+    // We can verify the merge happened by checking the request echo.
+    expect(result.request.preferredModel).toBe('claude-opus-4-7');
+  });
+});
+
+describe('suggestBestAccount with projectPin', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (fs.statSync as jest.Mock).mockReturnValue({ mode: 0o755 });
+    (readAuditLog as jest.Mock).mockReturnValue([]);
+    (logAudit as jest.Mock).mockClear();
+  });
+
+  test('echoes pinApplied on the AccountRecommendation', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.2 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const pin = makeResolvedPin({ profile: 'claude-a' });
+    const result = await suggestBestAccount(undefined, profiles as any, pin);
+
+    expect(result).toBeDefined();
+    expect(result!.pinApplied).toEqual(pin);
+    expect(result!.account.commandName).toBe('claude-a');
+  });
+
+  test('returns undefined when pinned profile is missing and only profile asked', async () => {
+    const profiles = [
+      { name: 'a', commandName: 'claude-a', cliType: 'claude' as const, provider: 'anthropic', createdAt: '2025-01-01T00:00:00Z' },
+    ];
+    (getKnownAccounts as jest.Mock).mockReturnValue(profiles.map(p => ({ ...p, isDefault: false })));
+    (getAccountInfo as jest.Mock).mockResolvedValue([
+      makeAccountInfo({
+        name: 'a', commandName: 'claude-a', cliType: 'claude',
+        live: makeLive({ status: 'allowed', utilization7d: 0.2 }),
+      }),
+    ]);
+    (fs.existsSync as jest.Mock).mockReturnValue(true);
+
+    const errSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const pin = makeResolvedPin({ profile: 'ghost-profile' });
+    const result = await suggestBestAccount(undefined, profiles as any, pin);
+    // Pin says ghost-profile, no candidate matches preferredProfile=ghost-profile → unselected.
+    expect(result).toBeUndefined();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("'ghost-profile'"));
+    errSpy.mockRestore();
   });
 });

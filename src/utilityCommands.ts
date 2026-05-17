@@ -21,6 +21,7 @@ import { DEFAULT_DAEMON_PORT } from './constants';
 import { getAllRefreshEtas } from './tokenRefresh';
 import { isLaunchdInstalled, isLaunchdRunning, LAUNCHD_LABEL, LAUNCHD_PLIST_PATH } from './launchd';
 import { isMacOS } from './platform';
+import { findProjectPin, PIN_FILENAME } from './projectConfig';
 
 const execFileAsync = promisify(execFile);
 
@@ -291,6 +292,37 @@ export async function runDoctor(): Promise<void> {
     console.log(chalk.gray(`  ✗ No usage cache found — run \`sweech usage\` to populate`));
     // No cache is informational, not a warning — fresh installs land here.
     severities.push('ok');
+  }
+
+  // T-LU-009: project-aware routing — surfaces the active `.sweech.json`
+  // pin (if any) so operators can see why `sweech auto` is making the
+  // choices it makes. Search root is the current cwd; pin is found by
+  // walking upward. No pin found is informational (gray), not a problem.
+  console.log(chalk.bold('\nProject pin:'));
+  try {
+    const pinResolved = findProjectPin();
+    if (pinResolved) {
+      const { pin, source } = pinResolved;
+      const parts: string[] = [];
+      if (pin.profile) parts.push(`profile=${pin.profile}`);
+      if (pin.cliType) parts.push(`cli=${pin.cliType}`);
+      if (pin.maxTier) parts.push(`maxTier=${pin.maxTier}`);
+      if (pin.model)   parts.push(`model=${pin.model}`);
+      const summary = parts.length > 0 ? parts.join(', ') : '(empty pin)';
+      console.log(chalk.green(`  ✓ ${summary}`));
+      console.log(chalk.gray(`    source: ${source}`));
+      severities.push('ok');
+    } else {
+      let cwd: string;
+      try { cwd = process.cwd(); } catch { cwd = os.homedir(); }
+      console.log(chalk.gray(`  · no ${PIN_FILENAME} found (search root: ${cwd})`));
+      console.log(chalk.gray(`    Run: sweech pin set --profile <name>  to pin this project`));
+      severities.push('ok');
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(chalk.yellow(`  ⚠ pin lookup failed: ${msg}`));
+    severities.push('warn');
   }
 
   // T-053: daemon /healthz probe — surfaces as its own row, with a 5s

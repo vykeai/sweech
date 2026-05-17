@@ -14,8 +14,13 @@ import { ConfigManager, ProfileConfig } from './config';
 import { CLIType, getProvider } from './providers';
 import { SUPPORTED_CLIS, getCLI } from './clis';
 import { getAccountInfo, getKnownAccounts, type AccountInfo } from './subscriptions';
-import { readAuditLog, type AuditEntry } from './auditLog';
+import { readAuditLog, logAudit, type AuditEntry } from './auditLog';
 import { scrubSecrets } from './scrubSecrets';
+import {
+  exceedsMaxTier,
+  type ProjectPin,
+  type ProjectPinResolved,
+} from './projectConfig';
 
 export type RouteFailureClass =
   | 'auth-required'
@@ -40,6 +45,13 @@ export interface AccountRecommendation {
   account: AccountEntry;
   score: number;
   reason: string;
+  /**
+   * Set when a `.sweech.json` project pin influenced this recommendation
+   * (matched `commandName`, capped tier, or steered `cliType`). The
+   * caller surfaces the source path so the user knows the routing
+   * decision was project-driven.
+   */
+  pinApplied?: ProjectPinResolved | null;
 }
 
 export interface RouteRecommendationRequest {
@@ -177,6 +189,13 @@ export interface RouteRecommendationResponse {
   selected: RouteCandidate | null;
   rejected: RouteCandidate[];
   candidates: RouteCandidate[];
+  /**
+   * The `.sweech.json` pin that influenced this recommendation, if any.
+   * `null` when the caller passed no pin or the pin file was missing.
+   * Surfaced so the auto/recommend commands can tell the user
+   * "(pinned from /path/to/.sweech.json)".
+   */
+  pinApplied: ProjectPinResolved | null;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -728,26 +747,77 @@ function buildCandidate(
 }
 
 /**
+ * Apply a project pin to the incoming RouteRecommendationRequest.
+ *
+ * Pin precedence:
+ *   - `pin.cliType` always wins over `request.cliType` — projects are
+ *     opinionated, callers asking for the "default" CLI should defer.
+ *   - `pin.profile` is mapped to `preferredProfile`. If the caller
+ *     already passed an explicit `preferredProfile`, the caller wins
+ *     (e.g. `sweech recommend --preferred-profile X` must override
+ *     the pin so a one-off run can sidestep the pin).
+ *   - `pin.model` becomes `preferredModel` (caller override wins).
+ *
+ * `maxTier` is NOT merged into the request — it's a candidate-level
+ * filter applied below alongside scoring.
+ */
+function mergePinIntoRequest(
+  request: RouteRecommendationRequest,
+  pin: ProjectPin,
+): RouteRecommendationRequest {
+  const merged: RouteRecommendationRequest = { ...request };
+  if (pin.cliType) {
+    merged.cliType = pin.cliType;
+  }
+  if (pin.profile && !merged.preferredProfile) {
+    merged.preferredProfile = pin.profile;
+  }
+  if (pin.model && !merged.preferredModel) {
+    merged.preferredModel = pin.model;
+  }
+  return merged;
+}
+
+/**
  * Recommend the best executable route for a coding task.
  *
  * Returns both the winning route and explicit rejection reasons for alternatives
  * that were filtered by CLI, capability, auth, quota, or launch-path state.
+ *
+ * When `projectPin` is provided it overrides the request (cliType,
+ * preferredProfile, preferredModel) and caps candidates by tier. The
+ * `pinApplied` field on the response surfaces the pin source so callers
+ * can tell the user "(pinned from /path/to/.sweech.json)".
+ *
+ * If the pin's `profile` does not match any available profile, the
+ * caller falls through to normal ranking — a warning is logged once to
+ * stderr but the pin doesn't black out the whole result. A bad pin
+ * should never strand the user.
  */
 export async function recommendRoute(
   request: RouteRecommendationRequest = {},
   profiles?: ProfileConfig[],
+  projectPin?: ProjectPinResolved | null,
 ): Promise<RouteRecommendationResponse> {
   const resolvedProfiles = profiles ?? new ConfigManager().getProfiles();
+
+  // Merge pin overrides into the request BEFORE normalisation so the
+  // pin's cliType/preferredProfile/preferredModel flow through the
+  // existing scoring / rejection paths unchanged.
+  const requestWithPin = projectPin?.pin
+    ? mergePinIntoRequest(request, projectPin.pin)
+    : request;
+
   const normalizedRequest: RouteRecommendationRequest = {
-    ...request,
-    requiredCapabilities: normalizeCapabilities(request.requiredCapabilities),
+    ...requestWithPin,
+    requiredCapabilities: normalizeCapabilities(requestWithPin.requiredCapabilities),
   };
   const known = getKnownAccounts(resolvedProfiles);
   const infos = await getAccountInfo(known, { cacheOnly: true });
   const available = getAvailableAccounts(resolvedProfiles);
   const byCommand = new Map(available.map((entry) => [entry.commandName, entry]));
 
-  const candidates = infos
+  let candidates = infos
     .map((info) => {
       const account = byCommand.get(info.commandName);
       if (!account) return null;
@@ -756,11 +826,61 @@ export async function recommendRoute(
     .filter((value): value is RouteCandidate => Boolean(value))
     .sort((a, b) => b.score - a.score);
 
+  // Apply pin.maxTier as a rejection reason (not a hard drop) so callers
+  // can see which candidates were tier-capped. The candidate stays in the
+  // `rejected` list with a clear reason for diagnostics.
+  if (projectPin?.pin.maxTier) {
+    const cap = projectPin.pin.maxTier;
+    for (const candidate of candidates) {
+      const info = infos.find(i => i.commandName === candidate.route.commandName);
+      const candidateTier = info?.rateLimitTier ?? info?.billingType ?? info?.live?.planType;
+      if (exceedsMaxTier(candidateTier, cap)) {
+        candidate.reasons.push(`pin-max-tier-exceeded:${candidateTier ?? 'unknown'}`);
+      }
+    }
+  }
+
+  // If the pin specified a profile that doesn't exist among candidates,
+  // log once to stderr and let scoring fall through. The selected
+  // candidate will just be the best-scoring one, not the pinned one.
+  const pinProfile = projectPin?.pin.profile;
+  if (pinProfile) {
+    const hasPinned = candidates.some(c => c.route.commandName === pinProfile);
+    if (!hasPinned) {
+      // eslint-disable-next-line no-console
+      console.error(
+        `sweech: pinned profile '${pinProfile}' (from ${projectPin?.source}) not found — falling through to default ranking`,
+      );
+    }
+  }
+
   const selected = candidates.find((candidate) => candidate.reasons.length === 0 && Number.isFinite(candidate.score)) ?? null;
   if (selected) selected.selected = true;
   for (const candidate of candidates) {
     if (candidate !== selected && candidate.reasons.length === 0) {
       candidate.reasons.push('not-selected:lower-score');
+    }
+  }
+
+  // Audit-log pin-influenced selections so we have a trail for routing
+  // decisions made on behalf of the user. Only logs when a pin was
+  // applied AND it actually changed the outcome (cliType, profile, or
+  // tier cap had to filter something). Best-effort — audit log failures
+  // never block the recommendation.
+  if (projectPin && selected) {
+    try {
+      logAudit({
+        timestamp: new Date().toISOString(),
+        action: 'route_pin_applied',
+        account: selected.route.commandName,
+        details: {
+          source: projectPin.source,
+          projectRoot: projectPin.projectRoot,
+          pin: projectPin.pin,
+        },
+      });
+    } catch {
+      /* audit-log failures are non-fatal */
     }
   }
 
@@ -775,6 +895,7 @@ export async function recommendRoute(
     selected,
     rejected: candidates.filter((candidate) => candidate !== selected),
     candidates,
+    pinApplied: projectPin ?? null,
   };
 }
 
@@ -785,12 +906,18 @@ export async function recommendRoute(
  * 1. Exclude accounts already rejected/at hard limit
  * 2. Prefer quota that resets sooner so expiring capacity gets used first
  * 3. Prefer accounts with higher weekly/session utilization if they are still healthy
+ *
+ * When `projectPin` is provided, the pin steers the recommendation
+ * (cliType / preferredProfile / maxTier) and the resolved pin source
+ * is echoed back on the result so `sweech auto` can tell the user
+ * "Using profile X (pinned by .sweech.json at /path)".
  */
 export async function suggestBestAccount(
   cliType?: string,
   profiles?: ProfileConfig[],
+  projectPin?: ProjectPinResolved | null,
 ): Promise<AccountRecommendation | undefined> {
-  const route = await recommendRoute({ cliType }, profiles);
+  const route = await recommendRoute({ cliType }, profiles, projectPin);
   const selected = route.selected;
   if (!selected) return undefined;
 
@@ -805,5 +932,6 @@ export async function suggestBestAccount(
     },
     score: selected.score,
     reason: selected.scoreReason,
+    pinApplied: route.pinApplied,
   };
 }
