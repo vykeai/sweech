@@ -1194,6 +1194,25 @@ function requireValidCli(value: string | undefined, command: string): CLIType | 
   return parsed;
 }
 
+/**
+ * Strict numeric parser for `--budget <usd>`. Codex adversarial review
+ * caught that `parseFloat('nope')` returns NaN, which then bypasses
+ * `Number.isFinite(opts.budget)` guards inside the action handlers —
+ * the launch proceeds with no budget enforcement at all. `parseFloat`
+ * also accepts garbage prefixes like `'0abc'` as `0`. This parser
+ * uses `Number()` (strict) and rejects NaN / negative / non-finite
+ * inputs at flag parse time so the action handlers see a clean number
+ * or the process has already exited.
+ */
+function parseBudgetUsd(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(chalk.red(`Invalid --budget '${value}': must be a non-negative number (e.g. 0.05).`));
+    process.exit(1);
+  }
+  return n;
+}
+
 function autonameArgs(cli: { sessionNameFlag?: string }, args: string[]): string[] {
   if (!cli.sessionNameFlag) return args;
   if (args.includes(cli.sessionNameFlag)) return args; // user supplied one
@@ -1315,7 +1334,7 @@ program
   .option('-r, --resume', 'Resume last session (--continue / equivalent)')
   .option('--no-tmux', 'Bypass tmux even if tmux is available')
   .option('--force', 'Skip model reachability check')
-  .option('--budget <usd>', 'Refuse to launch if the profile model exceeds this USD/call ceiling', parseFloat)
+  .option('--budget <usd>', 'Refuse to launch if the profile model exceeds this USD/call ceiling', parseBudgetUsd)
   .option('--est-input <tokens>', 'Estimated input tokens for the budget projection (default 5000)', parseInt)
   .option('--est-output <tokens>', 'Estimated output tokens for the budget projection (default 1500)', parseInt)
   .allowUnknownOption(true)
@@ -4485,7 +4504,7 @@ program
   .command('cost')
   .description('Show USD/million tokens per profile + last-7d spend')
   .option('--json', 'Machine-readable JSON output (stable shape)')
-  .option('--budget <usd>', 'Filter to profiles whose est cost per call fits this USD ceiling', parseFloat)
+  .option('--budget <usd>', 'Filter to profiles whose est cost per call fits this USD ceiling', parseBudgetUsd)
   .option('--profile <name>', 'Detail mode — list every model the profile can use with cost projection')
   .option('--est-input <tokens>', 'Estimated input tokens for cost projection (default 5000)', parseInt)
   .option('--est-output <tokens>', 'Estimated output tokens for cost projection (default 1500)', parseInt)
@@ -4574,7 +4593,7 @@ program
   .option('--cli <type>', 'Restrict to a specific CLI: claude | codex | kimi')
   .option('--json', 'Machine-readable output (for scripts)')
   .option('--exec', 'Spawn the CLI directly instead of printing the command')
-  .option('--budget <usd>', 'Reject candidates whose estimated cost per call exceeds this USD ceiling', parseFloat)
+  .option('--budget <usd>', 'Reject candidates whose estimated cost per call exceeds this USD ceiling', parseBudgetUsd)
   .option('--est-input <tokens>', 'Estimated input tokens for the budget projection (default 5000)', parseInt)
   .option('--est-output <tokens>', 'Estimated output tokens for the budget projection (default 1500)', parseInt)
   .action(async (opts: { cli?: string; json?: boolean; exec?: boolean; budget?: number; estInput?: number; estOutput?: number }) => {

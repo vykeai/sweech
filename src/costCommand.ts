@@ -67,30 +67,53 @@ export interface ProfileSpend {
 // ── 7-day spend computation ──────────────────────────────────────────
 
 const AUDIT_FILE = path.join(os.homedir(), '.sweech', 'audit.jsonl');
+const LAUNCHES_LOG = path.join(os.homedir(), '.sweech', 'launches.log');
 const WINDOW_7D_MS = 7 * 24 * 60 * 60 * 1000;
+/** Estimated tokens-per-launch when a real `token_usage` event is absent. */
+const ESTIMATED_INPUT_PER_LAUNCH = 5_000;
+const ESTIMATED_OUTPUT_PER_LAUNCH = 1_500;
 
 /**
- * Read the audit log and return per-profile USD spent in the last 7d.
+ * Read the audit log + launches.log and return per-profile USD spent
+ * in the last 7d.
  *
  * Source preference (richest signal wins):
- *   1. `token_usage` events with explicit input/output token counts +
- *      model id — these are exact spend records, used when a caller
- *      pushes accurate token telemetry into the audit log
- *   2. `session_started` / `launch` events with a model id — fall back
- *      to estimating spend per launch using a default token budget
+ *   1. `token_usage` events in audit.jsonl with explicit input/output
+ *      token counts + model id — these are exact spend records, used
+ *      when a caller pushes accurate token telemetry
+ *   2. `launches.log` entries (written by `logLaunch` on every CLI/TUI
+ *      launch) — fall back to estimating spend per launch using a
+ *      default token budget × the profile's default model price. Codex
+ *      adversarial review caught that without this, `sweech cost` 7d
+ *      column always reported $0 because no caller emits `token_usage`.
  *
- * Returns one row per profile that's appeared in the window OR is in
- * the supplied `profiles` list. Profiles with zero activity get
- * `spent_7d_usd: 0` and `last_use_ts: null`.
+ * Profiles with both signals get the SUM (`token_usage` is exact for
+ * the calls it records; launches without `token_usage` get estimated).
+ * If precision matters, callers should emit `token_usage` events.
+ *
+ * Returns one row per profile in the supplied `profiles` list.
+ * Profiles with zero activity get `spent_7d_usd: 0` and
+ * `last_use_ts: null`.
+ *
+ * `profiles` may include an optional `defaultModel` for each entry —
+ * required for the launches.log estimate to produce a non-zero result.
+ * The 22 fields needed to compute exact spend aren't in launches.log,
+ * so we use the same 5000/1500 tokens default as `routeWithinBudget`.
  */
 export function computeSpend7d(
-  profiles: Array<{ commandName: string }>,
+  profiles: Array<{ commandName: string; defaultModel?: string }>,
   now: number = Date.now(),
   auditPath: string = AUDIT_FILE,
+  launchesPath: string = LAUNCHES_LOG,
 ): ProfileSpend[] {
   const cutoff = now - WINDOW_7D_MS;
-  const spendByProfile = new Map<string, { spent: number; last: number }>();
+  const spendByProfile = new Map<string, { spent: number; last: number; counted: Set<string> }>();
+  const modelByProfile = new Map<string, string>();
+  for (const p of profiles) {
+    if (p.defaultModel) modelByProfile.set(p.commandName, p.defaultModel);
+  }
 
+  // ── 1. Exact spend from audit.jsonl token_usage events ────────────
   let entries: ReturnType<typeof readAuditLog> = [];
   try {
     if (fs.existsSync(auditPath)) {
@@ -106,30 +129,65 @@ export function computeSpend7d(
     const account = entry.account;
     if (!account) continue;
 
-    const details = entry.details ?? {};
-    let usd = 0;
-    let counted = false;
+    if (entry.action !== 'token_usage') continue;
 
-    // ── 1. Explicit token_usage event ──────────────────────────────
-    if (entry.action === 'token_usage') {
-      const model = typeof details.model === 'string' ? details.model : '';
-      const inTok = typeof details.inputTokens === 'number' ? details.inputTokens : 0;
-      const outTok = typeof details.outputTokens === 'number' ? details.outputTokens : 0;
-      const cachedTok = typeof details.cachedInputTokens === 'number' ? details.cachedInputTokens : 0;
-      if (model && (inTok > 0 || outTok > 0)) {
-        usd = estimateCostUsd(model, inTok, outTok, cachedTok);
-        counted = true;
-      } else if (typeof details.costUsd === 'number' && Number.isFinite(details.costUsd) && details.costUsd >= 0) {
-        usd = details.costUsd;
-        counted = true;
-      }
+    const details = entry.details ?? {};
+    const model = typeof details.model === 'string' ? details.model : '';
+    const inTok = typeof details.inputTokens === 'number' ? details.inputTokens : 0;
+    const outTok = typeof details.outputTokens === 'number' ? details.outputTokens : 0;
+    const cachedTok = typeof details.cachedInputTokens === 'number' ? details.cachedInputTokens : 0;
+    let usd = 0;
+    if (model && (inTok > 0 || outTok > 0)) {
+      usd = estimateCostUsd(model, inTok, outTok, cachedTok);
+    } else if (typeof details.costUsd === 'number' && Number.isFinite(details.costUsd) && details.costUsd >= 0) {
+      usd = details.costUsd;
+    } else {
+      continue;
     }
 
-    if (!counted) continue;
-    const slot = spendByProfile.get(account) ?? { spent: 0, last: 0 };
+    const slot = spendByProfile.get(account) ?? { spent: 0, last: 0, counted: new Set<string>() };
     slot.spent += usd;
     if (ts > slot.last) slot.last = ts;
+    // Mark this timestamp so a matching launches.log entry (best-effort
+    // dedup — minute-rounded; launches.log writes seconds-precision so
+    // an exact match is unlikely but minute bucketing catches the case
+    // where token_usage + launch are emitted from the same launch).
+    slot.counted.add(`${Math.floor(ts / 60_000)}`);
     spendByProfile.set(account, slot);
+  }
+
+  // ── 2. Estimated spend from launches.log ──────────────────────────
+  if (fs.existsSync(launchesPath)) {
+    try {
+      const content = fs.readFileSync(launchesPath, 'utf-8');
+      for (const line of content.split('\n')) {
+        if (!line.trim()) continue;
+        let event: { ts?: string; profile?: string } & Record<string, unknown>;
+        try {
+          event = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const tsStr = typeof event.ts === 'string' ? event.ts : '';
+        const profile = typeof event.profile === 'string' ? event.profile : '';
+        if (!tsStr || !profile) continue;
+        const ts = new Date(tsStr).getTime();
+        if (!Number.isFinite(ts) || ts < cutoff) continue;
+        const model = modelByProfile.get(profile);
+        if (!model) continue; // can't estimate without a model
+        const slot = spendByProfile.get(profile) ?? { spent: 0, last: 0, counted: new Set<string>() };
+        const bucket = `${Math.floor(ts / 60_000)}`;
+        if (slot.counted.has(bucket)) continue; // already counted by token_usage in the same minute
+        const usd = estimateCostUsd(model, ESTIMATED_INPUT_PER_LAUNCH, ESTIMATED_OUTPUT_PER_LAUNCH);
+        if (!Number.isFinite(usd) || usd <= 0) continue;
+        slot.spent += usd;
+        if (ts > slot.last) slot.last = ts;
+        slot.counted.add(bucket);
+        spendByProfile.set(profile, slot);
+      }
+    } catch {
+      // best-effort; bad log file never blocks the cost table
+    }
   }
 
   const out: ProfileSpend[] = [];
@@ -213,9 +271,21 @@ export async function buildCostTable(opts: CostTableOptions = {}): Promise<CostT
   const route = await recommendRoute({}, profiles);
   const byCommand = new Map(route.candidates.map(c => [c.account.commandName, c]));
 
-  // Build a spend map keyed by commandName.
+  // Build a spend map keyed by commandName. Pass defaultModel so the
+  // launches.log ingestion path can project estimated spend per launch
+  // — without that, the 7d column shows $0 for every profile until a
+  // caller starts emitting `token_usage` audit events.
+  const spendProfiles = accounts.map(a => {
+    const profile = profiles.find(p => p.commandName === a.commandName);
+    const providerKey = profile?.provider
+      ?? effectiveProvider(profile?.provider, profile?.baseUrl)
+      ?? (a.cliType === 'codex' ? 'openai' : 'anthropic');
+    const provider = getProvider(providerKey);
+    const defaultModel = profile?.model ?? provider?.defaultModel ?? '';
+    return { commandName: a.commandName, defaultModel };
+  });
   const spend = new Map<string, ProfileSpend>();
-  for (const row of computeSpend7d(accounts.map(a => ({ commandName: a.commandName })))) {
+  for (const row of computeSpend7d(spendProfiles)) {
     spend.set(row.profile, row);
   }
 
@@ -313,7 +383,7 @@ export function buildProfileDetail(
   const provider = getProvider(providerKey) ?? null;
   const defaultModel = profile?.model ?? provider?.defaultModel ?? '';
 
-  const spendRows = computeSpend7d([{ commandName }]);
+  const spendRows = computeSpend7d([{ commandName, defaultModel }]);
   const spend = spendRows[0] ?? { profile: commandName, spent_7d_usd: 0, last_use_ts: null };
 
   // Use the provider's catalog when available, else just project for

@@ -426,6 +426,129 @@ describe('computeSpend7d', () => {
     const rows = computeSpend7d([{ commandName: 'a' }], Date.now(), '/tmp/does-not-exist-xyz.jsonl');
     expect(rows).toEqual([{ profile: 'a', spent_7d_usd: 0, last_use_ts: null }]);
   });
+
+  // ──────────────────────────────────────────────────────────────────
+  // launches.log ingestion (post-codex-adversarial-review fix)
+  //
+  // Codex caught that `sweech cost` always showed $0 because the
+  // codebase has no caller emitting `token_usage` audit events —
+  // normal launches go to ~/.sweech/launches.log via `logLaunch`,
+  // which computeSpend7d ignored. These tests pin down the new
+  // fallback path so it can't regress.
+  // ──────────────────────────────────────────────────────────────────
+
+  test('launches.log entries within window estimate spend per profile', () => {
+    const now = Date.now();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweech-spend-'));
+    const launchesPath = path.join(tmpDir, 'launches.log');
+    fs.writeFileSync(launchesPath, [
+      JSON.stringify({ ts: new Date(now - 24 * 3600 * 1000).toISOString(), source: 'cli', profile: 'sonnet', cliCommand: 'claude', cliArgs: [], configDir: null, cwd: '/tmp', resume: false, yolo: false, tmux: false }),
+      JSON.stringify({ ts: new Date(now - 12 * 3600 * 1000).toISOString(), source: 'tui', profile: 'sonnet', cliCommand: 'claude', cliArgs: [], configDir: null, cwd: '/tmp', resume: false, yolo: false, tmux: false }),
+    ].join('\n') + '\n');
+    readAuditLogMock.mockReturnValue([]);
+
+    const rows = computeSpend7d(
+      [{ commandName: 'sonnet', defaultModel: 'claude-sonnet-4-5' }],
+      now,
+      '/tmp/no-such-audit.jsonl',
+      launchesPath,
+    );
+    // 2 launches × estimateCostUsd('claude-sonnet-4-5', 5000, 1500)
+    // sonnet pricing: $3/M in, $15/M out → 5k×$3/M + 1.5k×$15/M = $0.0375/call
+    // Two distinct minutes → $0.0750.
+    expect(rows[0].spent_7d_usd).toBeCloseTo(0.075, 3);
+    expect(rows[0].last_use_ts).toBeGreaterThan(0);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('launches.log entries outside 7d window are ignored', () => {
+    const now = Date.now();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweech-spend-'));
+    const launchesPath = path.join(tmpDir, 'launches.log');
+    fs.writeFileSync(launchesPath, JSON.stringify({
+      ts: new Date(now - 10 * 24 * 3600 * 1000).toISOString(),
+      source: 'cli',
+      profile: 'sonnet',
+      cliCommand: 'claude',
+      cliArgs: [],
+      configDir: null,
+      cwd: '/tmp',
+      resume: false,
+      yolo: false,
+      tmux: false,
+    }) + '\n');
+    readAuditLogMock.mockReturnValue([]);
+
+    const rows = computeSpend7d(
+      [{ commandName: 'sonnet', defaultModel: 'claude-sonnet-4-5' }],
+      now,
+      '/tmp/no-such-audit.jsonl',
+      launchesPath,
+    );
+    expect(rows[0].spent_7d_usd).toBe(0);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('launches.log entry without defaultModel produces no estimate (avoids guessing)', () => {
+    const now = Date.now();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweech-spend-'));
+    const launchesPath = path.join(tmpDir, 'launches.log');
+    fs.writeFileSync(launchesPath, JSON.stringify({
+      ts: new Date(now - 1000).toISOString(),
+      source: 'cli',
+      profile: 'no-model',
+      cliCommand: 'claude',
+      cliArgs: [],
+      configDir: null,
+      cwd: '/tmp',
+      resume: false,
+      yolo: false,
+      tmux: false,
+    }) + '\n');
+    readAuditLogMock.mockReturnValue([]);
+
+    // No defaultModel in the profile descriptor → no estimate.
+    const rows = computeSpend7d(
+      [{ commandName: 'no-model' }],
+      now,
+      '/tmp/no-such-audit.jsonl',
+      launchesPath,
+    );
+    expect(rows[0].spent_7d_usd).toBe(0);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('malformed launches.log lines are skipped, not throwing', () => {
+    const now = Date.now();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweech-spend-'));
+    const launchesPath = path.join(tmpDir, 'launches.log');
+    fs.writeFileSync(launchesPath, [
+      '{not json',
+      JSON.stringify({ ts: new Date(now - 1000).toISOString(), profile: 'sonnet' }),
+      '',
+      '   ',
+    ].join('\n') + '\n');
+    readAuditLogMock.mockReturnValue([]);
+
+    expect(() => computeSpend7d(
+      [{ commandName: 'sonnet', defaultModel: 'claude-sonnet-4-5' }],
+      now,
+      '/tmp/no-such-audit.jsonl',
+      launchesPath,
+    )).not.toThrow();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('non-existent launches file is silently ignored', () => {
+    readAuditLogMock.mockReturnValue([]);
+    const rows = computeSpend7d(
+      [{ commandName: 'a', defaultModel: 'claude-sonnet-4-5' }],
+      Date.now(),
+      '/tmp/no-audit.jsonl',
+      '/tmp/no-launches-xyz.log',
+    );
+    expect(rows[0].spent_7d_usd).toBe(0);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
