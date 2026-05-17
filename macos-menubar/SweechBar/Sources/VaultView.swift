@@ -347,6 +347,7 @@ private struct AccountsTab: View {
             tiles.append(VaultAccount(
                 accountId: "ext:\(canonical)",
                 kind: canonical,
+                provider: nil,
                 email: TileStyle.label(kind: canonical),
                 displayName: nil,
                 plan: nil,
@@ -407,9 +408,9 @@ private struct AccountsTab: View {
     /// "glm"); synthetic tiles use a canonical key (e.g. "kimi"). Look up
     /// the canonical first, then any non-canonical variant that maps to it.
     private func quotaFor(_ account: VaultAccount) -> ProviderQuota? {
-        if let q = service.providerQuotas[account.kind] { return q }
+        if let q = service.providerQuotas[account.effectiveKind] { return q }
         for (provKey, quota) in service.providerQuotas {
-            if canonicalProviderKey(provKey) == account.kind { return quota }
+            if canonicalProviderKey(provKey) == account.effectiveKind { return quota }
         }
         return nil
     }
@@ -419,7 +420,7 @@ private struct AccountsTab: View {
             // Match by realProvider (with the same canonicalisation used
             // for synthetic tiles) so a Kimi tile picks up both `kimi`
             // and `kimi-coding` workspaces.
-            let canonicalKind = canonicalProviderKey(account.kind)
+            let canonicalKind = canonicalProviderKey(account.effectiveKind)
             return service.accounts.filter { canonicalProviderKey($0.realProvider) == canonicalKind }
         }
         return service.accounts.filter { $0.activeAccount?.id == account.id }
@@ -429,7 +430,7 @@ private struct AccountsTab: View {
         // Anthropic = re-run the PKCE flow which updates the existing
         // vault row by email. OpenAI = guide user through codex login +
         // import (sweech can't reproduce the ChatGPT-desktop OAuth app).
-        switch account.kind {
+        switch account.effectiveKind {
         case "anthropic":
             SweechService.launchInTerminal(commandName: "sweech accounts add --kind anthropic")
         case "openai":
@@ -450,8 +451,8 @@ private struct AccountTile: View {
     let onReauth: () -> Void
 
     private var isExternal: Bool { account.accountId.hasPrefix("ext:") }
-    private var tint: Color { TileStyle.tint(kind: account.kind) }
-    private var glyph: String { TileStyle.glyph(kind: account.kind) }
+    private var tint: Color { TileStyle.tint(kind: account.effectiveKind) }
+    private var glyph: String { TileStyle.glyph(kind: account.effectiveKind) }
     private var workspaceCount: Int { mountedWorkspaces.count }
     private var isMounted: Bool { workspaceCount > 0 }
 
@@ -1038,13 +1039,13 @@ private struct AssignSheet: View {
     @State private var workingWorkspace: String?
     @State private var doneMessage: String?
 
-    private var tint: Color { TileStyle.tint(kind: account.kind) }
-    private var glyph: String { TileStyle.glyph(kind: account.kind) }
+    private var tint: Color { TileStyle.tint(kind: account.effectiveKind) }
+    private var glyph: String { TileStyle.glyph(kind: account.effectiveKind) }
 
     private var compatibleWorkspaces: [SweechAccount] {
         service.accounts.filter { ws in
             let k = ws.cliType == "claude" ? "anthropic" : ws.cliType == "codex" ? "openai" : ""
-            return k == account.kind && !ws.isExternal
+            return k == account.effectiveKind && !ws.isExternal
         }
     }
 
@@ -1082,7 +1083,7 @@ private struct AssignSheet: View {
                 ScrollView {
                     VStack(spacing: 6) {
                         if compatibleWorkspaces.isEmpty {
-                            Text("No compatible \(account.kind == "anthropic" ? "claude" : "codex") workspaces found.")
+                            Text("No compatible \(account.effectiveKind == "anthropic" ? "claude" : "codex") workspaces found.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(Sweech.Color.textMuted)
                                 .padding(.vertical, 12)

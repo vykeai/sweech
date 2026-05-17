@@ -346,7 +346,8 @@ struct ProviderQuota: Codable, Hashable {
 struct VaultAccount: Codable, Identifiable, Hashable {
     var id: String { accountId }
     let accountId: String      // 12-char vault id
-    let kind: String           // "anthropic" | "openai"
+    let kind: String           // v1: "anthropic" | "openai"  · v2: "oauth"
+    let provider: String?      // v2 only: "anthropic" | "openai"
     let email: String
     let displayName: String?
     let plan: String?
@@ -358,7 +359,15 @@ struct VaultAccount: Codable, Identifiable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case accountId = "id"
-        case kind, email, displayName, plan, rateLimitTier, addedAt, lastRefreshedAt, expiresAt, status
+        case kind, provider, email, displayName, plan, rateLimitTier, addedAt, lastRefreshedAt, expiresAt, status
+    }
+
+    /// Effective auth-flavour tag. v2 entries arrive as `kind: "oauth"` with
+    /// the actual provider in `provider`; v1 entries have the provider in
+    /// `kind` directly. Use this anywhere old code branched on `kind`.
+    var effectiveKind: String {
+        if kind == "oauth", let p = provider { return p }
+        return kind
     }
 
     /// Hides the synthetic <name>@unknown.local placeholders used during import.
@@ -368,7 +377,7 @@ struct VaultAccount: Codable, Identifiable, Hashable {
 
     /// Compatibility check: anthropic→claude only, openai→codex only.
     func isCompatible(with cliType: String) -> Bool {
-        switch (kind, cliType) {
+        switch (effectiveKind, cliType) {
         case ("anthropic", "claude"): return true
         case ("openai", "codex"): return true
         default: return false
@@ -696,7 +705,10 @@ class SweechService: ObservableObject {
     func fetchVault() {
         DispatchQueue.main.async { [weak self] in self?.isVaultFetching = true }
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            let result = Self.runSweech(["accounts", "list", "--json"])
+            // Filter to OAuth identities only — VaultView renders the
+            // subscription identities (anthropic/openai) and isn't built for
+            // the apikey/local rows surfaced by the v2 vault.
+            let result = Self.runSweech(["accounts", "list", "--json", "--kind", "oauth"])
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.isVaultFetching = false
