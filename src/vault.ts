@@ -116,8 +116,14 @@ export type AccountSecret = AnthropicSecret | OpenAISecret
 
 // ── Paths ────────────────────────────────────────────────────────────────────
 
-const SWEECH_DIR = path.join(os.homedir(), '.sweech')
-const ACCOUNTS_FILE = path.join(SWEECH_DIR, 'accounts.json')
+// Paths resolved lazily so jest.mock('node:os') tests that set a mocked
+// homedir AFTER vault.ts loads (the usual pattern) hit the mocked dir
+// instead of the real ~/.sweech/. A prior version captured these at
+// module-load time and silently wrote test data to the developer's
+// real vault. Functions instead of constants — the cost is negligible
+// (one path.join per call) and the safety is meaningful.
+function sweechDir(): string { return path.join(os.homedir(), '.sweech') }
+function accountsFile(): string { return path.join(sweechDir(), 'accounts.json') }
 
 /** Marker file inside a workspace pointing at the active account id. */
 export function workspaceMarkerPath(workspaceCommandName: string): string {
@@ -268,7 +274,7 @@ type ParsedAccounts =
 function parseAccountsFile(): ParsedAccounts {
   let raw: unknown
   try {
-    raw = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8'))
+    raw = JSON.parse(fs.readFileSync(accountsFile(), 'utf-8'))
   } catch {
     return { kind: 'empty' }
   }
@@ -287,17 +293,17 @@ function parseAccountsFile(): ParsedAccounts {
 }
 
 function persistV2File(file: V2VaultFile): void {
-  fs.mkdirSync(SWEECH_DIR, { recursive: true, mode: 0o700 })
-  atomicWriteFileSync(ACCOUNTS_FILE, JSON.stringify(file, null, 2))
+  fs.mkdirSync(sweechDir(), { recursive: true, mode: 0o700 })
+  atomicWriteFileSync(accountsFile(), JSON.stringify(file, null, 2))
   // Code-review (SHOULD-FIX): previously this swallowed the chmod error
   // silently — on weird filesystems (network home dirs, RO mounts post-write)
   // the vault could end up world-readable without any signal. Now we log
   // to stderr so a user / CI can see it happened.
   try {
-    fs.chmodSync(ACCOUNTS_FILE, 0o600)
+    fs.chmodSync(accountsFile(), 0o600)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    process.stderr.write(`[sweech] WARN: chmod 0600 on ${ACCOUNTS_FILE} failed: ${msg}\n`)
+    process.stderr.write(`[sweech] WARN: chmod 0600 on ${accountsFile()} failed: ${msg}\n`)
   }
 }
 
@@ -684,26 +690,27 @@ export function saveAccountsV2(accounts: import('./providerModel').Account[]): v
  * preventing the self-deadlock that codex flagged when callers like
  * vaultAddApiKey wrapped a saveAccountsV2 (which itself takes the lock).
  */
-const LOCK_FILE = path.join(SWEECH_DIR, 'accounts.lock')
+function lockFile(): string { return path.join(sweechDir(), 'accounts.lock') }
 let __vaultLockDepth = 0
 function withVaultLock<T>(fn: () => T): T {
   if (__vaultLockDepth > 0) {
     __vaultLockDepth++
     try { return fn() } finally { __vaultLockDepth-- }
   }
-  fs.mkdirSync(SWEECH_DIR, { recursive: true, mode: 0o700 })
+  fs.mkdirSync(sweechDir(), { recursive: true, mode: 0o700 })
+  const lf = lockFile()
   const deadline = Date.now() + 2000
   let fd: number | null = null
   while (Date.now() < deadline) {
     try {
-      fd = fs.openSync(LOCK_FILE, 'wx', 0o600)
+      fd = fs.openSync(lf, 'wx', 0o600)
       break
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
         try {
-          const st = fs.statSync(LOCK_FILE)
+          const st = fs.statSync(lf)
           if (Date.now() - st.mtimeMs > 10_000) {
-            fs.unlinkSync(LOCK_FILE)
+            fs.unlinkSync(lf)
             continue
           }
         } catch {}
@@ -715,7 +722,7 @@ function withVaultLock<T>(fn: () => T): T {
     }
   }
   if (fd === null) {
-    throw new Error(`vault lock timeout: could not acquire ${LOCK_FILE} within 2s`)
+    throw new Error(`vault lock timeout: could not acquire ${lf} within 2s`)
   }
   __vaultLockDepth = 1
   try {
@@ -723,7 +730,7 @@ function withVaultLock<T>(fn: () => T): T {
   } finally {
     __vaultLockDepth = 0
     try { fs.closeSync(fd) } catch {}
-    try { fs.unlinkSync(LOCK_FILE) } catch {}
+    try { fs.unlinkSync(lf) } catch {}
   }
 }
 

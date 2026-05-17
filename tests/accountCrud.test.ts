@@ -9,9 +9,26 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-let __mockHome: string | null = null;
+// CRITICAL: mock BOTH `os` and `node:os`. vault.ts imports `node:os`,
+// and the prefixed and unprefixed forms are different module specifiers
+// to jest. A mock targeting only `os` leaves vault.ts writing to the
+// REAL ~/.sweech/accounts.json. A prior version of this test file had
+// exactly that bug and silently polluted the developer's vault during
+// every test run.
+//
+// jest.mock factories are hoisted above all `let`/`const` declarations,
+// so the factory body has to look up the (also-hoisted) `var`-declared
+// `__mockHome` cell rather than referencing a hoisted helper.
+var __mockHome: string | null = null;
 jest.mock('os', () => {
-  const actual = jest.requireActual('os');
+  const actual = jest.requireActual('node:os');
+  return {
+    ...actual,
+    homedir: () => __mockHome ?? actual.homedir(),
+  };
+});
+jest.mock('node:os', () => {
+  const actual = jest.requireActual('node:os');
   return {
     ...actual,
     homedir: () => __mockHome ?? actual.homedir(),
@@ -231,6 +248,20 @@ describe('deleteAccount — decoupling contract', () => {
     await seedAnthropic('shared@x.com', 'org-1');
     await seedAnthropic('shared@x.com', 'org-2');
     await expect(deleteAccount('shared@x.com', [])).rejects.toThrow(/ambiguous/);
+  });
+
+  test('ambiguity error message names the match count and the escape hatch', async () => {
+    // Integration audit follow-up: the CLI surfaces this string verbatim
+    // in the `--json` error envelope. Renderers depend on the (N matches)
+    // count + the "12-char id or --kind" hint to guide the user. Lock
+    // the format with a strong assertion so a future cosmetic edit
+    // doesn't silently drop the breadcrumbs.
+    await seedAnthropic('shared@x.com', 'org-1');
+    await seedAnthropic('shared@x.com', 'org-2');
+    await seedAnthropic('shared@x.com', 'org-3');
+    await expect(deleteAccount('shared@x.com', [])).rejects.toThrow(
+      /shared@x\.com.+ambiguous.+3 matches.+12-char id.+--kind/s,
+    );
   });
 });
 

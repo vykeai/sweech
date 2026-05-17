@@ -550,7 +550,15 @@ private struct AccountTile: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Sweech.Color.surface.opacity(0.85))
+        // T-LU-010 accessibility (review-round-1 follow-up): hidden tiles
+        // dim by lowering background opacity + desaturating, NOT by
+        // wrapping the whole tile in `.opacity(0.55)`. The prior approach
+        // crushed 9pt badge text below the 4.5:1 WCAG contrast threshold
+        // in Light mode. Text + glyphs retain full opacity here so the
+        // tile reads as muted but stays legible.
+        .background(
+            Sweech.Color.surface.opacity((account.hidden ?? false) ? 0.45 : 0.85)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(
@@ -559,11 +567,10 @@ private struct AccountTile: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        // T-LU-010 CRUD: account-level lifecycle actions. External
-        // (API-key) tiles are skipped because their lifecycle is
-        // managed by the workspace dir, not the vault.
-        .opacity((account.hidden ?? false) ? 0.55 : 1.0)
+        .saturation((account.hidden ?? false) ? 0.4 : 1.0)
         .contextMenu {
+            // External (API-key) tiles are skipped because their lifecycle
+            // is managed by the workspace dir, not the vault.
             if !isExternal {
                 accountContextMenu
             }
@@ -1113,7 +1120,13 @@ private struct WorkspaceTile: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Sweech.Color.surface.opacity(0.85))
+        // T-LU-010 accessibility (review-round-1 follow-up): see the
+        // matching note on AccountTile. We dim the background +
+        // desaturate hue instead of `.opacity()` on the whole tile so
+        // 9pt badge text retains full contrast against the surface.
+        .background(
+            Sweech.Color.surface.opacity(ws.isInactive ? 0.45 : 0.85)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(
@@ -1122,10 +1135,7 @@ private struct WorkspaceTile: View {
                 )
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        // T-LU-010 CRUD: dim disabled / hidden workspaces and surface
-        // the lifecycle actions via right-click. Same pattern on the
-        // AccountTile below so the gesture is consistent.
-        .opacity(ws.isInactive ? 0.55 : 1.0)
+        .saturation(ws.isInactive ? 0.4 : 1.0)
         .contextMenu { workspaceContextMenu }
     }
 

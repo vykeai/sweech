@@ -17,9 +17,24 @@ import * as path from 'path';
 // jest.mock is hoisted to the top of the module, so this runs before
 // the ConfigManager import below. `__mockHome` is rewritten per-test
 // via setHomedir().
-let __mockHome: string | null = null;
+// CRITICAL: mock BOTH `os` and `node:os` — see accountCrud.test.ts for
+// the incident note. ConfigManager uses unprefixed `os` so only the
+// first mock is strictly required here, but mocking both insulates the
+// test against future imports flipping the specifier.
+//
+// jest.mock factories are hoisted above all `let`/`const` declarations,
+// so the factory body has to inline the `__mockHome` lookup via the
+// (also-hoisted) `var` declaration below.
+var __mockHome: string | null = null;
 jest.mock('os', () => {
-  const actual = jest.requireActual('os');
+  const actual = jest.requireActual('node:os');
+  return {
+    ...actual,
+    homedir: () => __mockHome ?? actual.homedir(),
+  };
+});
+jest.mock('node:os', () => {
+  const actual = jest.requireActual('node:os');
   return {
     ...actual,
     homedir: () => __mockHome ?? actual.homedir(),
@@ -207,6 +222,66 @@ describe('deleteWorkspace — decoupling contract', () => {
     expect(fs.existsSync(dir)).toBe(true);
     expect(fs.existsSync(path.join(dir, 'history.jsonl'))).toBe(true);
     expect(config.getProfiles().map(p => p.commandName)).toEqual(['claude-pole']);
+  });
+
+  test('--keep-data scrubs credentials from settings.json (security M1 regression)', () => {
+    // Review-round security finding: --keep-data preserved settings.json
+    // which holds plaintext ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY. The
+    // deleted workspace should not leak credentials to disk.
+    const dir = config.getProfileDir('claude-ted');
+    fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({
+      env: {
+        ANTHROPIC_AUTH_TOKEN: 'sk-ant-secret',
+        ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
+        ANTHROPIC_MODEL: 'claude-sonnet-4-6',
+      },
+      oauth: { provider: 'anthropic', refreshToken: 'r0t-secret', expiresAt: 1 },
+      hooks: { ConfigChange: [{ matcher: '', hooks: [] }] },
+    }, null, 2));
+
+    deleteWorkspace('claude-ted', { keepData: true }, config);
+
+    const scrubbed = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf-8'));
+    expect(scrubbed.env).toBeUndefined();
+    expect(scrubbed.oauth).toBeUndefined();
+    // Preserves non-secret keys so the dir is re-attachable later.
+    expect(scrubbed.hooks).toBeDefined();
+  });
+
+  test('--keep-data + --force-dependents — sibling profile re-binds and survives', () => {
+    // Integration audit follow-up: the combination of "preserve data" +
+    // "tolerate dependents" is a plausible parking scenario where the
+    // user keeps the dir intact so a still-active sibling profile that
+    // shares from it doesn't break. We assert the master is gone from
+    // config.json, the data dir is preserved (with creds scrubbed),
+    // and the dependent profile record remains intact.
+    writeProfiles(config, [
+      seedProfile({ commandName: 'claude-pole' }),
+      seedProfile({ commandName: 'claude-rai', sharedWith: 'claude-pole' }),
+    ]);
+    const masterDir = config.getProfileDir('claude-pole');
+    fs.writeFileSync(path.join(masterDir, 'history.jsonl'), '{"shared":"history"}\n');
+    fs.writeFileSync(path.join(masterDir, 'settings.json'), JSON.stringify({
+      env: { ANTHROPIC_AUTH_TOKEN: 'sk-ant-master' },
+    }));
+
+    const result = deleteWorkspace(
+      'claude-pole',
+      { keepData: true, forceDependents: true },
+      config,
+    );
+    expect(result.keptData).toBe(true);
+    expect(result.removedDependents).toEqual(['claude-rai']);
+
+    // Master record gone from config.json — but dir + dependent record intact.
+    const remaining = config.getProfiles().map(p => p.commandName);
+    expect(remaining).not.toContain('claude-pole');
+    expect(remaining).toContain('claude-rai');
+    expect(fs.existsSync(masterDir)).toBe(true);
+    expect(fs.existsSync(path.join(masterDir, 'history.jsonl'))).toBe(true);
+    // Credentials scrubbed even when keeping for the sibling's benefit.
+    const scrubbed = JSON.parse(fs.readFileSync(path.join(masterDir, 'settings.json'), 'utf-8'));
+    expect(scrubbed.env).toBeUndefined();
   });
 
   test('refuses to delete a workspace shared by another profile (without --force-dependents)', () => {
