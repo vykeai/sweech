@@ -2415,6 +2415,172 @@ profileCmd
     }
   });
 
+// ── sweech workspace ───────────────────────────────────────────────────────
+// Lifecycle CRUD on a workspace (~/.<commandName>/). Backed by workspaceCrud.ts.
+// `sweech workspace` (no action) is an alias for `sweech workspace list` so
+// the surface mirrors `sweech accounts`.
+const workspaceCmd = program
+  .command('workspace [action] [name]')
+  .description('Manage workspace lifecycle: list, disable, enable, hide, unhide, delete, edit')
+  .option('--keep-data', 'For delete: leave ~/.<name>/ on disk and only drop the profile record')
+  .option('--force-dependents', 'For delete: tolerate other profiles using sharedWith=<name>')
+  .option('--model <model>', 'For edit: override the default model')
+  .option('--base-url <url>', 'For edit: override the provider base URL')
+  .option('--small-fast-model <model>', 'For edit: override the small-fast model (Claude only)')
+  .option('--env <key=val...>', 'For edit: set one or more env overrides (repeatable)')
+  .option('--json', 'Machine-readable output')
+  .action(async (
+    action: string | undefined,
+    name: string | undefined,
+    opts: {
+      keepData?: boolean;
+      forceDependents?: boolean;
+      model?: string;
+      baseUrl?: string;
+      smallFastModel?: string;
+      env?: string[];
+      json?: boolean;
+    },
+  ) => {
+    const {
+      setWorkspaceFlag,
+      deleteWorkspace,
+      editWorkspace,
+      listWorkspaces,
+    } = require('./workspaceCrud') as typeof import('./workspaceCrud');
+    const { logAudit } = require('./auditLog') as typeof import('./auditLog');
+
+    const act = action || 'list';
+
+    try {
+      if (act === 'list') {
+        const rows = listWorkspaces();
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ workspaces: rows }, null, 2) + '\n');
+          return;
+        }
+        if (rows.length === 0) {
+          console.log(chalk.dim('\n  No workspaces. Run `sweech add` to create one.\n'));
+          return;
+        }
+        console.log(chalk.bold('\n  sweech · workspaces\n'));
+        for (const r of rows) {
+          const tagBits: string[] = [];
+          if (r.disabled) tagBits.push(chalk.yellow('disabled'));
+          if (r.hidden) tagBits.push(chalk.gray('hidden'));
+          if (!r.profileDirExists) tagBits.push(chalk.dim('no-dir'));
+          const tag = tagBits.length > 0 ? `  [${tagBits.join(' · ')}]` : '';
+          const styled = r.hidden ? chalk.dim : (s: string) => s;
+          console.log(`  ${styled(r.commandName)} ${chalk.dim(`(${r.cliType}/${r.provider})`)}${tag}`);
+        }
+        console.log();
+        return;
+      }
+
+      if (!name) {
+        throw new Error(`Workspace name required for action '${act}'`);
+      }
+
+      if (act === 'disable' || act === 'enable' || act === 'hide' || act === 'unhide') {
+        const result = setWorkspaceFlag(name, act);
+        logAudit({
+          timestamp: new Date().toISOString(),
+          action: 'workspace_flag_changed',
+          account: name,
+          details: {
+            commandName: name,
+            flagAction: act,
+            before: result.before,
+            after: result.after,
+            noop: result.noop,
+          },
+        });
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: true, ...result }, null, 2) + '\n');
+        } else if (result.noop) {
+          console.log(chalk.dim(`\n  '${name}' already ${act}d (no change).\n`));
+        } else {
+          console.log(chalk.green(`\n✓ Workspace '${name}' ${act}d.\n`));
+        }
+        return;
+      }
+
+      if (act === 'delete') {
+        const result = deleteWorkspace(name, {
+          keepData: opts.keepData,
+          forceDependents: opts.forceDependents,
+        });
+        logAudit({
+          timestamp: new Date().toISOString(),
+          action: 'workspace_deleted',
+          account: name,
+          details: {
+            commandName: name,
+            keptData: result.keptData,
+            removedDependents: result.removedDependents,
+            profileDirRemoved: result.profileDirRemoved,
+          },
+        });
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: true, ...result }, null, 2) + '\n');
+        } else {
+          const dataNote = result.keptData
+            ? chalk.dim(' (data preserved on disk)')
+            : result.profileDirRemoved ? chalk.dim(' (data dir removed)') : '';
+          console.log(chalk.green(`\n✓ Workspace '${name}' deleted.${dataNote}\n`));
+        }
+        return;
+      }
+
+      if (act === 'edit') {
+        const envOverrides: Record<string, string> = {};
+        for (const pair of opts.env ?? []) {
+          const idx = pair.indexOf('=');
+          if (idx <= 0) {
+            throw new Error(`Invalid --env entry '${pair}' (expected KEY=VAL)`);
+          }
+          envOverrides[pair.slice(0, idx)] = pair.slice(idx + 1);
+        }
+        const merged = editWorkspace(name, {
+          model: opts.model,
+          baseUrl: opts.baseUrl,
+          smallFastModel: opts.smallFastModel,
+          envOverrides: Object.keys(envOverrides).length > 0 ? envOverrides : undefined,
+        });
+        logAudit({
+          timestamp: new Date().toISOString(),
+          action: 'workspace_edited',
+          account: name,
+          details: {
+            commandName: name,
+            patch: {
+              model: opts.model,
+              baseUrl: opts.baseUrl,
+              smallFastModel: opts.smallFastModel,
+              env: Object.keys(envOverrides),
+            },
+          },
+        });
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: true, profile: merged }, null, 2) + '\n');
+        } else {
+          console.log(chalk.green(`\n✓ Workspace '${name}' updated.\n`));
+        }
+        return;
+      }
+
+      throw new Error(`Unknown action '${act}'. Use list, disable, enable, hide, unhide, delete, edit.`);
+    } catch (error: unknown) {
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
+      }
+      console.error(chalk.red('Error:'), msg);
+      process.exit(1);
+    }
+  });
+void workspaceCmd;
+
 // Share command — selective symlink management
 program
   .command('share [profile]')

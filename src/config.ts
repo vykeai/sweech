@@ -34,6 +34,22 @@ export interface ProfileConfig {
   envOverrides?: Record<string, string>; // arbitrary per-profile env vars (CLAUDE_EFFORT, ENABLE_PROMPT_CACHING_1H, etc.)
   createdAt: string;
   sharedWith?: string; // commandName of master profile (e.g. 'claude') if dirs are symlinked
+  /**
+   * Lifecycle flags (T-LU-010 CRUD).
+   *
+   *   disabled — workspace is excluded from `sweech auto`, `failover`, and the
+   *     background refresh daemon. The wrapper still works, the data dir is
+   *     untouched, and the row stays visible. Use this to "park" a cancelled
+   *     subscription without losing the conversation history.
+   *
+   *   hidden — workspace sinks to the bottom of `sweech list` rendered greyed
+   *     out. Implies skip-from-refresh as well (no point refreshing something
+   *     the user explicitly hid). `sweech list --hidden` opts back in.
+   *
+   * Both flags are optional; absent means the legacy "active" behaviour.
+   */
+  disabled?: boolean;
+  hidden?: boolean;
 }
 
 /** Keychain service name for sweech API keys. */
@@ -308,9 +324,23 @@ export class ConfigManager {
     this.writeProfiles(profiles);
   }
 
-  public removeProfile(commandName: string): void {
+  /**
+   * Remove a workspace profile.
+   *
+   * @param commandName  workspace to remove
+   * @param opts.keepData  preserve the ~/.<commandName>/ directory + wrapper.
+   *                       Used when the user wants to delete the profile
+   *                       record (so it stops appearing in `sweech list`)
+   *                       but keep the conversation history and credentials
+   *                       on disk for later import.
+   */
+  public removeProfile(commandName: string, opts: { keepData?: boolean } = {}): void {
     const profiles = this.getProfiles().filter(p => p.commandName !== commandName);
     this.writeProfiles(profiles);
+
+    if (opts.keepData) {
+      return;
+    }
 
     // Remove wrapper script
     const wrapperPath = path.join(this.binDir, commandName);
@@ -332,6 +362,58 @@ export class ConfigManager {
         fs.rmSync(profileDir, { recursive: true, force: true });
       }
     }
+  }
+
+  /**
+   * Toggle a lifecycle flag (`disabled` or `hidden`) on a workspace profile.
+   * Mutates only the named profile; preserves every other field. Throws if
+   * the profile does not exist.
+   */
+  public setProfileFlag(
+    commandName: string,
+    flag: 'disabled' | 'hidden',
+    value: boolean,
+  ): ProfileConfig {
+    const profiles = this.getProfiles();
+    const target = profiles.find(p => p.commandName === commandName);
+    if (!target) {
+      throw new Error(`Profile '${commandName}' not found`);
+    }
+    const updated: ProfileConfig = { ...target, [flag]: value };
+    // Drop the flag entirely when toggled false so config.json stays clean.
+    if (!value) delete updated[flag];
+    const next = profiles.map(p => (p.commandName === commandName ? updated : p));
+    this.writeProfiles(next);
+    return updated;
+  }
+
+  /**
+   * Update mutable, non-identity fields on a profile (model, baseUrl,
+   * smallFastModel, envOverrides). Does NOT change commandName or cliType
+   * — use `renameManagedProfile` for that. Returns the merged profile.
+   */
+  public editProfile(
+    commandName: string,
+    patch: Partial<Pick<ProfileConfig, 'model' | 'baseUrl' | 'smallFastModel' | 'envOverrides'>>,
+  ): ProfileConfig {
+    const profiles = this.getProfiles();
+    const target = profiles.find(p => p.commandName === commandName);
+    if (!target) {
+      throw new Error(`Profile '${commandName}' not found`);
+    }
+    const merged: ProfileConfig = { ...target };
+    for (const k of ['model', 'baseUrl', 'smallFastModel'] as const) {
+      if (patch[k] !== undefined) {
+        if (patch[k] === '') delete merged[k];
+        else merged[k] = patch[k] as string;
+      }
+    }
+    if (patch.envOverrides !== undefined) {
+      merged.envOverrides = { ...(merged.envOverrides ?? {}), ...patch.envOverrides };
+    }
+    const next = profiles.map(p => (p.commandName === commandName ? merged : p));
+    this.writeProfiles(next);
+    return merged;
   }
 
   public createProfileConfig(

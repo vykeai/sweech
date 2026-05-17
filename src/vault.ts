@@ -78,6 +78,15 @@ export interface AccountMeta {
   expiresAt?: number
   /** Latest known status: 'ok' | 'expired' | 'org_disabled' | 'unauthorized'. */
   status?: 'ok' | 'expired' | 'org_disabled' | 'unauthorized' | 'unknown'
+  /**
+   * Lifecycle flag (T-LU-010 CRUD): when true the account sinks to a
+   * "hidden" section at the bottom of `sweech accounts list`, is skipped
+   * by `sweech auto` candidate enumeration, and the background refresh
+   * daemon ignores it. The secret blob in the keychain is untouched —
+   * use `sweech accounts logout` to drop credentials, or `delete` to
+   * remove the row entirely.
+   */
+  hidden?: boolean
 }
 
 /** Anthropic OAuth blob — matches what Claude Code stores in its keychain entry. */
