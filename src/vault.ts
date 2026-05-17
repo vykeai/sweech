@@ -225,39 +225,54 @@ interface V2VaultFile {
 
 // ── Metadata I/O ─────────────────────────────────────────────────────────────
 
-/** Internal: parse the on-disk file into the v2 shape, migrating if needed. */
+/** Internal: parse the on-disk file into the v2 shape, migrating if needed.
+ *
+ * Code-review + Security-review (HIGH): the previous implementation called
+ * persistV2File from outside any lock when migration was needed. Two
+ * concurrent sweech processes could both detect v1, both migrate, and race
+ * to write — the second rename overwriting the first's entries.
+ * Fix: pure v2 reads stay lock-free (hot path, no overhead); only the v1
+ * migration write acquires the lock, then re-reads under the lock to
+ * confirm we're still v1 (double-checked locking — another process may
+ * have migrated in the gap). */
 function readV2File(): V2VaultFile {
+  const parsed = parseAccountsFile()
+  if (parsed.kind === 'v2') return parsed.file
+  if (parsed.kind === 'empty') return { schemaVersion: 2, accounts: [] }
+  return withVaultLock(() => {
+    const after = parseAccountsFile()
+    if (after.kind === 'v2') return after.file
+    if (after.kind === 'empty') return { schemaVersion: 2, accounts: [] }
+    const migrated = migrateV1ToV2(after.v1Rows)
+    persistV2File(migrated)
+    return migrated
+  })
+}
+
+type ParsedAccounts =
+  | { kind: 'v2'; file: V2VaultFile }
+  | { kind: 'v1'; v1Rows: AccountMeta[] }
+  | { kind: 'empty' }
+
+function parseAccountsFile(): ParsedAccounts {
   let raw: unknown
   try {
     raw = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf-8'))
   } catch {
-    return { schemaVersion: 2, accounts: [] }
+    return { kind: 'empty' }
   }
-
-  // v1 shape (bare AccountMeta[]): the only shape until wave-6.
-  if (Array.isArray(raw)) {
-    const migrated = migrateV1ToV2(raw as AccountMeta[])
-    persistV2File(migrated)
-    return migrated
-  }
-
-  // Anything else (object) — check schemaVersion.
+  if (Array.isArray(raw)) return { kind: 'v1', v1Rows: raw as AccountMeta[] }
   if (raw && typeof raw === 'object') {
     const obj = raw as Record<string, unknown>
     const version = typeof obj.schemaVersion === 'number' ? obj.schemaVersion : 1
     if (version >= 2 && Array.isArray(obj.accounts)) {
-      return { schemaVersion: 2, accounts: obj.accounts as V2Entry[] }
+      return { kind: 'v2', file: { schemaVersion: 2, accounts: obj.accounts as V2Entry[] } }
     }
-    // v1 stored as `{ accounts: [...] }` is theoretically possible if
-    // someone hand-edited the file; treat the inner array as v1.
     if (version === 1 && Array.isArray(obj.accounts)) {
-      const migrated = migrateV1ToV2(obj.accounts as AccountMeta[])
-      persistV2File(migrated)
-      return migrated
+      return { kind: 'v1', v1Rows: obj.accounts as AccountMeta[] }
     }
   }
-
-  return { schemaVersion: 2, accounts: [] }
+  return { kind: 'empty' }
 }
 
 function persistV2File(file: V2VaultFile): void {
