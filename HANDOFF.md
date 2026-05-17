@@ -1,130 +1,147 @@
-# Handoff — 2026-05-17 (T-LU-001 → T-LU-006 wave complete)
+# Handoff — 2026-05-17 (wave T-LU-005/007/008/009 + 2 review rounds)
 
 ## What was completed this session
 
-All 5 priority codex-queue tasks from the prior handoff are shipped to `origin/main`.
+All 4 remaining MEDIUM-priority tasks from the prior wave shipped to `origin/main` (commit `a1a5952`). The wave totalled ~5,200 lines added across 9 new source modules + tests, ran 4 build agents in parallel, and survived **two adversarial review rounds** (Claude code-reviewer + security-reviewer + integration-audit, then codex/gpt-5.4 adversarial via `codex review --base`).
 
-### Wave 1 — parallel agents (3 worktrees, merged together)
+### Tasks shipped
 
-- **T-LU-001 (HIGH)** — `d1a5eb7` + merge `574c072`
-  - `sweech profile create --cli codex --provider <custom>` now writes a real `[model_providers.X]` block to `$CODEX_HOME/config.toml` so codex actually uses the configured provider instead of falling through to ChatGPT OAuth.
-  - New `src/codexConfigToml.ts` (329 lines) with minimal TOML parser/merger/emitter + `writeCodexProviderTomlForProfile`.
-  - Wired through `src/config.ts:createProfileConfig` so model-change / import paths also regenerate the toml.
-  - Wrapper script (`config.ts:648-663`) hoists `settings.env` for codex profiles so the API key referenced by `env_key` resolves at runtime.
-  - Constraint: only `wire_api = "responses"` is emitted (codex 0.x removed `wire_api = "chat"`).
-  - 37 tests in `tests/codexConfigToml.test.ts`.
+- **T-LU-005** — `sweech serve --status` + `isLaunchdRunning()` + doctor launchd integration (`762a487`)
+  - Existing `installLaunchd` / `uninstallLaunchd` were already wired; the gap was status detection + doctor wiring.
+  - New `LaunchdStatus { installed, running, pid }` via `launchctl list ai.sweech.serve` PID-dict parse.
+  - `sweech serve --status` exit codes 0/1/2 (running / installed-not-running / not-installed). Non-macOS exits 2.
+  - `sweech doctor` shows "launchd daemon" row with four states (running with pid, installed-not-running warning, running standalone, not installed).
+  - 27 tests in `tests/launchd.test.ts` (mock execSync + fs).
 
-- **T-LU-004 (HIGH)** — `9b70463` + merge `f6ac251`
-  - New `src/providerRateLimitParsers.ts` (321 lines) with parsers for Kimi (moonshot.ai), Qwen (Alibaba DashScope), DeepSeek, and Z.ai/GLM. All map to the same `LiveRateLimitData` shape so `accountScore` works unchanged.
-  - Status semantics mirror Claude: 200<0.8→allowed, 200≥0.8→allowed_warning, 429→limit_reached, 401→unauthorized, 403→forbidden.
-  - 107 tests in `tests/providerRateLimitParsers.test.ts` covering each provider × {200, 429, 401, malformed}.
-  - **DoS guard added later** (review fix): `MAX_HEADER_VALUE_LENGTH = 64` cap on header values so a pathological custom provider can't block the event loop.
+- **T-LU-007** — `sweech cost` + `routeWithinBudget()` API (`6ae65c2` + codex fix in `a1a5952`)
+  - `src/costs.ts` — 30+ model pricing table (Claude 3.5/3.7/4.x, GPT-5 family, Kimi K2 variants, Qwen3 coder, DeepSeek, GLM 4.6/5/5.1, MiniMax M2.x, Grok). `~/.sweech/pricing.json` override.
+  - `src/budgetRouter.ts` — `routeWithinBudget({cliType, maxCostPerCallUsd, projectPin})` for codeuctor + downstream callers. Honors cooldowns, tier caps, pin's maxTier.
+  - `src/costCommand.ts` — `buildCostTable` + `buildProfileDetail` + `computeSpend7d`. JSON output has `schemaVersion: 'sweech.cost-table.v1'`, `producer: 'sweech'`.
+  - 7d spend reads BOTH `audit.jsonl` `token_usage` events (exact) AND `~/.sweech/launches.log` (estimated via profile's default model × 5000 in / 1500 out). Codex caught that without launches.log ingestion, the column always showed $0.
+  - `--budget` wired into `sweech auto`, `sweech launch`, `sweech cost`. Strict numeric parsing (`Number()`, not `parseFloat`) — rejects `nope`, `0abc`, `-0.5`.
+  - 132 tests across `tests/costs.test.ts`, `tests/budgetRouter.test.ts`, `tests/costCommand.test.ts`.
 
-- **T-LU-006 (HIGH)** — `bae41ba` + merge `d0d2e08`
-  - `src/tokenRefresh.ts` refreshes 24h before expiry (was 10 min). Each attempt logged to `~/.sweech/audit.jsonl` via `logAudit` (`token_refresh` / `token_refresh_failed`).
-  - New `getNextRefreshEta` / `getAllRefreshEtas` exports.
-  - `sweech doctor` now includes a "Token refresh ETA" section listing every OAuth-backed profile with hours-until-expiry + due-now flag (`utilityCommands.ts:378`).
-  - 26 tests across `tests/tokenRefresh.test.ts` + `tests/doctorTokenRefresh.test.ts`.
+- **T-LU-008** — `sweech profile audit` (`6ae65c2`)
+  - `src/profileAudit.ts` — five finding kinds: `dormant`, `cross_bleed`, `orphan_credentials`, `missing_settings`, `expired_token`.
+  - Dormancy walks profile dirs (sessions/, projects/, history.jsonl, state_*.sqlite, logs_*.sqlite) bounded to depth 4. Only file mtimes count; directory mtimes are ignored.
+  - Cross-bleed via key-prefix heuristics (`sk-ant-`, `sk-`, `ms-`, `mse_`, `gsk_`, `AIzaSy`, `nvapi-`) + best-effort JWT issuer claim decode.
+  - `--prune` is interactive y/N per-profile; `--prune --yes` is bulk, gated by one TTY confirmation, refused entirely in non-TTY.
+  - Writes `profile_removed` audit-log entries on every successful prune (interactive + bulk).
+  - 80 tests in `tests/profileAudit.test.ts`.
 
-### Wave 1 review fixes (`3af9fb0`)
+- **T-LU-009** — Project-aware routing via `.sweech.json` (`6ffb111` + pin-forwarding fix in `52b12fc`)
+  - `src/projectConfig.ts` walks upward from cwd to `$HOME`, never above. `findProjectPin()` returns `{pin, source, projectRoot}`. Malformed JSON → null + one-line stderr warning.
+  - Pin schema: `{profile, cliType, maxTier, model, budget}`. Unknown keys tolerated (logged once).
+  - `recommendRoute` and `suggestBestAccount` accept optional 3rd `projectPin` arg. Pin's `cliType`/`profile` merge into the request; `maxTier` tags candidates with `pin-max-tier-exceeded:<tier>` rejection reason.
+  - `routeWithinBudget` ALSO accepts `projectPin` (post-review fix). Without this, `sweech auto --budget` silently dropped the pin's maxTier.
+  - `sweech pin show|set|unset|--json` command. Writes `./.sweech.json` (or `--dir`).
+  - `sweech doctor` "Project pin" row.
+  - `route_pin_applied` audit-log entry only when pin actually shaped outcome (directed selection, narrowed cliType, or capped tier — comment now matches behavior).
+  - 68 tests across `tests/projectConfig.test.ts`, `tests/pinCommand.test.ts`, `tests/accountSelector.test.ts` (pin integration), `tests/budgetRouter.test.ts` (pin forwarding).
 
-Code + security reviews surfaced 4 MUST-FIX bugs + 2 CRITICAL wiring gaps. All fixed:
+### Review round 1 — 3 parallel Claude sub-agents (`52b12fc`)
 
-- **MUST-FIX**: `tokenRefresh.writeSettings` was non-atomic `fs.writeFileSync` — replaced with `atomicWriteFileSync` + chmod 0600. Concurrent readers (wrapper hoist, getCurrentApiKey, peer sweech invocations) now never observe a truncate window.
-- **MUST-FIX**: `tokenRefresh.refreshExpiringTokens` was silently auditing `token_refresh` success even when `readSettings` returned null — so the rotated refresh token was effectively lost on next restart. New behaviour: audit `token_refresh_failed` + skip the in-memory update so the next poll retries.
-- **MEDIUM**: `config.ts` settings.json write now validates that no `settings.env` value contains `\n` / `\r` / `\0` — defence in depth against shell injection in the codex wrapper's `export "$_key=$_val"` loop.
-- **SHOULD-FIX**: providerRateLimitParsers's `parseResetHeader` was rejecting `"0s"` as unparseable. Accepted now (window just reset is a valid state).
-- **SHOULD-FIX**: codexConfigToml dead branch in `sectionOrder` maintenance — collapsed.
-- **CRITICAL wiring**: `liveUsage.getLiveUsage` / `refreshLiveUsage` now dispatch to the new Kimi/Qwen/DeepSeek/Z.ai parsers based on `profile.provider`. Without this the wave-1 parsers existed but never fired in production. API key resolved via `readApiKeyFromSettings(configDir, envKeys[])` against the same settings.env block the codex wrapper hoists from. Provider name aliases: `kimi-coding`→`kimi`, `dashscope`→`qwen`, `glm`→`zai`.
-- **CRITICAL wiring**: `fedServer.startSweechFedServerWithShutdown` now starts (and gracefully stops on SIGTERM/SIGINT) the token-refresh loop. Without this, the 24h refresh window existed but `startTokenRefreshLoop` had no production caller. `tokenRefresh` is lazy-required to avoid pulling in `inquirer` (ESM-only) when tests import fedServer.
-- New `tests/liveUsageProviderDispatch.test.ts` (9 tests) proves the dispatch fires for each supported provider + alias + missing-key short-circuit + codex-cliType-wins ordering.
+- **code-reviewer**: 3 HIGH (budget+pin maxTier bypass, unvalidated `--cli` cast, `--force` budget bypass on unpriced model) + 4 MEDIUM. All fixed.
+- **security-reviewer**: 2 LOW (commandName path-traversal in `--prune --yes`, missing audit log on prune). Both fixed — `getProfileDir` now validates `[A-Za-z0-9_-]+`, prune writes `profile_removed` entries.
+- **integration-audit**: 2 HIGH (`auto --budget` discards 3/4 pin fields, prune missing audit log) + 4 MEDIUM (`filterCandidatesByBudget` dead API docstring, top-level help banner stale, SWEECH_GUIDE.md missing wave docs, failover scope-narrowness undocumented) + 6 LOW. All HIGH/MEDIUM fixed except `filterCandidatesByBudget` (kept as routing-aware utility for external callers; docstring rewritten to be honest).
 
-### Wave 2 — `sweech auto` + `sweech failover`
+### Review round 2 — codex adversarial via `codex review --base fb54763` (`a1a5952`)
 
-- **T-LU-002 (HIGH)** — `fdda248`
-  - `sweech auto [--cli claude|codex|kimi] [--json] [--exec]` runs `suggestBestAccount(cliType)` and either prints `sweech use <pick>` or spawns the CLI directly.
-  - Pure helpers extracted to `src/autoCommand.ts` for testability: `buildAutoCommandJson` (stable JSON shape contract) + `buildAutoExecEnv` (spawn env construction).
-  - 16 tests initially, grew to 30 after review fixes.
+Codex (gpt-5.4 via codex-pole profile) caught 2 P2 findings that all three Claude reviewers missed:
 
-- **T-LU-003 (CRITICAL)** — `8265dd4`
-  - New `src/failover.ts` (310 lines) with cooldown store at `~/.sweech/failover-cooldowns.json` (atomic write + 0o600). `startFailoverListener` subscribes to the existing `limit_reached` event (emitted by `checkUsageThresholds`) and records a cooldown automatically.
-  - New `sweech failover [from] [--cli C] [--exclude N1,N2] [--exec] [--json] [--status] [--clear name] [--clear-all]` command. `--exec` records the rotation via `recordFailover` AFTER spawn so audit history reflects real switches.
-  - New typed event `failover_rotated` for webhook delivery.
-  - `fedServer` daemon starts the failover listener (lazy-required) and stops it FIRST on shutdown (silence the event bus before stopping the refresh timer that could trip it).
-  - 31 tests covering write/read round-trip, expiry pruning, listener idempotency + hot-reload guard, candidate walk, default-collision skip.
-
-### Wave 2 review fixes (`996edf8`)
-
-Code + security + integration reviewers found 3 more bugs:
-
-- **MUST-FIX**: `fedServer` shutdown order was `stopTokenRefresh → stopFailoverListener → close` — a final refresh probe could fire `limit_reached` during teardown and trip the still-registered listener into a disk write while closing. Swapped to `stopFailoverListener → stopTokenRefresh → logRotator → close`.
-- **MUST-FIX**: `pickFailoverTarget` was using `suggestBestAccount + post-filter` — silently dropped availability when a built-in default account (claude / codex) collided with the source. Switched to `recommendRoute + walk-candidates` so every scored candidate gets a fair check.
-- **SHOULD-FIX**: failover listener test-crash recovery — `stopFailoverListener` now always resets the module-level state vars; listener is tagged so hot-reload doesn't leak duplicates.
-- **HIGH security**: `atomicWriteFileSync` gained `opts.mode` parameter. Callers holding secrets (settings.json, failover-cooldowns) now pass `{ mode: 0o600 }`.
-- **MEDIUM security**: `buildAutoExecEnv` expanded strip list to cover shadowing API keys (`ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`, `KIMI/MOONSHOT/GLM/ZAI/ZHIPU/DEEPSEEK/QWEN/DASHSCOPE_API_KEY`), other Claude Code nesting vars (`CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_OAUTH_TOKEN`), config-dir overrides, and `MCP_SERVERS_PATH`.
-
-### Codex adversarial review fixes (`5f6d9fa`)
-
-Independent review via `codex review --base d0d2e08` (codex-pole / gpt-5.4) caught 3 bugs the Claude-side reviewers missed:
-
-- **P1**: `--exec` was bypassing the wrapper script's settings.env hoist. For codex profiles (which read env at runtime via `env_key`), the API key never made it into the spawned process. Added `readSettingsEnv(configDir)` pure helper + wired both `sweech auto --exec` and `sweech failover --exec` to call it. Hoist runs AFTER strip + BEFORE configDirEnvVar set.
-- **P2**: `atomicWriteFileSync` was applying mode via post-write chmod, leaving a tiny window where a co-tenant could `open()` the temp file with default umask perms and keep that fd open across the chmod. Refactored to pass mode through to `writeFileSync({ mode })` so `open(O_CREAT)` honours it. Belt-and-braces post-write chmod retained for umask-077 case.
-- **P2**: `subscriptions.checkUsageThresholds(p.name, ...)` was passing display name, but failover compares against commandName. For profiles where name ≠ commandName, a 429 would record under the wrong key and the rate-limited profile got re-selected. Fix: pass `p.commandName` (the unique routing key).
-- New `tests/atomicWrite.test.ts` (10 tests) + 10 new `tests/autoCommand.test.ts` cases for `readSettingsEnv` + hoist behaviour.
+1. **`parseFloat('nope')` silently bypassed `--budget` guard.** NaN failed the `Number.isFinite` check in the action handler, which then skipped the budget block entirely → launch proceeded with no enforcement. `parseFloat('0abc')` also returned 0 (literal). Fixed: replaced `parseFloat` with `parseBudgetUsd` (uses strict `Number()`, exits 1 on NaN / negative).
+2. **`sweech cost` 7d column always reported $0.** No caller emits `token_usage` audit events; normal launches go to `~/.sweech/launches.log` via `logLaunch`. Fixed: `computeSpend7d` now reads BOTH sources, dedups by minute to avoid double-counting, requires `defaultModel` in the profile descriptor to project.
 
 ## Test state
 
-- **71 suites / 1775 tests, all green** (up from 63/1526 at session start: +8 suites, +249 tests)
+- **78 suites / 2097 tests, all green** (up from 71/1775 at session start: +7 suites, +322 tests)
 - `npx tsc --noEmit` returns 0 errors
-- Swift release build clean (`swift build -c release` in `macos-menubar/SweechBar/`)
-- SweechBar process still running (PID 17515 unchanged) — backwards-compatible data shape changes
+- Full suite runs in ~10 seconds
 
 ## Current state
 
 - Branch: `main`
-- Latest commit: `5f6d9fa fix(wave2): address codex adversarial review (3 findings)`
+- Latest commit: `a1a5952 fix(wave-T-LU): address codex adversarial review — budget validation + real 7d spend`
 - Origin: up to date — every commit pushed
-- Uncommitted changes: **none** (working tree clean)
-- Untracked: `.worktrees/`, `packages/engine/bun.lock` (pre-existing)
-- Keel: 0 active, 0 blocked, 58 done, 4 todo
+- Uncommitted changes: **none** (working tree clean except pre-existing `packages/engine/bun.lock` + screenshot dirs)
+- Worktrees: only the canonical main worktree (4 agent worktrees cleaned up after merge)
+- Keel: 0 active, 0 blocked, 62 done, 0 todo
 
-## Still on the keel queue
+## E2E proof
 
-- **T-LU-005 (MEDIUM)** — `sweech serve --install`: launchd daemon with auto-restart
-- **T-LU-007 (MEDIUM)** — `sweech cost`: USD/M-token per profile + budget filtering
-- **T-LU-008 (MEDIUM)** — `sweech profile audit`: flag dormant + identity cross-bleed, prune
-- **T-LU-009 (MEDIUM)** — Project-aware routing: `.sweech.json` to pin profile per project
+Smoke output + screenshot at `~/Desktop/screenshots/sweech/`:
+- `smoke-20260517-153908.txt` — initial wave smoke (every new command help + JSON shape + table)
+- `smoke-post-review-20260517-161516.txt` — post-review smoke (budget validation rejects, 7d spend shows real data, --cli bogus rejected, launchd still working)
+- `wave-T-LU-005-007-008-009-20260517-154028.png` — full-screen visual proof
+- `wave-T-LU-final-20260517-161532.png` — post-review final state
 
-## Open worktree (still needs accounting)
-
-- `.worktrees/d-lint-consumer-leak-guard` on branch `chore/d-lint-consumer-leak-guard` — pre-existing from before this session, carries a CI guard blocking `vykean` references. Verify with the user whether to merge or remove.
+Live measurements (from the smoke run):
+- `sweech auto --budget 0.05 --json` → picks `claude-pole` ($0.0375/call < budget)
+- `sweech auto --budget nope` → "Invalid --budget" + exit 1
+- `sweech auto --cli bogus` → "Invalid --cli for auto: must be claude, codex, kimi" + exit 1
+- `sweech cost` → real 7d spend visible: `claude-pole: $0.6750`, `codex-pole: $1.09` (from this very session's codex review!)
+- `sweech serve --status` → "ai.sweech.serve: running (pid 81054)" + exit 0
+- `sweech pin set/show/unset` cycle reversible, JSON shape stable
 
 ## Decisions made (do not re-litigate)
 
-- **Provider-aware dispatch uses settings.env, not credentialStore.** The codex wrapper script already hoists `settings.env` for codex profiles, so reading the same source keeps the daemon in sync with what the CLI actually runs with. Aliases (`kimi-coding`→`kimi`, etc.) defined in `PROVIDER_DISPATCH`.
-- **Failover listener is daemon-only.** `startFailoverListener` is called from `fedServer.startSweechFedServerWithShutdown` — NOT from foreground CLI commands. Foreground commands that trigger `getAccountInfo` still emit `limit_reached`, but the listener only catches them when registered (daemon running). This is intentional: a one-shot `sweech list` shouldn't write cooldowns.
-- **Cooldown key is `commandName` (not display name).** `checkUsageThresholds` now receives `p.commandName`, the listener stores `data.account` (= commandName), and `pickFailoverTarget` filters against commandName. Consistent everywhere.
-- **`atomicWriteFileSync` mode applied at open(), not chmod after.** Closes the temp-file TOCTOU window. Belt-and-braces post-write chmod kept for umask-077 case.
-- **24h refresh window is intentional.** Wider than the 10-min predecessor so tokens survive long sleep/standby + give the daemon multiple polling intervals to recover from transient refresh failures.
-- **buildAutoExecEnv: strip first, hoist second, set configDirEnvVar last.** Order is load-bearing — strip removes parent's stale tokens; hoist re-sets the picked profile's auth; configDirEnvVar set last so a hoisted CONFIG_DIR can't clobber the correct path.
+- **Failover is intentionally pin/budget unaware.** The pinned profile is the one that just hit limits; honoring pin would re-select it. Caller composes pin+budget via `sweech auto`, not `sweech failover`. Documented in `src/failover.ts:pickFailoverTarget` JSDoc.
+- **`--force` only bypasses reachability, never budget.** Documented: a silent budget skip when pricing data is missing defeats the whole point of `--budget`. Refuses with exit 1 + hint to fix pricing.json or drop `--budget`.
+- **Pin is forwarded into `routeWithinBudget` but NOT into `failover.pickFailoverTarget` or `fedServer /fed/route-recommendation`.** First is correct (pin shapes budget routing); second is correct (failover is escape-hatch); third is correct (server has no client cwd context). Each has a comment explaining the choice.
+- **`profile audit --prune` requires explicit `--yes` in non-TTY contexts.** Refuses with exit 1 otherwise. Prevents shell-pipe destruction.
+- **`route_pin_applied` audit log only fires when pin actually shaped the outcome.** Three signals checked: pin directed selected profile, pin narrowed cliType, pin capped tier (≥1 candidate hit pin-max-tier-exceeded). Previous "logs when changed outcome" comment was a lie; now matches.
+- **Spend dedup by minute bucket.** When both `token_usage` and `launches.log` emit for the same call, the launch entry is skipped if a `token_usage` entry exists in the same minute. Prefers exact source over estimate.
+- **Default token budget for spend estimation is 5000 in / 1500 out** — matches `routeWithinBudget` defaults and the `sweech cost --est-input/--est-output` flag defaults. Single source of truth.
+- **`getProfileDir` validates `commandName` as `[A-Za-z0-9_-]+`.** Defense-in-depth against poisoned `config.json` entries that could let `--prune --yes` wipe sibling dirs via `..` escape.
+
+## Still on the keel queue
+
+**Empty.** All 4 MEDIUM tasks from the prior handoff (T-LU-005/007/008/009) are done. No active, no blocked, no todo.
+
+## Open follow-ups (not blocking ship)
+
+- **Emit `token_usage` audit events from launch paths** so `sweech cost` 7d spend becomes exact instead of estimated. Currently estimated-from-launches.log is shipping but exact would beat estimate. Could be tackled as T-LU-010 if/when token telemetry is available from the launched CLI.
+- **CLI integration smoke tests (`spawnSync('node', ['dist/cli.js', ...])`)**: every new command (auto, cost, pin, profile audit, serve --status) has unit tests for its builder functions but no test that exercises the action handler via the built CLI. Integration audit flagged as LOW; consider a thin smoke test file if surface keeps growing.
+- **`sweech list --budget`**: integration audit suggested filtering the workspace list by budget. Out of scope for this wave; could be added.
+- **MODEL_PRICING / formatUsd / formatUsdCompact in src/costs.ts**: tested but not used in production. Kept as utility exports. Delete if confirmed unused in 90 days.
 
 ## Key files (new this session)
 
-- `src/codexConfigToml.ts` — minimal TOML parser/merger/emitter. Pattern for any future TOML writes.
-- `src/providerRateLimitParsers.ts` — OpenAI-compat rate-limit header parsers shared across Kimi/Qwen/DeepSeek/Z.ai.
-- `src/autoCommand.ts` — pure helpers for `sweech auto`. Stable JSON shape contract — downstream scripts depend on keys.
-- `src/failover.ts` — cooldown store + listener + `pickFailoverTarget` + `recordFailover`. The tagged-listener pattern for hot-reload guard is reusable.
-- `tests/atomicWrite.test.ts` — first dedicated atomic-write test file. Cross-platform skip on Windows.
-- `tests/liveUsageProviderDispatch.test.ts` — proves the wave-1 wiring fix actually fires the provider parsers end-to-end.
+- `src/costs.ts` — pricing table + estimateCostUsd + ~/.sweech/pricing.json override. 30+ models.
+- `src/budgetRouter.ts` — routeWithinBudget API + filterCandidatesByBudget helper.
+- `src/costCommand.ts` — sweech cost builders. Reads token_usage + launches.log for 7d spend.
+- `src/profileAudit.ts` — dormancy + cross-bleed + orphan-cred analysis engine.
+- `src/projectConfig.ts` — .sweech.json upward walker + writer + validator.
+- `tests/launchd.test.ts` — 27 tests, was zero.
+- `tests/profileAudit.test.ts` — 80 tests covering all finding kinds.
+- `tests/projectConfig.test.ts` + `tests/pinCommand.test.ts` — 64 tests for pin lifecycle.
 
 ## Watch out for
 
-- **`mockRecommendRoute` is mocked in failover tests, not `mockSuggestBestAccount`.** `pickFailoverTarget` switched implementations; use `mockRecommendRoute.mockResolvedValueOnce(makeRouteResponse(...))` for new tests.
-- **`pickFailoverTarget` walks `route.candidates`, doesn't post-filter.** A candidate with `reasons.length > 0` is already rejected — skip it; the loop continues to the next.
-- **The `failover_rotated` event ONLY fires from `recordFailover()` (after spawn).** Don't fire it from `recordRateLimitCooldown` — that's the upstream signal, not the rotation event.
-- **`readSettingsEnv` is intentionally tolerant.** Missing file, malformed JSON, non-string values → returns `{}`. No throws.
-- **Cache lock spin-wait blocks ~25ms per retry, bounded by 2s.** Cache is non-critical, graceful timeout. Don't try to "fix" the spin — it's intentional.
+- **`parseCliType()` returns `undefined` / `null` / CLIType** — three states, not two. `undefined` = no flag, `null` = invalid, otherwise = narrowed. `requireValidCli()` is the friendly wrapper that exits on `null`.
+- **`computeSpend7d` needs `defaultModel` in the profile descriptor** to estimate launches.log entries. Callers that only pass `commandName` get $0 for launches that have no `token_usage` event. `buildCostTable` and `buildProfileDetail` already fill it in via ConfigManager+getProvider; new callers must too.
+- **`accountSelector.recommendRoute` and `suggestBestAccount` are 3-arg now** — but the 3rd is optional. Existing 2-arg callers compile unchanged.
+- **`routeWithinBudget` second arg WAS `profiles`** in budgetRouter's call to recommendRoute; it's now `undefined` because we pass `projectPin` as the 3rd. If you ever need to scope to a profile subset in the budget path, pass it as the 2nd arg.
+- **Cost --json schema is `sweech.cost-table.v1` / `sweech.cost-detail.v1`** — bump if you change the shape. Downstream parsers (codeuctor, sweech-bar) will rely on this.
+- **Pin write path validates commandName via `getProfileDir` first** — invalid commandName in `.sweech.json.profile` falls through to default ranking with a stderr warning rather than crashing.
+
+## Adversarial review pattern, codified
+
+The "two pairs of eyes, different brains" approach this session validates the wave's quality. Use it for future waves:
+
+1. Build features in parallel via 4 isolated agent worktrees.
+2. Merge in deliberate order (no signature-changing branch last).
+3. Run 3 reviewers in parallel from the SAME message: code-reviewer + security-reviewer + integration-audit (general-purpose with a focused brief).
+4. Fix HIGH + MEDIUM in one batch commit.
+5. Run codex adversarial: `CODEX_HOME="$HOME/.codex-pole" codex review --base <pre-wave-commit>`. This is the load-bearing step — same-family reviewers shared blind spots; gpt-5.4 caught the budget-NaN bypass and the launches.log gap.
+6. Fix codex findings, push.
+
+This session: 4 HIGH + 2 P2 + 6 MEDIUM + 8 LOW caught and fixed across 5 commits. No "ship it broken and fix later" tradeoffs taken.
 
 ## Next steps
 
-The top of the codex queue is now: T-LU-005 (launchd daemon), T-LU-007 (cost tracking), T-LU-008 (profile audit), T-LU-009 (project-aware routing). All MEDIUM priority. Run `/vy-go` to pick them up.
+Backlog is clear. Suggested directions if more work is wanted:
+- Add `token_usage` audit emission from the launch paths to make 7d spend exact (T-LU-010 candidate).
+- Wire `--budget` into `sweech list` for completeness.
+- Surface `sweech cost` + `sweech pin` data in SweechBar (currently CLI-only).
+- The `filterCandidatesByBudget` helper has 4 tests + no caller — either build a caller for it or delete.
