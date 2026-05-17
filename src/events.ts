@@ -18,6 +18,17 @@ export interface SweechEvents {
   account_removed: { account: string };
   server_started: { port: number };
   server_stopped: {};
+  /**
+   * T-LU-003: emitted by `recordFailover` whenever a rate-limited profile
+   * is auto-rotated to the next-ranked one. Webhook subscribers (e.g.
+   * requestor v1) listen for this to update their routing.
+   */
+  failover_rotated: {
+    from: string;
+    to: string;
+    reason: string;
+    timestamp: string;
+  };
 }
 
 export type SweechEventName = keyof SweechEvents;

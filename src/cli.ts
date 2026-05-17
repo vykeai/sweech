@@ -36,6 +36,13 @@ import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { kickBackgroundRefresh } from './backgroundRefresh';
 import { recommendRoute, suggestBestAccount } from './accountSelector';
 import { buildAutoCommandJson, buildAutoExecEnv, noProfileErrorMessage } from './autoCommand';
+import {
+  clearAllCooldowns,
+  clearCooldown,
+  getActiveCooldowns,
+  pickFailoverTarget,
+  recordFailover,
+} from './failover';
 import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { recordProjectionSamples, getAccountProjection, formatEta } from './quotaProjection';
 import { startSweechFedServerWithShutdown } from './fedServer';
@@ -4201,6 +4208,127 @@ program
     console.log(`  launch   : ${chalk.cyan(json.command)}\n`);
     console.log(chalk.dim('  Tip: sweech auto --exec  → spawn the CLI directly.'));
     console.log();
+  });
+
+// ── sweech failover ────────────────────────────────────────────────────────
+// T-LU-003: pick the next-best profile to fail over to (excluding cooldowns)
+// and either print the launch command or spawn the CLI directly. Subcommands
+// expose cooldown state for ops and a manual clear path.
+program
+  .command('failover [from]')
+  .description('Pick the next-best profile (excluding rate-limited cooldowns) and optionally launch')
+  .option('--cli <type>', 'Restrict to a specific CLI: claude | codex | kimi')
+  .option('--exclude <names>', 'Comma-separated commandNames to exclude in addition to cooldowns')
+  .option('--exec', 'Spawn the CLI directly instead of printing the command')
+  .option('--json', 'Machine-readable output')
+  .option('--status', 'Print the active cooldown list and exit (no rotation)')
+  .option('--clear <name>', 'Clear a single cooldown by commandName and exit')
+  .option('--clear-all', 'Clear every cooldown at once and exit')
+  .action(async (from: string | undefined, opts: {
+    cli?: string; exclude?: string; exec?: boolean; json?: boolean;
+    status?: boolean; clear?: string; clearAll?: boolean;
+  }) => {
+    // --status: list active cooldowns
+    if (opts.status) {
+      const active = getActiveCooldowns();
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ cooldowns: active }, null, 2) + '\n');
+        return;
+      }
+      if (active.length === 0) {
+        console.log(chalk.green('\n  No active failover cooldowns.\n'));
+        return;
+      }
+      console.log(chalk.bold(`\n  Active cooldowns (${active.length}):\n`));
+      for (const c of active) {
+        const remainSec = Math.max(0, Math.floor((c.expiresAt - Date.now()) / 1000));
+        const remainStr = remainSec >= 60 ? `${Math.floor(remainSec / 60)}m ${remainSec % 60}s` : `${remainSec}s`;
+        console.log(`  ${chalk.bold(c.commandName)}  reason=${c.reason}  expires_in=${remainStr}`);
+      }
+      console.log();
+      return;
+    }
+
+    // --clear <name>: clear a single cooldown
+    if (opts.clear) {
+      const ok = clearCooldown(opts.clear);
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ cleared: ok, commandName: opts.clear }) + '\n');
+      } else if (ok) {
+        console.log(chalk.green(`\n  Cleared cooldown: ${chalk.bold(opts.clear)}\n`));
+      } else {
+        console.error(chalk.yellow(`\n  No active cooldown for: ${opts.clear}\n`));
+      }
+      if (!ok) process.exit(1);
+      return;
+    }
+
+    // --clear-all: clear every cooldown
+    if (opts.clearAll) {
+      const count = clearAllCooldowns();
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ clearedAll: true, count }) + '\n');
+      } else {
+        console.log(chalk.green(`\n  Cleared ${count} cooldown(s).\n`));
+      }
+      return;
+    }
+
+    // Default: pick the next-best failover target
+    const exclude = opts.exclude ? opts.exclude.split(',').map(s => s.trim()).filter(Boolean) : [];
+    const target = await pickFailoverTarget(from, { cliType: opts.cli, exclude });
+
+    if (!target) {
+      const message = `no failover target available${from ? ` (from=${from})` : ''}`;
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ error: message }) + '\n');
+      } else {
+        console.error(chalk.red(`\n  ${message}\n`));
+      }
+      process.exit(1);
+    }
+
+    const pick = target.account;
+    const cmd = `sweech use ${pick.commandName}`;
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify({
+        from: from ?? null,
+        to: pick.commandName,
+        cliType: pick.cliType,
+        configDir: pick.configDir,
+        score: target.score,
+        reason: target.reason,
+        command: cmd,
+      }, null, 2) + '\n');
+    }
+
+    if (opts.exec) {
+      const cli = getCLI(pick.cliType);
+      if (!cli) {
+        console.error(chalk.red(`Unknown cliType '${pick.cliType}' — cannot --exec`));
+        process.exit(1);
+      }
+      // Record AFTER we've decided to actually rotate (spawn), so audit
+      // history reflects real switches not just dry-run lookups.
+      recordFailover(from ?? '(unspecified)', pick.commandName, target.reason);
+      const { spawn } = require('child_process');
+      const env = buildAutoExecEnv(cli, pick.configDir, process.env);
+      const child = spawn(cli.command, [], { env, stdio: 'inherit' });
+      child.on('exit', (code: number) => process.exit(code ?? 0));
+      return;
+    }
+
+    if (!opts.json) {
+      console.log(chalk.bold('\n  sweech · failover\n'));
+      if (from) console.log(`  from     : ${from}`);
+      console.log(`  to       : ${chalk.bold(pick.commandName)}`);
+      console.log(`  cli      : ${pick.cliType}`);
+      console.log(`  reason   : ${chalk.dim(target.reason)}`);
+      console.log(`  launch   : ${chalk.cyan(cmd)}\n`);
+      console.log(chalk.dim('  Tip: sweech failover --exec  → spawn the CLI + record the rotation.'));
+      console.log();
+    }
   });
 
 // ── sweech code-review ─────────────────────────────────────────────────────

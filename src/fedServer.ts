@@ -319,6 +319,20 @@ export async function startSweechFedServerWithShutdown(port: number): Promise<ht
   // captures the list by reference so config edits during a long-running
   // daemon don't propagate, which is a known limitation accepted as a
   // restart-on-add policy for now).
+  // T-LU-003 wiring: register the failover listener BEFORE the token-refresh
+  // loop kicks off so the very first probe's limit_reached event is captured.
+  // The listener writes ~/.sweech/failover-cooldowns.json + audit + webhook;
+  // see src/failover.ts. lazy-required for the same reason as tokenRefresh.
+  let stopFailoverListener: (() => void) | null = null
+  try {
+    const { startFailoverListener } = require('./failover') as typeof import('./failover')
+    stopFailoverListener = startFailoverListener()
+  } catch (err) {
+    const message = scrubSecrets(err instanceof Error ? err.message : String(err))
+    process.stderr.write(`[sweech serve] failed to start failover listener: ${message}\n`)
+    stopFailoverListener = null
+  }
+
   let stopTokenRefresh: (() => void) | null = null
   try {
     const profiles = new ConfigManager().getProfiles()
@@ -336,6 +350,8 @@ export async function startSweechFedServerWithShutdown(port: number): Promise<ht
     logRotator = null
     stopTokenRefresh?.()
     stopTokenRefresh = null
+    stopFailoverListener?.()
+    stopFailoverListener = null
     server.close(() => {
       process.exit(0)
     })
