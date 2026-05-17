@@ -12,7 +12,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DEFAULT_DAEMON_PORT, envOrDefaultDaemonPort } from './constants';
 import { ConfigManager, resolveApiKey } from './config';
-import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider } from './providers';
+import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider, type CLIType } from './providers';
 import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
 import { logLaunch } from './launchLog';
@@ -1276,13 +1276,16 @@ program
 program
   .command('launch <command-name>')
   .alias('launch-profile')
-  .description('Launch a profile directly (no TUI). Flags: --yolo, --resume, --no-tmux')
+  .description('Launch a profile directly (no TUI). Flags: --yolo, --resume, --no-tmux, --budget')
   .option('-y, --yolo', 'Skip permission prompts (--dangerously-skip-permissions / equivalent)')
   .option('-r, --resume', 'Resume last session (--continue / equivalent)')
   .option('--no-tmux', 'Bypass tmux even if tmux is available')
   .option('--force', 'Skip model reachability check')
+  .option('--budget <usd>', 'Refuse to launch if the profile model exceeds this USD/call ceiling', parseFloat)
+  .option('--est-input <tokens>', 'Estimated input tokens for the budget projection (default 5000)', parseInt)
+  .option('--est-output <tokens>', 'Estimated output tokens for the budget projection (default 1500)', parseInt)
   .allowUnknownOption(true)
-  .action(async (commandName: string, opts: { yolo?: boolean; resume?: boolean; tmux?: boolean; force?: boolean }, cmd: any) => {
+  .action(async (commandName: string, opts: { yolo?: boolean; resume?: boolean; tmux?: boolean; force?: boolean; budget?: number; estInput?: number; estOutput?: number }, cmd: any) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
     const aliasManager = new AliasManager();
@@ -1294,6 +1297,31 @@ program
     if (!profile && !cliConfig) {
       console.error(chalk.red(`Profile '${commandName}' not found`));
       process.exit(1);
+    }
+
+    // ── --budget guard: refuse to launch if the profile's model would
+    //    exceed the per-call USD ceiling. Same pricing source as
+    //    `sweech cost` and `routeWithinBudget`.
+    if (opts.budget !== undefined && Number.isFinite(opts.budget)) {
+      const { getModelPricing, estimateCostUsd } = require('./costs') as typeof import('./costs');
+      const { getProvider: providerLookup } = require('./providers') as typeof import('./providers');
+      const providerKey = profile?.provider ?? (cliConfig?.name === 'codex' ? 'openai' : 'anthropic');
+      const provider = providerLookup(providerKey);
+      const model = profile?.model ?? provider?.defaultModel ?? '';
+      const pricing = model ? getModelPricing(model) : null;
+      const estIn = opts.estInput ?? 5000;
+      const estOut = opts.estOutput ?? 1500;
+      if (!pricing) {
+        console.error(chalk.yellow(`WARN: model '${model}' has no pricing data — --budget cannot evaluate. Use --force to override.`));
+        if (!opts.force) process.exit(1);
+      } else {
+        const cost = estimateCostUsd(model, estIn, estOut);
+        if (cost > opts.budget) {
+          console.error(chalk.red(`Profile '${resolvedName}' would cost $${cost.toFixed(4)}/call (model ${model}), exceeds budget $${opts.budget.toFixed(4)}.`));
+          console.error(chalk.dim(`  Use 'sweech cost --budget ${opts.budget}' to list profiles that fit.`));
+          process.exit(1);
+        }
+      }
     }
 
     // Pre-launch reachability check (unless --force)
@@ -4154,6 +4182,90 @@ program
     console.log();
   });
 
+// ── sweech cost ────────────────────────────────────────────────────────────
+// T-LU-007: $/Min · $/Mout · 7d spend table per profile + --budget filter.
+// Sourced from src/costs.ts (pricing table) and src/costCommand.ts (builders).
+program
+  .command('cost')
+  .description('Show USD/million tokens per profile + last-7d spend')
+  .option('--json', 'Machine-readable JSON output (stable shape)')
+  .option('--budget <usd>', 'Filter to profiles whose est cost per call fits this USD ceiling', parseFloat)
+  .option('--profile <name>', 'Detail mode — list every model the profile can use with cost projection')
+  .option('--est-input <tokens>', 'Estimated input tokens for cost projection (default 5000)', parseInt)
+  .option('--est-output <tokens>', 'Estimated output tokens for cost projection (default 1500)', parseInt)
+  .option('--cli <type>', 'Restrict to a specific CLI: claude | codex | kimi')
+  .action(async (opts: { json?: boolean; budget?: number; profile?: string; estInput?: number; estOutput?: number; cli?: string }) => {
+    const { buildCostTable, buildProfileDetail, formatPerMillion, formatSpend } = require('./costCommand') as typeof import('./costCommand');
+
+    // ── Detail mode: --profile <name> ──────────────────────────────
+    if (opts.profile) {
+      const detail = buildProfileDetail(opts.profile, opts.estInput ?? 5000, opts.estOutput ?? 1500);
+      if (!detail) {
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ error: 'profile not found', profile: opts.profile }) + '\n');
+        } else {
+          console.error(chalk.red(`\n  Profile '${opts.profile}' not found.\n`));
+        }
+        process.exit(1);
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(detail, null, 2) + '\n');
+        return;
+      }
+      console.log(chalk.bold(`\n  sweech · cost · ${detail.profile}\n`));
+      console.log(`  cli       : ${detail.cliType}`);
+      console.log(`  provider  : ${detail.provider}`);
+      console.log(`  default   : ${detail.defaultModel || chalk.dim('(none)')}`);
+      console.log(`  7d spend  : ${formatSpend(detail.spent7dUsd)}`);
+      console.log(`  est call  : ${opts.estInput ?? 5000}in / ${opts.estOutput ?? 1500}out`);
+      console.log();
+      const headerRow = `  ${'Model'.padEnd(36)}  ${'$/Min'.padStart(8)}  ${'$/Mout'.padStart(8)}  ${'$/call'.padStart(10)}`;
+      console.log(chalk.dim(headerRow));
+      console.log(chalk.dim(`  ${'─'.repeat(36)}  ${'─'.repeat(8)}  ${'─'.repeat(8)}  ${'─'.repeat(10)}`));
+      for (const m of detail.models) {
+        const line = `  ${m.model.padEnd(36)}  ${formatPerMillion(m.inputUsdPerMillion).padStart(8)}  ${formatPerMillion(m.outputUsdPerMillion).padStart(8)}  ${(m.estCostPerCallUsd !== null ? '$' + m.estCostPerCallUsd.toFixed(4) : '—').padStart(10)}`;
+        console.log(m.model === detail.defaultModel ? chalk.bold(line) : line);
+      }
+      console.log();
+      return;
+    }
+
+    // ── Table mode (default) ──────────────────────────────────────
+    const table = await buildCostTable({
+      budgetUsd: opts.budget,
+      estInputTokens: opts.estInput,
+      estOutputTokens: opts.estOutput,
+      cliType: opts.cli,
+    });
+
+    if (opts.json) {
+      process.stdout.write(JSON.stringify(table, null, 2) + '\n');
+      return;
+    }
+
+    console.log(chalk.bold('\n  sweech · cost\n'));
+    if (opts.budget !== undefined) {
+      console.log(`  budget   : ${chalk.cyan('$' + opts.budget.toFixed(4))} per call`);
+    }
+    console.log(`  est call : ${table.estInputTokens}in / ${table.estOutputTokens}out`);
+    console.log();
+    const header = `  ${'Profile'.padEnd(18)}  ${'CLI'.padEnd(6)}  ${'Provider'.padEnd(14)}  ${'Model'.padEnd(28)}  ${'$/Min'.padStart(8)}  ${'$/Mout'.padStart(8)}  ${'7d spend'.padStart(10)}`;
+    console.log(chalk.dim(header));
+    console.log(chalk.dim(`  ${'─'.repeat(18)}  ${'─'.repeat(6)}  ${'─'.repeat(14)}  ${'─'.repeat(28)}  ${'─'.repeat(8)}  ${'─'.repeat(8)}  ${'─'.repeat(10)}`));
+    if (table.rows.length === 0) {
+      console.log(chalk.dim('  (no profiles match the current filter)'));
+    } else {
+      for (const r of table.rows) {
+        const line = `  ${r.profile.padEnd(18)}  ${r.cliType.padEnd(6)}  ${r.provider.padEnd(14)}  ${(r.model || '—').padEnd(28)}  ${formatPerMillion(r.inputUsdPerMillion).padStart(8)}  ${formatPerMillion(r.outputUsdPerMillion).padStart(8)}  ${formatSpend(r.spent7dUsd).padStart(10)}`;
+        console.log(line);
+      }
+    }
+    console.log();
+    console.log(chalk.dim('  Tip: sweech cost --profile <name>  → per-model breakdown for one profile'));
+    console.log(chalk.dim('  Tip: sweech cost --budget 0.05     → only profiles that fit under 5¢/call'));
+    console.log();
+  });
+
 // ── sweech auto ────────────────────────────────────────────────────────────
 // Pick the highest-scoring account across all CLIs (or filter by --cli) and
 // either print `sweech use X` or spawn the CLI directly with --exec.
@@ -4165,9 +4277,70 @@ program
   .option('--cli <type>', 'Restrict to a specific CLI: claude | codex | kimi')
   .option('--json', 'Machine-readable output (for scripts)')
   .option('--exec', 'Spawn the CLI directly instead of printing the command')
-  .action(async (opts: { cli?: string; json?: boolean; exec?: boolean }) => {
+  .option('--budget <usd>', 'Reject candidates whose estimated cost per call exceeds this USD ceiling', parseFloat)
+  .option('--est-input <tokens>', 'Estimated input tokens for the budget projection (default 5000)', parseInt)
+  .option('--est-output <tokens>', 'Estimated output tokens for the budget projection (default 1500)', parseInt)
+  .action(async (opts: { cli?: string; json?: boolean; exec?: boolean; budget?: number; estInput?: number; estOutput?: number }) => {
     const config = new ConfigManager();
     const profiles = config.getProfiles();
+
+    // ── --budget path: delegate to routeWithinBudget so the dollar
+    //    ceiling is the source of truth for the pick. Without --budget
+    //    the original quota-based scoring stays as-is.
+    if (opts.budget !== undefined && Number.isFinite(opts.budget)) {
+      const cliType = (opts.cli ?? 'claude') as CLIType;
+      const { routeWithinBudget } = require('./budgetRouter') as typeof import('./budgetRouter');
+      const result = await routeWithinBudget({
+        cliType,
+        maxCostPerCallUsd: opts.budget,
+        estInputTokens: opts.estInput,
+        estOutputTokens: opts.estOutput,
+      });
+      if (!result) {
+        const message = `no profile fits budget $${opts.budget.toFixed(4)}/call`;
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ error: message, budgetUsd: opts.budget }) + '\n');
+        } else {
+          console.error(chalk.red(`\n  ${message}\n`));
+        }
+        process.exit(1);
+      }
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({
+          profile: result.account,
+          cliType: result.cliType,
+          model: result.model,
+          provider: result.provider,
+          estimatedCostUsd: result.estimatedCostUsd,
+          budgetUsd: opts.budget,
+          score: result.score,
+          command: `sweech use ${result.account}`,
+        }, null, 2) + '\n');
+        return;
+      }
+      const dir = path.join(os.homedir(), `.${result.account}`);
+      if (opts.exec) {
+        const cli = getCLI(result.cliType);
+        if (!cli) {
+          console.error(chalk.red(`Unknown cliType '${result.cliType}' — cannot --exec`));
+          process.exit(1);
+        }
+        const { spawn } = require('child_process');
+        const settingsEnv = readSettingsEnv(dir);
+        const env = buildAutoExecEnv(cli, dir, process.env, settingsEnv);
+        const child = spawn(cli.command, [], { env, stdio: 'inherit' });
+        child.on('exit', (code: number) => process.exit(code ?? 0));
+        return;
+      }
+      console.log(chalk.bold('\n  sweech · auto (budget-aware)\n'));
+      console.log(`  profile  : ${chalk.bold(result.account)}`);
+      console.log(`  cli      : ${result.cliType}`);
+      console.log(`  model    : ${result.model}`);
+      console.log(`  cost     : ${chalk.green('$' + result.estimatedCostUsd.toFixed(4))} (budget $${opts.budget.toFixed(4)})`);
+      console.log(`  launch   : ${chalk.cyan('sweech use ' + result.account)}\n`);
+      return;
+    }
+
     const recommendation = await suggestBestAccount(opts.cli, profiles);
 
     if (!recommendation) {
