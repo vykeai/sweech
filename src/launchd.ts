@@ -72,6 +72,14 @@ export function installLaunchd(port: number): void {
     throw new Error('launchd is only available on macOS');
   }
   try {
+    // T-LU-005: detect re-install so the operator gets explicit feedback
+    // that the existing service is being unloaded before reload. Without
+    // this, a repeat `sweech serve --install` looks like a silent no-op.
+    const isReinstall = fs.existsSync(PLIST_PATH);
+    if (isReinstall) {
+      console.log(chalk.yellow(`Reinstalling ${PLIST_LABEL} — unloading existing service first`));
+    }
+
     const plistContent = generatePlist(port);
 
     fs.mkdirSync(PLIST_DIR, { recursive: true, mode: 0o700 });
@@ -124,3 +132,55 @@ export function uninstallLaunchd(): void {
 export function isLaunchdInstalled(): boolean {
   return fs.existsSync(PLIST_PATH);
 }
+
+/**
+ * T-LU-005: surface the launchd service's actual runtime state, not just
+ * whether the plist file exists on disk. `isLaunchdInstalled()` only checks
+ * file presence, which is insufficient for doctor and shell scripting —
+ * the service may be installed but stopped (KeepAlive crash-looping, or
+ * manually unloaded by the operator).
+ *
+ * Parses the legacy `launchctl list <label>` plist-dict output:
+ *   - Exit code != 0       → not loaded (treated as !installed)
+ *   - Output has "PID" key → installed + running
+ *   - Otherwise            → installed, not running
+ *
+ * `installed` here means "loaded into launchd" (not just plist on disk).
+ * The doctor row should combine this with `isLaunchdInstalled()` to detect
+ * the "plist exists but not loaded" edge case.
+ */
+export interface LaunchdStatus {
+  /** True if the service is currently loaded into launchd. */
+  installed: boolean;
+  /** True if the service is loaded AND has an active PID. */
+  running: boolean;
+  /** Active PID if running, otherwise undefined. */
+  pid?: number;
+}
+
+export function isLaunchdRunning(): LaunchdStatus {
+  if (!isMacOS()) {
+    return { installed: false, running: false };
+  }
+  let output: string;
+  try {
+    output = execSync(`launchctl list ${PLIST_LABEL} 2>/dev/null`, { encoding: 'utf-8' });
+  } catch {
+    // Non-zero exit (typically 113 "Could not find service") means the
+    // service is not loaded into launchd.
+    return { installed: false, running: false };
+  }
+  // Parse `"PID" = 81054;` — when absent, the service is loaded but not
+  // currently running (e.g. KeepAlive cooldown after a crash).
+  const pidMatch = output.match(/"PID"\s*=\s*(\d+)\s*;/);
+  if (pidMatch) {
+    const pid = parseInt(pidMatch[1], 10);
+    return { installed: true, running: true, pid };
+  }
+  return { installed: true, running: false };
+}
+
+/** T-LU-005: exposed for tests + cli --status so the row text matches. */
+export const LAUNCHD_LABEL = PLIST_LABEL;
+export const LAUNCHD_PLIST_PATH = PLIST_PATH;
+export const LAUNCHD_LOG_PATH = LOG_PATH;

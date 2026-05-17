@@ -2148,7 +2148,38 @@ program
   .option('--port <number>', 'Port to listen on', '7854')
   .option('--install', 'Install as launchd daemon (macOS)')
   .option('--uninstall', 'Uninstall launchd daemon (macOS)')
-  .action(async (opts: { port: string; install?: boolean; uninstall?: boolean }) => {
+  .option('--status', 'Print launchd daemon status (macOS) and exit (0=running, 1=installed-not-running, 2=not installed)')
+  .action(async (opts: { port: string; install?: boolean; uninstall?: boolean; status?: boolean }) => {
+    if (opts.status) {
+      const { isLaunchdRunning, isLaunchdInstalled, LAUNCHD_LABEL, LAUNCHD_PLIST_PATH } = await import('./launchd');
+      const { isMacOS } = await import('./platform');
+      if (!isMacOS()) {
+        console.error(chalk.gray('launchd is only available on macOS'));
+        process.exit(2);
+      }
+      const status = isLaunchdRunning();
+      // T-LU-005: "plist on disk but not loaded into launchd" is a real
+      // failure mode (operator ran `launchctl unload` but kept the plist).
+      // Surface it as "installed-not-running" exit 1, not "not installed".
+      const plistOnDisk = isLaunchdInstalled();
+      if (status.installed && status.running) {
+        console.log(chalk.green(`${LAUNCHD_LABEL}: running (pid ${status.pid})`));
+        process.exit(0);
+      }
+      if (status.installed && !status.running) {
+        console.log(chalk.yellow(`${LAUNCHD_LABEL}: installed but not running`));
+        console.error(chalk.gray(`  Try: launchctl load "${LAUNCHD_PLIST_PATH}"`));
+        process.exit(1);
+      }
+      if (!status.installed && plistOnDisk) {
+        console.log(chalk.yellow(`${LAUNCHD_LABEL}: plist on disk but not loaded into launchd`));
+        console.error(chalk.gray(`  Try: launchctl load "${LAUNCHD_PLIST_PATH}"`));
+        process.exit(1);
+      }
+      console.log(chalk.gray(`${LAUNCHD_LABEL}: not installed`));
+      console.error(chalk.gray(`  Run: sweech serve --install`));
+      process.exit(2);
+    }
     if (opts.install) {
       const { installLaunchd } = await import('./launchd');
       await installLaunchd(parseInt(opts.port, 10));

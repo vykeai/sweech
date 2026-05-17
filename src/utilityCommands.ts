@@ -19,6 +19,8 @@ import { renameManagedProfile } from './profileManagement';
 import { getAccountInfo, getKnownAccounts } from './subscriptions';
 import { DEFAULT_DAEMON_PORT } from './constants';
 import { getAllRefreshEtas } from './tokenRefresh';
+import { isLaunchdInstalled, isLaunchdRunning, LAUNCHD_LABEL, LAUNCHD_PLIST_PATH } from './launchd';
+import { isMacOS } from './platform';
 
 const execFileAsync = promisify(execFile);
 
@@ -313,6 +315,57 @@ export async function runDoctor(): Promise<void> {
   } else {
     console.log(chalk.red(`  ✗ /healthz: ${healthz.message}`));
     severities.push('error');
+  }
+
+  // T-LU-005: launchd auto-restart status (macOS only). The /healthz probe
+  // above only tells us if `sweech serve` is *currently* reachable —
+  // operators also need to know whether the process will auto-restart on
+  // crash/reboot via launchd. Four states:
+  //   1. installed + running         → green
+  //   2. installed + not running     → warn (KeepAlive cooldown, manual unload)
+  //   3. !installed + healthz ok     → gray "running standalone"
+  //   4. !installed + healthz down   → gray "not installed"
+  // Silently skipped on non-macOS (launchd is darwin-only).
+  if (isMacOS()) {
+    console.log(chalk.bold('\nlaunchd daemon:'));
+    try {
+      const status = isLaunchdRunning();
+      const plistOnDisk = isLaunchdInstalled();
+      if (status.installed && status.running) {
+        console.log(chalk.green(`  ✓ ${LAUNCHD_LABEL}: running (pid ${status.pid})`));
+        severities.push('ok');
+      } else if (status.installed && !status.running) {
+        // Loaded into launchd but not running — KeepAlive is in cooldown
+        // (crash loop) or the service was throttled. Warn, not error.
+        console.log(chalk.yellow(`  ⚠ ${LAUNCHD_LABEL}: installed but not running`));
+        console.log(chalk.gray(`    Run: launchctl load "${LAUNCHD_PLIST_PATH}"`));
+        severities.push('warn');
+      } else if (plistOnDisk) {
+        // Plist exists on disk but not loaded into launchd — operator
+        // ran `launchctl unload` but kept the plist file. Warn.
+        console.log(chalk.yellow(`  ⚠ ${LAUNCHD_LABEL}: plist on disk but not loaded`));
+        console.log(chalk.gray(`    Run: launchctl load "${LAUNCHD_PLIST_PATH}"`));
+        severities.push('warn');
+      } else if (healthz.status === 'ok') {
+        // Server is running but not under launchd supervision — works
+        // but won't auto-restart on crash/reboot. Informational.
+        console.log(chalk.gray(`  ✓ ${LAUNCHD_LABEL}: running standalone (no auto-restart)`));
+        console.log(chalk.gray(`    Run: sweech serve --install (for auto-restart)`));
+        severities.push('ok');
+      } else {
+        // Not installed, not running standalone — informational, not a
+        // problem. The CLI works fine without the fed server.
+        console.log(chalk.gray(`  ✗ ${LAUNCHD_LABEL}: not installed`));
+        console.log(chalk.gray(`    Run: sweech serve --install (for auto-restart)`));
+        severities.push('ok');
+      }
+    } catch (err: unknown) {
+      // launchctl missing or unexpected error — surface as warn rather
+      // than crash the whole doctor run.
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(chalk.yellow(`  ⚠ ${LAUNCHD_LABEL}: status check failed — ${msg}`));
+      severities.push('warn');
+    }
   }
 
   // Check credential freshness (OAuth tokens in Keychain)
