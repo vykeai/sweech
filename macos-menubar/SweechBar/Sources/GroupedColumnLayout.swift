@@ -14,11 +14,11 @@ enum GroupedColumnLayout {
         var columns: [[GroupedColumnSection<Item>]] = []
 
         if !claude.isEmpty {
-            columns.append([GroupedColumnSection(title: "claude", items: claude)])
+            columns.append([GroupedColumnSection(title: "Anthropic", items: claude)])
         }
 
         if !codex.isEmpty {
-            columns.append([GroupedColumnSection(title: "codex", items: codex)])
+            columns.append([GroupedColumnSection(title: "OpenAI", items: codex)])
         }
 
         let externalOnly = externalGroups.filter { !$0.items.isEmpty }

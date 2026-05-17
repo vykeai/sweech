@@ -14,8 +14,8 @@ final class GroupedColumnLayoutTests: XCTestCase {
         )
 
         XCTAssertEqual(columns.count, 3)
-        XCTAssertEqual(columns[0].map(\.title), ["claude"])
-        XCTAssertEqual(columns[1].map(\.title), ["codex"])
+        XCTAssertEqual(columns[0].map(\.title), ["Anthropic"])
+        XCTAssertEqual(columns[1].map(\.title), ["OpenAI"])
         XCTAssertEqual(columns[2].map(\.title), ["Alibaba Cloud", "MiniMax", "Kimi"])
     }
 
@@ -30,7 +30,7 @@ final class GroupedColumnLayoutTests: XCTestCase {
         )
 
         XCTAssertEqual(columns.count, 2)
-        XCTAssertEqual(columns[0].map(\.title), ["codex"])
+        XCTAssertEqual(columns[0].map(\.title), ["OpenAI"])
         XCTAssertEqual(columns[1].map(\.title), ["MiniMax"])
     }
 
@@ -42,6 +42,6 @@ final class GroupedColumnLayoutTests: XCTestCase {
         )
 
         XCTAssertEqual(columns.count, 1)
-        XCTAssertEqual(columns[0].map(\.title), ["claude"])
+        XCTAssertEqual(columns[0].map(\.title), ["Anthropic"])
     }
 }
