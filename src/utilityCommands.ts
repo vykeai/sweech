@@ -467,6 +467,14 @@ export async function runDoctor(): Promise<void> {
       if (eta.expiresAt == null) {
         console.log(chalk.gray(`  • ${eta.profile}: no expiry (non-expiring token)`));
         severities.push('ok');
+      } else if (!eta.managedBySweech) {
+        // Post-2026-05-17 policy: sweech does NOT refresh OAuth tokens
+        // for any cliType — every official CLI manages its own
+        // credential store. Sweech surfaces the expiry for visibility
+        // but defers refresh to the CLI itself. See tokenRefresh.ts
+        // file header for the full incident.
+        const hint = eta.hoursUntil !== null ? `${eta.hoursUntil}h until expiry` : 'no expiry data';
+        console.log(chalk.dim(`  · ${eta.profile}: managed by CLI (${hint})`));
       } else if (eta.dueNow) {
         const label = (eta.hoursUntil ?? 0) <= 0
           ? `expired (${eta.expiresAt})`

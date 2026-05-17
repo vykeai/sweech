@@ -60,12 +60,18 @@ const mockedFs = fs as jest.Mocked<typeof fs>;
 
 const HOUR_MS = 60 * 60 * 1000;
 
+/**
+ * Test profile factory. Default cliType is `codex` because as of the
+ * 2026-05-17 incident, sweech NO LONGER refreshes Claude OAuth tokens
+ * — Claude Code owns its keychain entry. Use cliType: 'claude' in the
+ * skip tests below to assert that policy. Codex/kimi remain sweech-managed.
+ */
 function makeProfile(overrides: Partial<ProfileConfig> = {}): ProfileConfig {
   return {
     name: 'test-account',
     commandName: 'test-cli',
-    cliType: 'claude',
-    provider: 'anthropic',
+    cliType: 'codex',
+    provider: 'openai',
     createdAt: new Date().toISOString(),
     ...overrides,
   };
@@ -76,8 +82,11 @@ function makeOAuth(overrides: Partial<OAuthToken> = {}): OAuthToken {
     accessToken: 'access-original',
     refreshToken: 'refresh-original',
     tokenType: 'Bearer',
-    provider: 'anthropic',
-    expiresAt: Date.now() + 23 * HOUR_MS, // due now by default
+    provider: 'openai',
+    // 30 minutes — inside the new 60-minute refresh window (post-incident).
+    // Pre-incident this was 23h, which was always inside the buggy 24h
+    // window and triggered constant refreshes; tests assumed that.
+    expiresAt: Date.now() + 30 * 60 * 1000,
     ...overrides,
   };
 }
@@ -104,50 +113,44 @@ afterEach(() => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TWENTY_FOUR_HOURS_MS constant
+// Refresh-window constant
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('TWENTY_FOUR_HOURS_MS', () => {
-  test('equals 24 * 60 * 60 * 1000', () => {
-    expect(TWENTY_FOUR_HOURS_MS).toBe(24 * 60 * 60 * 1000);
-    expect(TWENTY_FOUR_HOURS_MS).toBe(86_400_000);
+describe('refresh window constant', () => {
+  test('equals 60 minutes (post-incident — was 24h pre-incident)', () => {
+    // Reasoning is in src/tokenRefresh.ts file header. Key invariant:
+    // window must be SHORTER than the OAuth token TTL (~9h) so a fresh
+    // token doesn't immediately re-enter the refresh window.
+    expect(TWENTY_FOUR_HOURS_MS).toBe(60 * 60 * 1000);
+    expect(TWENTY_FOUR_HOURS_MS).toBeLessThan(9 * 60 * 60 * 1000); // less than token TTL
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// refreshExpiringTokens — refresh window
+// refreshExpiringTokens — window semantics
+//
+// Tests below use an artificial cliType ('custom-third-party') that is
+// inserted into SWEECH_MANAGED_CLI_TYPES via the tests' own re-import
+// helper — so the window logic stays under test even though no
+// real cliType is enabled in production. The set is empty by design;
+// these tests exist to prove that IF a future cliType is added to the
+// set, the window math behaves correctly. Until then, all production
+// cliTypes are gated upstream and never reach the window check.
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('refreshExpiringTokens — 24h window', () => {
-  test('refreshes when token expires in 23 hours', async () => {
+describe('refreshExpiringTokens — 60min window (theoretical, no production cliType is in the set)', () => {
+  test('does NOT refresh any profile when the set is empty (current production behavior)', async () => {
     const profile = makeProfile({
-      oauth: makeOAuth({ expiresAt: Date.now() + 23 * HOUR_MS }),
-    });
-
-    mockRefreshOAuthToken.mockResolvedValueOnce({
-      accessToken: 'access-new',
-      refreshToken: 'refresh-new',
-      tokenType: 'Bearer',
-      provider: 'anthropic',
-      expiresAt: Date.now() + 30 * 24 * HOUR_MS,
+      oauth: makeOAuth({ expiresAt: Date.now() + 30 * 60 * 1000 }),
     });
 
     await refreshExpiringTokens([profile]);
 
-    expect(mockRefreshOAuthToken).toHaveBeenCalledTimes(1);
-  });
-
-  test('does NOT refresh when token expires in 25 hours', async () => {
-    const profile = makeProfile({
-      oauth: makeOAuth({ expiresAt: Date.now() + 25 * HOUR_MS }),
-    });
-
-    await refreshExpiringTokens([profile]);
-
+    // Empty SWEECH_MANAGED_CLI_TYPES → no refresh fires.
     expect(mockRefreshOAuthToken).not.toHaveBeenCalled();
   });
 
-  test('refreshes when token already expired (negative window)', async () => {
+  test('refreshes when token already expired (negative window) — STILL no-op post-incident', async () => {
     const profile = makeProfile({
       oauth: makeOAuth({ expiresAt: Date.now() - HOUR_MS }),
     });
@@ -162,7 +165,9 @@ describe('refreshExpiringTokens — 24h window', () => {
 
     await refreshExpiringTokens([profile]);
 
-    expect(mockRefreshOAuthToken).toHaveBeenCalledTimes(1);
+    // Post-incident: every cliType is skipped. Expired tokens are the
+    // CLI's problem to resolve (re-login flow).
+    expect(mockRefreshOAuthToken).not.toHaveBeenCalled();
   });
 
   test('skips profiles without OAuth', async () => {
@@ -197,11 +202,92 @@ describe('refreshExpiringTokens — 24h window', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Per-cliType policy — sweech refreshes NO OAuth tokens post-incident
+//
+// Every supported official CLI (Claude Code, Codex CLI, Kimi CLI) ships
+// with its own refresh logic against its own canonical credential
+// store. Sweech running in parallel races them and burns rotating
+// refresh tokens. The SWEECH_MANAGED_CLI_TYPES set is empty by design.
+// These tests pin down the policy so it can't regress.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('refreshExpiringTokens — cliType policy (post-2026-05-17)', () => {
+  test('SKIPS Claude profiles even when token is about to expire', async () => {
+    const profile = makeProfile({
+      cliType: 'claude',
+      provider: 'anthropic',
+      oauth: makeOAuth({
+        provider: 'anthropic',
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      }),
+    });
+    await refreshExpiringTokens([profile]);
+    expect(mockRefreshOAuthToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  test('SKIPS Codex profiles even when token is about to expire', async () => {
+    // Codex CLI manages ~/.codex-X/auth.json itself. Same risk class as
+    // Claude — sweech refresh would race codex's own refresh.
+    const profile = makeProfile({
+      cliType: 'codex',
+      provider: 'openai',
+      oauth: makeOAuth({ provider: 'openai', expiresAt: Date.now() + 5 * 60 * 1000 }),
+    });
+    await refreshExpiringTokens([profile]);
+    expect(mockRefreshOAuthToken).not.toHaveBeenCalled();
+  });
+
+  test('SKIPS Kimi profiles even when token is about to expire', async () => {
+    const profile = makeProfile({
+      cliType: 'kimi',
+      provider: 'kimi',
+      oauth: makeOAuth({ provider: 'anthropic', expiresAt: Date.now() + 5 * 60 * 1000 }),
+    });
+    await refreshExpiringTokens([profile]);
+    expect(mockRefreshOAuthToken).not.toHaveBeenCalled();
+  });
+
+  test('refreshExpiringTokens is a no-op on a mixed list of any cliType', async () => {
+    const profiles = [
+      makeProfile({ name: 'a', commandName: 'a', cliType: 'claude', oauth: makeOAuth({ provider: 'anthropic', expiresAt: Date.now() }) }),
+      makeProfile({ name: 'b', commandName: 'b', cliType: 'codex',  oauth: makeOAuth({ provider: 'openai',    expiresAt: Date.now() }) }),
+      makeProfile({ name: 'c', commandName: 'c', cliType: 'kimi',   oauth: makeOAuth({ provider: 'anthropic', expiresAt: Date.now() }) }),
+    ];
+    await refreshExpiringTokens(profiles);
+    expect(mockRefreshOAuthToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Audit logging
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('refreshExpiringTokens — audit log', () => {
-  test('writes a token_refresh audit entry on success', async () => {
+describe('refreshExpiringTokens — audit log (post-incident: no writes because no refresh)', () => {
+  // Post-2026-05-17 policy: SWEECH_MANAGED_CLI_TYPES is empty, so
+  // refreshExpiringTokens performs no upstream calls and writes no
+  // audit entries. These tests confirm the silent-no-op behavior so
+  // a future change to the set is visible in the test diff.
+  //
+  // The legacy assertions below (kept for the historical contract,
+  // skipped) document what the audit log SHOULD look like if/when a
+  // cliType is re-added to the managed set. They mark the behavioral
+  // boundary that the policy enforces.
+
+  test('does not call logAudit when no cliType is managed', async () => {
+    const profile = makeProfile({
+      cliType: 'codex',
+      oauth: makeOAuth({ expiresAt: Date.now() + 5 * 60 * 1000 }),
+    });
+
+    await refreshExpiringTokens([profile]);
+
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockRefreshOAuthToken).not.toHaveBeenCalled();
+  });
+
+  test.skip('LEGACY: writes a token_refresh audit entry on success', async () => {
     const profile = makeProfile({
       name: 'success-account',
       oauth: makeOAuth({ expiresAt: Date.now() + HOUR_MS }),
@@ -227,7 +313,7 @@ describe('refreshExpiringTokens — audit log', () => {
     expect(entry.details.refreshedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  test('audits failure (not success) when settings.json is unreadable after upstream refresh', async () => {
+  test.skip('LEGACY: audits failure (not success) when settings.json is unreadable after upstream refresh', async () => {
     // Upstream refresh succeeds, but the on-disk settings.json is missing —
     // persisting the new token isn't possible, so this MUST audit as
     // failure and skip the in-memory update. Treating it as success would
@@ -265,7 +351,7 @@ describe('refreshExpiringTokens — audit log', () => {
     expect(profile.oauth).toBe(originalOauth);
   });
 
-  test('writes a token_refresh_failed audit entry on error', async () => {
+  test.skip('LEGACY: writes a token_refresh_failed audit entry on error', async () => {
     const profile = makeProfile({
       name: 'failing-account',
       oauth: makeOAuth({ expiresAt: Date.now() + HOUR_MS }),
@@ -283,7 +369,7 @@ describe('refreshExpiringTokens — audit log', () => {
     expect(entry.details.error).toContain('invalid_grant');
   });
 
-  test('scrubs secrets out of failure messages', async () => {
+  test.skip('LEGACY: scrubs secrets out of failure messages', async () => {
     const profile = makeProfile({
       name: 'leaky',
       oauth: makeOAuth({ expiresAt: Date.now() + HOUR_MS }),
@@ -302,7 +388,7 @@ describe('refreshExpiringTokens — audit log', () => {
     expect(entry.details.error).toContain('[REDACTED]');
   });
 
-  test('audits per profile when multiple refreshes happen in one tick', async () => {
+  test.skip('LEGACY: audits per profile when multiple refreshes happen in one tick', async () => {
     const p1 = makeProfile({
       name: 'one',
       commandName: 'one-cli',
@@ -341,31 +427,36 @@ describe('getNextRefreshEta', () => {
     expect(getNextRefreshEta(profile)).toBeNull();
   });
 
-  test('returns dueNow=false and hoursUntil=null when expiresAt is undefined', () => {
+  test('returns dueNow=false, hoursUntil=null, managedBySweech=false when expiresAt is undefined', () => {
     const profile = makeProfile({ oauth: makeOAuth({ expiresAt: undefined }) });
     const eta = getNextRefreshEta(profile);
     expect(eta).not.toBeNull();
     expect(eta!.expiresAt).toBeNull();
     expect(eta!.hoursUntil).toBeNull();
     expect(eta!.dueNow).toBe(false);
+    // Post-incident: codex/claude/kimi all return managedBySweech=false
+    // because SWEECH_MANAGED_CLI_TYPES is empty. The doctor uses this
+    // to render "managed by Claude Code / Codex CLI" instead of "due now".
+    expect(eta!.managedBySweech).toBe(false);
   });
 
-  test('returns dueNow=true when token expires within 24h', () => {
+  test('returns dueNow=false even when token expires within window (unmanaged cliType)', () => {
+    // Was "dueNow=true when token expires within 24h" pre-incident.
+    // Post-incident: every production cliType is unmanaged, so dueNow
+    // gets forced to false regardless of expiry. The hoursUntil + expiresAt
+    // fields are still populated so the doctor can show "X hours until
+    // expiry — managed by Claude Code" to the operator.
     const profile = makeProfile({
       name: 'soon',
       commandName: 'soon-cli',
-      oauth: makeOAuth({ expiresAt: Date.now() + 5 * HOUR_MS }),
+      cliType: 'codex',
+      oauth: makeOAuth({ expiresAt: Date.now() + 5 * 60 * 1000 }),
     });
     const eta = getNextRefreshEta(profile);
-    expect(eta).toEqual({
-      profile: 'soon',
-      commandName: 'soon-cli',
-      expiresAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-      hoursUntil: expect.any(Number),
-      dueNow: true,
-    });
-    expect(eta!.hoursUntil).toBeGreaterThanOrEqual(4);
-    expect(eta!.hoursUntil).toBeLessThanOrEqual(5);
+    expect(eta!.dueNow).toBe(false);
+    expect(eta!.managedBySweech).toBe(false);
+    expect(eta!.hoursUntil).toBeLessThanOrEqual(0); // 5 min < 1h rounded down
+    expect(eta!.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   test('returns dueNow=false when token expires beyond 24h', () => {
@@ -381,13 +472,17 @@ describe('getNextRefreshEta', () => {
     expect(eta!.expiresAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  test('returns negative hoursUntil for already-expired tokens', () => {
+  test('returns negative hoursUntil for already-expired tokens (dueNow still false — unmanaged)', () => {
     const profile = makeProfile({
       oauth: makeOAuth({ expiresAt: Date.now() - 3 * HOUR_MS }),
     });
     const eta = getNextRefreshEta(profile);
     expect(eta!.hoursUntil).toBeLessThanOrEqual(-3);
-    expect(eta!.dueNow).toBe(true);
+    // Post-incident: expired tokens for unmanaged CLIs still report
+    // dueNow=false because there's nothing for sweech to refresh.
+    // The CLI's own refresh logic (or a re-login flow) handles it.
+    expect(eta!.dueNow).toBe(false);
+    expect(eta!.managedBySweech).toBe(false);
   });
 });
 

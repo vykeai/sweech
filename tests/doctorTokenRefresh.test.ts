@@ -23,6 +23,7 @@ jest.mock('chalk', () => {
     gray: identity,
     magenta: identity,
     white: identity,
+    dim: identity,
     bold: Object.assign(identity, {
       red: identity, green: identity, cyan: identity, yellow: identity,
     }),
@@ -187,7 +188,12 @@ describe('doctor — Token refresh ETA section (T-LU-006)', () => {
     expect(out).not.toMatch(/Token refresh ETA/);
   });
 
-  test('flags tokens expiring within 24h as "due now"', async () => {
+  test('flags tokens expiring soon — post-incident: rendered as "managed by CLI"', async () => {
+    // Pre-2026-05-17: the doctor rendered "due now" because sweech
+    // was about to refresh. Post-incident: sweech does NOT refresh
+    // claude/codex/kimi tokens — the CLI itself handles its own
+    // refresh against its keychain/auth.json. The doctor surfaces
+    // expiry for visibility but does NOT call it a sweech-action.
     mockProfiles = [
       makeProfile({
         name: 'due-soon',
@@ -196,7 +202,7 @@ describe('doctor — Token refresh ETA section (T-LU-006)', () => {
           refreshToken: 'r',
           tokenType: 'Bearer',
           provider: 'anthropic',
-          expiresAt: Date.now() + 6 * HOUR_MS, // < 24h
+          expiresAt: Date.now() + 6 * HOUR_MS,
         },
       }),
     ];
@@ -204,11 +210,12 @@ describe('doctor — Token refresh ETA section (T-LU-006)', () => {
     const out = await captureDoctorOutput();
 
     expect(out).toMatch(/due-soon/);
-    expect(out).toMatch(/due now/);
+    expect(out).toMatch(/managed by CLI/);
     expect(out).toMatch(/h until expiry/);
+    expect(out).not.toMatch(/due now/);
   });
 
-  test('marks tokens >24h away with "ok"', async () => {
+  test('tokens far from expiry render as "managed by CLI" (was "ok" pre-incident)', async () => {
     mockProfiles = [
       makeProfile({
         name: 'far-future',
@@ -225,16 +232,20 @@ describe('doctor — Token refresh ETA section (T-LU-006)', () => {
     const out = await captureDoctorOutput();
 
     expect(out).toMatch(/far-future/);
-    expect(out).toMatch(/ok/);
-    // 5 days ≈ 119–120 hours
+    expect(out).toMatch(/managed by CLI/);
     expect(out).toMatch(/(11[89]|120)h until expiry/);
   });
 
-  test('shows ISO expiresAt timestamp in the row', async () => {
+  test('shows hours-until-expiry in the row (post-incident: ISO is no longer rendered)', async () => {
+    // Pre-incident the doctor printed the raw ISO timestamp because
+    // the operator was supposed to predict the next refresh moment.
+    // Post-incident sweech doesn't refresh, so the more useful signal
+    // is "how many hours until the CLI will need to refresh on its
+    // own" — a relative number, not an absolute timestamp.
     const expiry = Date.now() + 30 * HOUR_MS;
     mockProfiles = [
       makeProfile({
-        name: 'iso-check',
+        name: 'hours-check',
         oauth: {
           accessToken: 'a',
           refreshToken: 'r',
@@ -247,11 +258,12 @@ describe('doctor — Token refresh ETA section (T-LU-006)', () => {
 
     const out = await captureDoctorOutput();
 
-    const isoFragment = new Date(expiry).toISOString();
-    expect(out).toContain(isoFragment);
+    expect(out).toMatch(/hours-check/);
+    expect(out).toMatch(/(29|30)h until expiry/);
+    expect(out).toMatch(/managed by CLI/);
   });
 
-  test('reports already-expired tokens as "expired"', async () => {
+  test('expired tokens still surface — but as "managed by CLI" (sweech does not re-login)', async () => {
     mockProfiles = [
       makeProfile({
         name: 'stale',
@@ -268,7 +280,11 @@ describe('doctor — Token refresh ETA section (T-LU-006)', () => {
     const out = await captureDoctorOutput();
 
     expect(out).toMatch(/stale/);
-    expect(out).toMatch(/expired/);
+    expect(out).toMatch(/managed by CLI/);
+    // hoursUntil is negative — we still surface the number so the
+    // operator can see "the CLI hasn't refreshed in a while, you
+    // may need to re-login".
+    expect(out).toMatch(/-?\d+h until expiry/);
   });
 
   test('skips non-OAuth profiles inside a mixed list', async () => {

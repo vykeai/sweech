@@ -1,12 +1,33 @@
 /**
  * Background token refresh for OAuth profiles.
- * Periodically checks for expiring tokens and refreshes them.
  *
- * T-LU-006: refresh window widened from 10 minutes to 24 hours so
- * Anthropic/OpenAI tokens are rotated well before they expire even when
- * the daemon only wakes every few minutes. Each attempt (success or
- * failure) is recorded in the audit log so operators can confirm the
- * daemon is alive without tailing stderr.
+ * Scope: **codex and kimi only**. Claude Code manages its own OAuth
+ * refresh against the keychain entry `Claude Code-credentials[-hash]`
+ * (single source of truth that Claude Code itself reads). Sweech used
+ * to refresh Claude OAuth too, but:
+ *
+ *   1. Sweech wrote new tokens to its own `settings.json` — Claude Code
+ *      reads the keychain, so sweech's refreshed token was invisible
+ *      to Claude Code.
+ *   2. Anthropic uses rotating refresh tokens — each refresh response
+ *      includes a new refresh token, and the old one is invalidated
+ *      server-side on use. Sweech's refresh burned the old refresh
+ *      token but Claude Code's keychain still held it → next time
+ *      Claude Code tried to refresh, 401 invalid_grant → permanent
+ *      re-login required.
+ *   3. Compounded by a window bug (see expiresWithin docstring below)
+ *      that caused sweech to refresh on every poll instead of once per
+ *      token lifetime, sweech raced Claude Code thousands of times per
+ *      day per profile.
+ *
+ * Incident: 2026-05-17 — every Claude session on a MacBook with the
+ * post-T-LU-006 daemon running became unauthenticated. Studio (older
+ * sweech, 10-minute window) stayed healthy.
+ *
+ * Codex and kimi don't have this problem: their CLIs read the API key
+ * from `settings.env` via sweech's wrapper script, so settings.json IS
+ * the source of truth. Sweech's refresh updates the only place those
+ * CLIs would look.
  */
 
 import * as fs from 'fs';
@@ -20,12 +41,49 @@ import { logAudit } from './auditLog';
 import { atomicWriteFileSync } from './atomicWrite';
 
 /**
- * T-LU-006: refresh OAuth tokens 24h before expiry (was 10 minutes).
- * Wider window survives long sleep/standby periods and gives the daemon
- * multiple polling intervals to recover from transient refresh failures.
+ * Refresh window — how close to expiry a token must be before we refresh.
+ *
+ * Old value (T-LU-006): 24 hours. **Buggy** — Anthropic and OpenAI
+ * tokens have a ~9-hour TTL, so `expires in <24h` was true 100% of the
+ * time after a refresh. Result: refresh fired on every poll (every 5
+ * minutes), thousands of times per day per profile, burning rotating
+ * refresh tokens and racing the CLI's own refresh logic.
+ *
+ * New value: 60 minutes. Covers sleep/standby gaps shorter than an
+ * hour with a single poll-cycle of slack to retry on transient errors.
+ * Gaps longer than an hour just trigger a fresh refresh on wake —
+ * same idle behavior as the upstream CLIs themselves.
  */
-export const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+export const REFRESH_WINDOW_MS = 60 * 60 * 1000;
+/** Backwards-compatible alias — old name kept so dist callers don't break. */
+export const TWENTY_FOUR_HOURS_MS = REFRESH_WINDOW_MS;
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * CLI types whose OAuth refresh is owned by sweech.
+ *
+ * **Currently empty.** Post-incident (2026-05-17) policy: every
+ * supported official CLI (Claude Code, Codex CLI, Kimi CLI) ships with
+ * its own OAuth refresh logic against its own canonical credential
+ * store (keychain for Claude, ~/.codex-X/auth.json for codex, similar
+ * for kimi). Sweech refreshing in parallel:
+ *
+ *   - races the CLI's own refresh against the same upstream endpoint
+ *   - burns the rotating refresh token if sweech's call lands first
+ *   - writes the new token to a place the CLI does NOT read
+ *     (settings.env / settings.json — not the canonical store)
+ *
+ * Result: the CLI is left holding a refresh token sweech already
+ * burned, so the next CLI refresh attempt 401s with invalid_grant and
+ * the user is forced to re-login.
+ *
+ * The set is kept rather than removed so a future third-party CLI
+ * with no built-in refresh can be added back as a single-line change.
+ * Empty set means refreshExpiringTokens is a no-op — by design.
+ *
+ * See file header for the 2026-05-17 incident write-up.
+ */
+const SWEECH_MANAGED_CLI_TYPES = new Set<string>();
 
 /**
  * Resolve the settings.json path for a given profile.
@@ -63,7 +121,15 @@ function writeSettings(settingsPath: string, settings: Record<string, any>): voi
 }
 
 /**
- * Check whether a token expires within the given window (default 24 hours).
+ * Check whether a token's remaining TTL has dropped below `windowMs`.
+ *
+ * Returns `true` when the token expires within the next `windowMs`,
+ * i.e. it is time to refresh.
+ *
+ * Important: callers must use a window SHORTER than the token's TTL.
+ * Anthropic and OpenAI tokens have ~9-hour TTLs; a 24-hour window
+ * matches every freshly-refreshed token and triggers refresh on every
+ * poll — see the file header for the incident this caused.
  */
 function expiresWithin(expiresAt: number | undefined, windowMs: number): boolean {
   if (expiresAt == null) return false;
@@ -83,8 +149,15 @@ export interface RefreshEta {
   expiresAt: string | null;
   /** Whole hours until the token expires. May be negative if already expired. */
   hoursUntil: number | null;
-  /** True when the token is within the 24h refresh window (or already expired). */
+  /** True when the token is within the refresh window (or already expired). */
   dueNow: boolean;
+  /**
+   * True when sweech is responsible for refreshing this token. False
+   * for Claude profiles — Claude Code owns its own keychain entry, so
+   * sweech reports the expiry but does NOT refresh. The doctor uses
+   * this to show "(managed by Claude Code)" rather than "due now".
+   */
+  managedBySweech: boolean;
 }
 
 /**
@@ -98,6 +171,7 @@ export interface RefreshEta {
 export function getNextRefreshEta(profile: ProfileConfig): RefreshEta | null {
   if (!profile.oauth) return null;
 
+  const managedBySweech = SWEECH_MANAGED_CLI_TYPES.has(profile.cliType);
   const expiresAtMs = profile.oauth.expiresAt;
   if (expiresAtMs == null) {
     return {
@@ -106,16 +180,22 @@ export function getNextRefreshEta(profile: ProfileConfig): RefreshEta | null {
       expiresAt: null,
       hoursUntil: null,
       dueNow: false,
+      managedBySweech,
     };
   }
 
   const hoursUntil = Math.floor((expiresAtMs - Date.now()) / (60 * 60 * 1000));
+  // dueNow only signals an actionable refresh when sweech manages this
+  // CLI's tokens. For Claude profiles, "due" would be misleading —
+  // there's nothing for sweech to do; Claude Code will refresh on its
+  // own schedule via its own keychain entry.
   return {
     profile: profile.name,
     commandName: profile.commandName,
     expiresAt: new Date(expiresAtMs).toISOString(),
     hoursUntil,
-    dueNow: expiresWithin(expiresAtMs, TWENTY_FOUR_HOURS_MS),
+    dueNow: managedBySweech && expiresWithin(expiresAtMs, REFRESH_WINDOW_MS),
+    managedBySweech,
   };
 }
 
@@ -143,7 +223,14 @@ export async function refreshExpiringTokens(profiles: ProfileConfig[]): Promise<
   for (const profile of profiles) {
     if (!profile.oauth) continue;
     if (!profile.oauth.refreshToken) continue;
-    if (!expiresWithin(profile.oauth.expiresAt, TWENTY_FOUR_HOURS_MS)) continue;
+    // Incident 2026-05-17: never refresh Claude OAuth. Claude Code is
+    // the canonical owner of its keychain credential entry — sweech
+    // refreshing here races CC's own refresh, burns rotating refresh
+    // tokens, and writes the result to settings.json (which CC never
+    // reads). Codex and kimi DO use settings.env as the source of
+    // truth via the wrapper script, so refreshing them is correct.
+    if (!SWEECH_MANAGED_CLI_TYPES.has(profile.cliType)) continue;
+    if (!expiresWithin(profile.oauth.expiresAt, REFRESH_WINDOW_MS)) continue;
 
     try {
       const newToken = await refreshOAuthToken(profile.oauth);
