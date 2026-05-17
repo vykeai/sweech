@@ -231,6 +231,11 @@ export async function refreshExpiringTokens(profiles: ProfileConfig[]): Promise<
     // truth via the wrapper script, so refreshing them is correct.
     if (!SWEECH_MANAGED_CLI_TYPES.has(profile.cliType)) continue;
     if (!expiresWithin(profile.oauth.expiresAt, REFRESH_WINDOW_MS)) continue;
+    // T-LU-010 CRUD: respect the lifecycle flags. Disabled or hidden
+    // workspaces should not generate noisy refresh attempts (and the
+    // associated audit-log entries). The user can re-enable / unhide
+    // to opt back in.
+    if (profile.disabled || profile.hidden) continue;
 
     try {
       const newToken = await refreshOAuthToken(profile.oauth);

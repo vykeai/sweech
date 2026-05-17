@@ -190,6 +190,8 @@ interface V2OAuthEntry {
   lastRefreshedAt?: string
   expiresAt?: number
   status?: 'ok' | 'expired' | 'org_disabled' | 'unauthorized' | 'unknown'
+  /** Lifecycle flag — see AccountMeta.hidden for semantics. */
+  hidden?: boolean
   /**
    * Reference to the OAuth refresh-token secret in keychain. The
    * sweech-vault-<accountKind>-<id> entry is the source of truth for
@@ -495,6 +497,7 @@ function readMeta(): AccountMeta[] {
       lastRefreshedAt: entry.lastRefreshedAt,
       expiresAt: entry.expiresAt,
       status: entry.status,
+      ...(entry.hidden ? { hidden: true } : {}),
     })
   }
   return out
@@ -525,6 +528,7 @@ function writeMeta(accounts: AccountMeta[]): void {
       lastRefreshedAt: m.lastRefreshedAt,
       expiresAt: m.expiresAt,
       status: m.status,
+      ...(m.hidden ? { hidden: true } : {}),
       accountKind: m.kind,
       refreshTokenRef: {
         service: `sweech-vault-${m.kind}-${m.id}`,

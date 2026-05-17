@@ -5419,15 +5419,33 @@ program
 
 program
   .command('accounts [action]')
-  .description('Manage credential vault (list, import, add, remove, refresh)')
-  .option('--kind <kind>', 'Filter / select kind. list: oauth|apikey|local|all (default all). add: apikey|anthropic|openai. remove: anthropic|openai (legacy).')
+  .description('Manage credential vault (list, import, add, remove, refresh, hide, unhide, logout, delete, edit)')
+  .option('--kind <kind>', 'Filter / select kind. list: oauth|apikey|local|all (default all). add: apikey|anthropic|openai. remove/CRUD: anthropic|openai (legacy).')
   .option('--provider <name>', 'Filter (list) or target (add) a provider id (e.g. kimi, dashscope, glm)')
-  .option('--email <email>', 'Target a specific account by email (remove)')
+  .option('--email <email>', 'Target account by email-or-id (remove, hide, unhide, logout, delete, edit)')
   .option('--key <source>', 'API key source for `add --kind apikey`: an env-var name (e.g. KIMI_API_KEY), `-` to read stdin, or omit for an interactive prompt')
   .option('--label <label>', 'Human label for the new apikey account (optional)')
   .option('--force', 'For `add --kind apikey --label X`: rotate an existing (provider, label) entry instead of refusing.')
+  .option('--keep-workspace-markers', 'For `delete`: leave the workspace .sweech-account marker files in place')
+  .option('--display-name <name>', 'For `edit`: set the human-readable account display name')
+  .option('--plan <plan>', 'For `edit`: set the plan label (e.g. "Max 20x", "Pro")')
+  .option('--rate-limit-tier <tier>', 'For `edit`: override the Anthropic rate-limit tier')
+  .option('--org-name <name>', 'For `edit`: set the human-readable org/workspace name')
   .option('--json', 'Machine-readable output')
-  .action(async (action: string | undefined, opts: { kind?: string; provider?: string; email?: string; key?: string; label?: string; force?: boolean; json?: boolean }) => {
+  .action(async (action: string | undefined, opts: {
+    kind?: string;
+    provider?: string;
+    email?: string;
+    key?: string;
+    label?: string;
+    force?: boolean;
+    keepWorkspaceMarkers?: boolean;
+    displayName?: string;
+    plan?: string;
+    rateLimitTier?: string;
+    orgName?: string;
+    json?: boolean;
+  }) => {
     const { listAccounts, findAccountByEmail, removeAccount, listAccountsV2 } = require('./vault') as typeof import('./vault');
     const { importWorkspaces, discoverWorkspaces } = require('./vaultImport');
     const act = action || 'list';
@@ -5634,11 +5652,20 @@ program
         return color(` · next bill ${next} (${dayStr})`);
       };
 
+      // Partition out hidden accounts so they sink to a dedicated
+      // section at the bottom. The `hidden?: boolean` flag lives on
+      // AccountMeta (vault.ts) and isn't part of the V2 projection,
+      // so we look it up via the legacy meta read.
+      const { listAccounts: listOauthMeta } = require('./vault') as typeof import('./vault');
+      const hiddenIds = new Set(listOauthMeta().filter(m => m.hidden).map(m => m.id));
+      const hiddenAccounts = selected.filter(a => hiddenIds.has(a.id));
+      const visibleSelected = selected.filter(a => !hiddenIds.has(a.id));
+
       // Render OAuth section (split by anthropic/openai for parity
       // with the pre-wave-6 layout).
-      const oauthAccounts = selected.filter(a => a.kind === 'oauth') as Array<typeof selected[number] & { kind: 'oauth' }>;
-      const apikeyAccounts = selected.filter(a => a.kind === 'apikey') as Array<typeof selected[number] & { kind: 'apikey' }>;
-      const localAccounts  = selected.filter(a => a.kind === 'none')   as Array<typeof selected[number] & { kind: 'none' }>;
+      const oauthAccounts = visibleSelected.filter(a => a.kind === 'oauth') as Array<typeof visibleSelected[number] & { kind: 'oauth' }>;
+      const apikeyAccounts = visibleSelected.filter(a => a.kind === 'apikey') as Array<typeof visibleSelected[number] & { kind: 'apikey' }>;
+      const localAccounts  = visibleSelected.filter(a => a.kind === 'none')   as Array<typeof visibleSelected[number] & { kind: 'none' }>;
 
       const byOauthProvider: Record<string, typeof oauthAccounts> = {};
       for (const a of oauthAccounts) (byOauthProvider[a.provider] ||= []).push(a);
@@ -5731,6 +5758,17 @@ program
           console.log(`  ${chalk.bold(tile.label)}${chalk.dim(' (API key)')}${quotaStr}${wsStr}`);
         }
         console.log();
+      }
+
+      // Hidden section — sunk to the bottom, dimmed. Unhide via
+      // `sweech accounts unhide --email <email-or-id>`.
+      if (hiddenAccounts.length > 0) {
+        console.log(chalk.bold(chalk.dim(`  ── Hidden (${hiddenAccounts.length}) ──`)));
+        for (const a of hiddenAccounts.sort((x, y) => x.id.localeCompare(y.id))) {
+          const label = a.kind === 'oauth' ? a.email : (a.label ?? a.id);
+          console.log(chalk.dim(`  ${label} ${chalk.gray(`[${a.provider}/${a.kind}]`)}`));
+        }
+        console.log(chalk.dim(`  unhide: sweech accounts unhide --email <email-or-id>\n`));
       }
       return;
     }
@@ -5937,7 +5975,136 @@ program
       return;
     }
 
-    console.error(chalk.red(`Unknown action: ${act}. Use: list, import, remove`));
+    // ── CRUD (T-LU-010 half 2) ────────────────────────────────────────
+    // hide / unhide / logout / delete / edit, by email-or-id. The
+    // `accounts remove` action above remains for backwards-compat with
+    // CI scripts; `accounts delete` is the documented replacement.
+    if (act === 'hide' || act === 'unhide' || act === 'logout' || act === 'delete' || act === 'edit') {
+      const target = (opts.email || '').trim();
+      if (!target) {
+        console.error(chalk.red(`--email <email-or-id> required for action '${act}'`));
+        process.exit(1);
+      }
+      const accountKind = (opts.kind === 'anthropic' || opts.kind === 'openai')
+        ? (opts.kind as 'anthropic' | 'openai')
+        : undefined;
+
+      const { logAudit } = require('./auditLog') as typeof import('./auditLog');
+      const {
+        setAccountHidden,
+        logoutAccount,
+        deleteAccount,
+        editAccount,
+        flagChangeAudit,
+      } = require('./accountCrud') as typeof import('./accountCrud');
+      const { discoverWorkspaces } = require('./vaultImport');
+
+      try {
+        if (act === 'hide' || act === 'unhide') {
+          const result = setAccountHidden(target, act, accountKind);
+          logAudit({
+            timestamp: new Date().toISOString(),
+            action: 'account_flag_changed',
+            account: result.email,
+            details: flagChangeAudit(result),
+          });
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: true, ...result }, null, 2) + '\n');
+          } else if (result.noop) {
+            console.log(chalk.dim(`\n  ${result.email} already ${act}d (no change).\n`));
+          } else {
+            console.log(chalk.green(`\n✓ Account ${result.email} ${act}d.\n`));
+          }
+          return;
+        }
+
+        const workspaces = discoverWorkspaces();
+        if (act === 'logout') {
+          const result = await logoutAccount(target, workspaces, accountKind);
+          logAudit({
+            timestamp: new Date().toISOString(),
+            action: 'account_logged_out',
+            account: result.email,
+            details: {
+              accountId: result.id,
+              hadSecret: result.hadSecret,
+              unmountedWorkspaces: result.unmountedWorkspaces,
+            },
+          });
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: true, ...result }, null, 2) + '\n');
+          } else {
+            const credBit = result.hadSecret
+              ? chalk.dim(' (credentials dropped from keychain)')
+              : chalk.dim(' (no credentials were stored)');
+            const mountBit = result.unmountedWorkspaces.length > 0
+              ? chalk.dim(`\n  Unmounted from: ${result.unmountedWorkspaces.join(', ')}`)
+              : '';
+            console.log(chalk.green(`\n✓ Logged out ${result.email}.${credBit}${mountBit}\n`));
+          }
+          return;
+        }
+
+        if (act === 'delete') {
+          const result = await deleteAccount(
+            target,
+            workspaces,
+            { keepWorkspaceMarkers: Boolean(opts.keepWorkspaceMarkers) },
+            accountKind,
+          );
+          logAudit({
+            timestamp: new Date().toISOString(),
+            action: 'account_deleted',
+            account: result.email,
+            details: {
+              accountId: result.id,
+              hadSecret: result.hadSecret,
+              unmountedWorkspaces: result.unmountedWorkspaces,
+            },
+          });
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: true, ...result }, null, 2) + '\n');
+          } else {
+            console.log(chalk.green(`\n✓ Deleted ${result.email} from vault.\n`));
+            if (result.unmountedWorkspaces.length > 0) {
+              console.log(chalk.dim(`  Unmounted from: ${result.unmountedWorkspaces.join(', ')}`));
+              console.log(chalk.dim(`  Workspace data dirs are untouched — use 'sweech workspace delete' to remove them.\n`));
+            }
+          }
+          return;
+        }
+
+        if (act === 'edit') {
+          const patch: Record<string, string | undefined> = {};
+          if (opts.displayName !== undefined) patch.displayName = opts.displayName;
+          if (opts.plan !== undefined) patch.plan = opts.plan;
+          if (opts.rateLimitTier !== undefined) patch.rateLimitTier = opts.rateLimitTier;
+          if (opts.orgName !== undefined) patch.orgName = opts.orgName;
+          const merged = editAccount(target, patch, accountKind);
+          logAudit({
+            timestamp: new Date().toISOString(),
+            action: 'account_edited',
+            account: merged.email,
+            details: { accountId: merged.id, patch: Object.keys(patch) },
+          });
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({ ok: true, account: merged }, null, 2) + '\n');
+          } else {
+            console.log(chalk.green(`\n✓ Updated ${merged.email}.\n`));
+          }
+          return;
+        }
+      } catch (error: unknown) {
+        const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
+        }
+        console.error(chalk.red('Error:'), msg);
+        process.exit(1);
+      }
+    }
+
+    console.error(chalk.red(`Unknown action: ${act}. Use: list, import, remove, hide, unhide, logout, delete, edit`));
     process.exit(1);
   });
 

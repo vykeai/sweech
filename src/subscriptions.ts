@@ -329,7 +329,16 @@ function computeWeeklyReset(subscriptionCreatedAt: string): { weeklyResetAt: str
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function getKnownAccounts(
-  profiles: Array<{ name: string; commandName: string; cliType?: string; provider?: string; baseUrl?: string; sharedWith?: string }>,
+  profiles: Array<{
+    name: string;
+    commandName: string;
+    cliType?: string;
+    provider?: string;
+    baseUrl?: string;
+    sharedWith?: string;
+    disabled?: boolean;
+    hidden?: boolean;
+  }>,
 ): AccountRef[] {
   const seen = new Set<string>()
   const accounts: AccountRef[] = []
@@ -348,6 +357,11 @@ export function getKnownAccounts(
 
   for (const profile of profiles) {
     if (seen.has(profile.commandName)) continue
+    // T-LU-010: disabled / hidden workspaces drop out of candidate
+    // enumeration entirely. This is what suppresses the recurring
+    // [sweech] token refresh failed for .claude-ted noise on
+    // cancelled subscriptions.
+    if (profile.disabled || profile.hidden) continue
     seen.add(profile.commandName)
     accounts.push({
       name: profile.name,
