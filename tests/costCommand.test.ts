@@ -262,8 +262,10 @@ describe('buildCostTable', () => {
   test('JSON shape is stable (snapshot of keys)', async () => {
     const table = await buildCostTable({});
     expect(Object.keys(table).sort()).toEqual([
-      'budgetUsd', 'estInputTokens', 'estOutputTokens', 'generatedAt', 'rows',
+      'budgetUsd', 'estInputTokens', 'estOutputTokens', 'generatedAt', 'producer', 'rows', 'schemaVersion',
     ]);
+    expect(table.schemaVersion).toBe('sweech.cost-table.v1');
+    expect(table.producer).toBe('sweech');
     expect(Object.keys(table.rows[0]).sort()).toEqual([
       'cacheReadUsdPerMillion',
       'cacheWriteUsdPerMillion',

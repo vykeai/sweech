@@ -8,6 +8,8 @@ import {
   getProvidersForCLI,
   isProviderCompatible,
   getProvidersByFormat,
+  parseCliType,
+  CLI_TYPES,
   PROVIDERS
 } from '../src/providers';
 
@@ -282,6 +284,34 @@ describe('Provider Management', () => {
 
       expect(custom?.baseUrl).toBe('');
       expect(custom?.defaultModel).toBe('');
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────
+  // parseCliType — narrows untrusted CLI flag input to CLIType.
+  // Added with the wave-T-LU review fixes to close a silent failure
+  // mode where `--cli bogus` cast through to undefined behavior.
+  // ──────────────────────────────────────────────────────────────────
+
+  describe('parseCliType', () => {
+    test('returns the canonical CLIType for valid inputs', () => {
+      expect(parseCliType('claude')).toBe('claude');
+      expect(parseCliType('codex')).toBe('codex');
+      expect(parseCliType('kimi')).toBe('kimi');
+    });
+
+    test('returns null for invalid inputs', () => {
+      expect(parseCliType('bogus')).toBeNull();
+      expect(parseCliType('CLAUDE')).toBeNull(); // case-sensitive on purpose
+      expect(parseCliType('')).toBeNull();
+    });
+
+    test('returns undefined when no value passed (preserves "no filter" semantics)', () => {
+      expect(parseCliType(undefined)).toBeUndefined();
+    });
+
+    test('CLI_TYPES contains exactly the three canonical types', () => {
+      expect([...CLI_TYPES].sort()).toEqual(['claude', 'codex', 'kimi']);
     });
   });
 });

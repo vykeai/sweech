@@ -56,7 +56,93 @@ sweech check --all --json                # bulk reachability for every workspace
 sweech usage --json                      # full payload — every workspace, bars, vault, provider quotas
 sweech providers quota                    # third-party balance / rate-limit table
 sweech providers quota --refresh --json   # force a fresh probe of every API-key vendor
+
+# Wave T-LU-007 / 008 / 009 — cost, audit, project routing
+sweech auto [--budget N] [--exec]        # rate-aware pick; --budget caps USD/call
+sweech failover [from] [--exec]          # rotate off rate-limited workspaces (pin/budget unaware by design)
+sweech cost [--budget N] [--profile X]   # USD/M-token per profile + 7d spend table
+sweech cost --json                       # schemaVersion:"sweech.cost-table.v1", rows[], producer:"sweech"
+sweech pin show|set|unset                # project-aware routing via ./.sweech.json
+sweech pin set --profile X --cli Y       # write a pin (used by auto + recommend + check)
+sweech profile audit [--json] [--prune]  # flag dormant + identity cross-bleed + orphan-cred profiles
+sweech serve --status                    # launchd daemon health (exit 0=running, 1=installed-not-running, 2=not installed)
 ```
+
+### `sweech auto --json` shape
+
+When run in a project with `./.sweech.json`, the output gains a `pinApplied` field:
+
+```jsonc
+{
+  "profile": "claude-pole",
+  "cliType": "claude",
+  "model": "claude-sonnet-4-6",
+  "command": "sweech use claude-pole",
+  "pinApplied": {
+    "source": "/path/to/.sweech.json",
+    "projectRoot": "/path/to",
+    "pin": { "profile": "claude-pole", "cliType": "claude", "maxTier": "max" }
+  }
+}
+```
+
+With `--budget N`, the budget-aware path also returns `estimatedCostUsd` and `budgetUsd`. If nothing fits the budget, `{error, budgetUsd}` is printed and exit code is 1.
+
+### `sweech cost --json` shape
+
+```jsonc
+{
+  "schemaVersion": "sweech.cost-table.v1",
+  "producer": "sweech",
+  "rows": [
+    {
+      "profile": "claude-pole",
+      "cliType": "claude",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "inputUsdPerMillion": 3,
+      "outputUsdPerMillion": 15,
+      "estCostPerCallUsd": 0.0375,
+      "spent7dUsd": 0,
+      "lastUseTs": null
+    }
+  ],
+  "estInputTokens": 5000,
+  "estOutputTokens": 1500,
+  "budgetUsd": null,
+  "generatedAt": "2026-05-17T14:30:50.595Z"
+}
+```
+
+Override the default rates by dropping a `~/.sweech/pricing.json` of shape `{ "model-id": { "input_usd_per_million": 1.0, "output_usd_per_million": 2.0 } }`. Bad entries are silently dropped and a warning printed once to stderr.
+
+### `route_within_budget()` for downstream callers
+
+```ts
+import { routeWithinBudget } from 'sweech/dist/budgetRouter';
+const result = await routeWithinBudget({
+  cliType: 'claude',
+  maxCostPerCallUsd: 0.05,
+  estInputTokens: 5000,
+  estOutputTokens: 1500,
+  projectPin: findProjectPin(),  // optional — honors .sweech.json
+});
+// → { account, model, estimatedCostUsd, score, rejected } | null
+```
+
+### `.sweech.json` schema
+
+```jsonc
+{
+  "profile": "claude-pole",           // optional — pin a specific workspace commandName
+  "cliType": "claude",                // optional — claude | codex | kimi
+  "maxTier": "max",                   // optional — free | pro | max | team | enterprise
+  "model": "claude-sonnet-4-6",       // optional — preferred model id
+  "budget": 0.05                      // optional — forward-compat (not yet wired)
+}
+```
+
+Resolution walks upward from cwd to `$HOME` (never above), first hit wins. Malformed JSON → `null` + one-line stderr warning, CLI keeps running. Pin shape is validated; unknown keys are tolerated but warned once.
 
 For routing decisions in scripts: parse `sweech usage --json` for the `accounts[]` array. Each entry has:
 - `commandName`, `cliType`, `provider`, `baseUrl`, `effectiveProvider`, `displayGroup`

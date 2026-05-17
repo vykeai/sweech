@@ -5,6 +5,21 @@
 export type CLIType = 'claude' | 'codex' | 'kimi';
 export type APIFormat = 'anthropic' | 'openai';
 
+export const CLI_TYPES: readonly CLIType[] = ['claude', 'codex', 'kimi'] as const;
+
+/**
+ * Narrow a free-form string from a CLI flag into a CLIType, or `null`
+ * if it's invalid. Returns `undefined` when the input is undefined
+ * (flag not passed). Callers use the null vs undefined distinction
+ * to decide between "unspecified — fall through to default" and
+ * "specified but invalid — abort with a clear error".
+ */
+export function parseCliType(value: string | undefined): CLIType | null | undefined {
+  if (value === undefined) return undefined;
+  if (CLI_TYPES.includes(value as CLIType)) return value as CLIType;
+  return null;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;

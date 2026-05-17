@@ -30,6 +30,7 @@ import type { CLIType } from './providers';
 import { isInCooldown } from './failover';
 import { recommendRoute } from './accountSelector';
 import { estimateCostUsd, getModelPricing } from './costs';
+import type { ProjectPinResolved } from './projectConfig';
 
 // ── Public API ───────────────────────────────────────────────────────
 
@@ -48,6 +49,14 @@ export interface BudgetRouteRequest {
   estCachedInputTokens?: number;
   /** Override list of profile commandNames to exclude (e.g. already-tried). */
   exclude?: string[];
+  /**
+   * Project pin (from `findProjectPin()`) to forward into `recommendRoute`
+   * so a `.sweech.json`'s `profile` / `cliType` / `maxTier` constrains the
+   * scored candidate list. Without this, a pinned project running
+   * `sweech auto --budget X` would silently ignore the pin's tier cap and
+   * could route to a profile the user explicitly rejected.
+   */
+  projectPin?: ProjectPinResolved | null;
   /** Override "now" for deterministic tests. */
   now?: number;
 }
@@ -139,7 +148,7 @@ export async function routeWithinBudget(
   const now = req.now ?? Date.now();
   const excluded = new Set(req.exclude ?? []);
 
-  const route = await recommendRoute({ cliType: req.cliType });
+  const route = await recommendRoute({ cliType: req.cliType }, undefined, req.projectPin ?? null);
   const rejected: BudgetRouteRejection[] = [];
 
   for (const candidate of route.candidates) {
@@ -164,6 +173,18 @@ export async function routeWithinBudget(
     if (isInCooldown(account, now)) {
       const cost = model ? estimateCostUsd(model, estInput, estOutput, estCachedInput) : 0;
       rejected.push({ account, model, cost, reason: 'cooldown' });
+      continue;
+    }
+
+    // Pin tier cap: `recommendRoute` tags candidates over the pin's
+    // maxTier with `pin-max-tier-exceeded:<tier>`. Classify these as
+    // tier-mismatch so the user sees the real reason — without this,
+    // they'd fall through to the generic health-failed bucket below.
+    if (candidate.reasons.some(r => r.startsWith('pin-max-tier-exceeded:'))) {
+      const cost = model && getModelPricing(model)
+        ? estimateCostUsd(model, estInput, estOutput, estCachedInput)
+        : 0;
+      rejected.push({ account, model, cost, reason: 'tier-mismatch' });
       continue;
     }
 
@@ -212,12 +233,17 @@ export async function routeWithinBudget(
 }
 
 /**
- * Filter helper for `sweech accounts list --budget`: return only the
- * candidate command-names whose default model fits the requested
- * budget. Surfaces the per-account cost so the CLI can render a column.
+ * Budget-filter snapshot of the candidate list — returns every candidate
+ * with its per-call cost and a `fits` flag. Built on the same
+ * `recommendRoute` source as `routeWithinBudget` so an external caller
+ * (e.g. a future "show me everything under $0.05/call" CLI surface, a
+ * pre-flight tool, or a custom dashboard) gets a consistent shape.
  *
- * Same routing source as `routeWithinBudget` to keep the budget filter
- * consistent across the table view + the single-pick API.
+ * `sweech cost --budget` uses a simpler row-level filter inside
+ * `costCommand.applyFilters` because it's already iterating every
+ * profile; this helper is the routing-aware variant for callers that
+ * need cooldown-aware scoring. Kept for API parity with
+ * `routeWithinBudget` — tests cover the shape contract.
  */
 export interface BudgetFilterEntry {
   account: string;

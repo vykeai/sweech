@@ -213,6 +213,19 @@ export interface FailoverPickOptions {
  *
  * Returns undefined when nothing's available — the caller should escalate
  * (alert, retry-later, exit non-zero, etc.).
+ *
+ * NOTE: failover is intentionally project-pin and budget unaware.
+ *   - A project pin (`.sweech.json`) typically names a specific profile;
+ *     if that profile just hit a rate-limit (the reason we're failing
+ *     over), honoring the pin would re-select the same profile.
+ *   - `--budget` is similarly omitted: when the user calls `sweech
+ *     failover`, the priority is "find anything that works", not "find
+ *     something under N USD/call". A failover that respects budget and
+ *     returns nothing leaves the user worse off than the rate-limit
+ *     they're already escaping.
+ *   If you need both pin + budget AND failover, compose them at the
+ *   caller: `sweech auto --budget X` from a pinned dir is the right
+ *   surface for that case.
  */
 export async function pickFailoverTarget(
   fromCommandName: string | undefined,

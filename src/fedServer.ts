@@ -208,6 +208,10 @@ export function createSweechFedServer(port: number): http.Server {
     }
 
     if (pathname === '/fed/route-recommendation') {
+      // Federation endpoint has no client-cwd context, so project pins
+      // (`.sweech.json`) are NOT applied here — pin resolution is a
+      // client-side responsibility (CLI/SweechBar). Intentionally
+      // 2-arg call; don't "fix" this by adding `findProjectPin()`.
       const recommendation = await recommendRoute(routeRequestFromQuery(url), getProfiles())
       sendJson(res, 200, recommendation)
       return

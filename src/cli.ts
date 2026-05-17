@@ -12,7 +12,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { DEFAULT_DAEMON_PORT, envOrDefaultDaemonPort } from './constants';
 import { ConfigManager, resolveApiKey } from './config';
-import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider, type CLIType } from './providers';
+import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider, parseCliType, type CLIType } from './providers';
 import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
 import { logLaunch } from './launchLog';
@@ -95,6 +95,11 @@ Common workflows:
   sweech list                  every workspace + status
   sweech use <workspace>       spawn the CLI for that workspace
   sweech check <workspace>     reachability probe (model + latency)
+  sweech auto [--budget N]     pick best workspace (rate-aware, USD-aware)
+  sweech failover [--cli C]    rotate off rate-limited workspaces
+  sweech cost [--budget N]     USD/M-token per profile + 7d spend
+  sweech pin {show,set,unset}  project-aware routing via .sweech.json
+  sweech profile audit         flag dormant + identity cross-bleed profiles
   sweech accounts list         every account in the vault (OAuth + API key + Local)
   sweech assign <ws> [email]   mount a vault account into a workspace
   sweech providers quota       third-party balance / rate-limit table
@@ -1171,6 +1176,24 @@ program
   });
 
 /** Append claude's --name <basename(cwd)> if not already present. No-op for other CLIs. */
+/**
+ * Validate a `--cli` flag value at the top of an action handler. Exits
+ * with a clear error message when the user passed e.g. `--cli bogus`.
+ * Returns the narrowed CLIType (or `undefined` when no flag was passed).
+ *
+ * Without this, an invalid `--cli` value silently cast through `as CLIType`
+ * routed callers to non-existent CLI types and produced confusing
+ * "no profile fits" errors instead of telling the user what they did wrong.
+ */
+function requireValidCli(value: string | undefined, command: string): CLIType | undefined {
+  const parsed = parseCliType(value);
+  if (parsed === null) {
+    console.error(chalk.red(`Invalid --cli '${value}' for ${command}: must be one of claude, codex, kimi.`));
+    process.exit(1);
+  }
+  return parsed;
+}
+
 function autonameArgs(cli: { sessionNameFlag?: string }, args: string[]): string[] {
   if (!cli.sessionNameFlag) return args;
   if (args.includes(cli.sessionNameFlag)) return args; // user supplied one
@@ -1312,7 +1335,10 @@ program
 
     // ── --budget guard: refuse to launch if the profile's model would
     //    exceed the per-call USD ceiling. Same pricing source as
-    //    `sweech cost` and `routeWithinBudget`.
+    //    `sweech cost` and `routeWithinBudget`. `--force` only skips
+    //    the model reachability check (documented), NOT the budget
+    //    check — silently bypassing a USD ceiling because pricing
+    //    is missing would defeat the whole point of --budget.
     if (opts.budget !== undefined && Number.isFinite(opts.budget)) {
       const { getModelPricing, estimateCostUsd } = require('./costs') as typeof import('./costs');
       const { getProvider: providerLookup } = require('./providers') as typeof import('./providers');
@@ -1323,8 +1349,9 @@ program
       const estIn = opts.estInput ?? 5000;
       const estOut = opts.estOutput ?? 1500;
       if (!pricing) {
-        console.error(chalk.yellow(`WARN: model '${model}' has no pricing data — --budget cannot evaluate. Use --force to override.`));
-        if (!opts.force) process.exit(1);
+        console.error(chalk.red(`Refusing to launch '${resolvedName}' under --budget: model '${model || '(unknown)'}' has no pricing data — cannot verify cost ceiling.`));
+        console.error(chalk.dim(`  Add an entry to ~/.sweech/pricing.json or drop --budget to launch.`));
+        process.exit(1);
       } else {
         const cost = estimateCostUsd(model, estIn, estOut);
         if (cost > opts.budget) {
@@ -2242,6 +2269,24 @@ profileCmd
           try {
             const result = removeManagedProfile(p.profile, { forceDependents: true });
             pruned.push({ profile: p.profile, removedDependents: result.removedDependents });
+            // Audit trail for forensic reconstruction. The `profile_removed`
+            // action is canonical in src/auditLog.ts; without this entry the
+            // bulk `--yes` path destroys profiles with no record. Best-effort
+            // — never block deletion on audit failure.
+            try {
+              const { logAudit } = require('./auditLog') as typeof import('./auditLog');
+              logAudit({
+                timestamp: new Date().toISOString(),
+                action: 'profile_removed',
+                account: p.profile,
+                details: {
+                  source: 'profile_audit_prune',
+                  bulk: true,
+                  reasons: p.reasons.map(r => r.kind),
+                  removedDependents: result.removedDependents,
+                },
+              });
+            } catch { /* audit failure never blocks prune */ }
           } catch (e: unknown) {
             errors.push({
               profile: p.profile,
@@ -2270,6 +2315,20 @@ profileCmd
             const result = removeManagedProfile(p.profile, { forceDependents: true });
             pruned.push({ profile: p.profile, removedDependents: result.removedDependents });
             console.log(chalk.green(`  ✓ Removed ${p.profile}`));
+            try {
+              const { logAudit } = require('./auditLog') as typeof import('./auditLog');
+              logAudit({
+                timestamp: new Date().toISOString(),
+                action: 'profile_removed',
+                account: p.profile,
+                details: {
+                  source: 'profile_audit_prune',
+                  bulk: false,
+                  reasons: p.reasons.map(r => r.kind),
+                  removedDependents: result.removedDependents,
+                },
+              });
+            } catch { /* audit failure never blocks prune */ }
           } catch (e: unknown) {
             const msg = scrubSecrets(e instanceof Error ? e.message : String(e));
             errors.push({ profile: p.profile, error: msg });
@@ -4432,6 +4491,7 @@ program
   .option('--est-output <tokens>', 'Estimated output tokens for cost projection (default 1500)', parseInt)
   .option('--cli <type>', 'Restrict to a specific CLI: claude | codex | kimi')
   .action(async (opts: { json?: boolean; budget?: number; profile?: string; estInput?: number; estOutput?: number; cli?: string }) => {
+    requireValidCli(opts.cli, 'cost');
     const { buildCostTable, buildProfileDetail, formatPerMillion, formatSpend } = require('./costCommand') as typeof import('./costCommand');
 
     // ── Detail mode: --profile <name> ──────────────────────────────
@@ -4518,6 +4578,7 @@ program
   .option('--est-input <tokens>', 'Estimated input tokens for the budget projection (default 5000)', parseInt)
   .option('--est-output <tokens>', 'Estimated output tokens for the budget projection (default 1500)', parseInt)
   .action(async (opts: { cli?: string; json?: boolean; exec?: boolean; budget?: number; estInput?: number; estOutput?: number }) => {
+    requireValidCli(opts.cli, 'auto');
     const config = new ConfigManager();
     const profiles = config.getProfiles();
 
@@ -4532,9 +4593,9 @@ program
     // ── --budget path: delegate to routeWithinBudget so the dollar
     //    ceiling is the source of truth for the pick. Without --budget
     //    the original quota-based scoring stays as-is. The project pin
-    //    is surfaced in output but does NOT short-circuit budget — a
-    //    pinned profile that exceeds budget is still rejected so the
-    //    user gets honest signal.
+    //    is forwarded to the router so its `maxTier` filters candidates
+    //    and any `cliType` override applies — without forwarding pin,
+    //    `auto --budget` in a pinned dir would silently bypass the pin.
     if (opts.budget !== undefined && Number.isFinite(opts.budget)) {
       const cliType = (opts.cli ?? projectPin?.pin.cliType ?? 'claude') as CLIType;
       const { routeWithinBudget } = require('./budgetRouter') as typeof import('./budgetRouter');
@@ -4543,6 +4604,7 @@ program
         maxCostPerCallUsd: opts.budget,
         estInputTokens: opts.estInput,
         estOutputTokens: opts.estOutput,
+        projectPin,
       });
       if (!result) {
         const message = `no profile fits budget $${opts.budget.toFixed(4)}/call`;
@@ -4685,6 +4747,7 @@ program
     cli?: string; exclude?: string; exec?: boolean; json?: boolean;
     status?: boolean; clear?: string; clearAll?: boolean;
   }) => {
+    requireValidCli(opts.cli, 'failover');
     // --status: list active cooldowns
     if (opts.status) {
       const active = getActiveCooldowns();

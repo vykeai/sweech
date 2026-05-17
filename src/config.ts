@@ -691,6 +691,17 @@ exec "${eCliCommand}" "\${ARGS[@]}"
   public getProfileDir(commandName: string): string {
     // Profiles live at ~/.claude-<suffix>/ as siblings to ~/.claude/
     // e.g. claude-rai -> ~/.claude-rai/
+    //
+    // Defensive: reject path-traversal-shaped commandNames so a
+    // poisoned config.json entry (e.g. commandName: "../private")
+    // cannot trick `removeManagedProfile` into rm-ing a sibling dir.
+    // The path constructed is `~/.<commandName>` so any separator,
+    // backslash, NUL, or `..` segment is fatal. Allow only
+    // [A-Za-z0-9_-] — matching the input commandName must already
+    // satisfy `--command-name` validation on profile create.
+    if (!/^[A-Za-z0-9_-]+$/.test(commandName)) {
+      throw new Error(`Refusing to resolve profile dir: invalid commandName '${commandName}' (only [A-Za-z0-9_-] allowed)`);
+    }
     return path.join(os.homedir(), `.${commandName}`);
   }
 

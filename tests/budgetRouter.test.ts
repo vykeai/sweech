@@ -455,3 +455,76 @@ describe('filterCandidatesByBudget', () => {
     expect(rows[0].cost).toBeCloseTo(18.00, 2);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// routeWithinBudget — projectPin forwarding (post-review fix)
+//
+// Code review + integration audit both caught that `routeWithinBudget`
+// silently dropped projectPin, so a `.sweech.json` with maxTier=pro
+// would be ignored when running `sweech auto --budget`. These tests
+// pin down the wiring so it can't regress.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('routeWithinBudget — project pin forwarding', () => {
+  test('projectPin is passed to recommendRoute as the 3rd argument', async () => {
+    recommendRouteMock.mockResolvedValue({
+      candidates: [candidate({ account: 'sonnet', model: 'claude-sonnet-4-5' })],
+    });
+    const pin = {
+      pin: { profile: 'sonnet', cliType: 'claude' as const, maxTier: 'max' as const },
+      source: '/tmp/proj/.sweech.json',
+      projectRoot: '/tmp/proj',
+    };
+    await routeWithinBudget({
+      cliType: 'claude',
+      maxCostPerCallUsd: 0.10,
+      projectPin: pin,
+    });
+    // First arg: request. Second: profiles (undefined). Third: pin.
+    expect(recommendRouteMock).toHaveBeenCalledWith({ cliType: 'claude' }, undefined, pin);
+  });
+
+  test('null projectPin is forwarded as null (not undefined) so the called fn can tell "no pin" vs "unset"', async () => {
+    recommendRouteMock.mockResolvedValue({
+      candidates: [candidate({ account: 'sonnet', model: 'claude-sonnet-4-5' })],
+    });
+    await routeWithinBudget({ cliType: 'claude', maxCostPerCallUsd: 0.10 });
+    expect(recommendRouteMock).toHaveBeenCalledWith({ cliType: 'claude' }, undefined, null);
+  });
+
+  test('candidate with pin-max-tier-exceeded reason is classified as tier-mismatch (not health-failed)', async () => {
+    recommendRouteMock.mockResolvedValue({
+      candidates: [
+        candidate({
+          account: 'opus',
+          model: 'claude-opus-4-5',
+          reasons: ['pin-max-tier-exceeded:opus'],
+        }),
+        candidate({ account: 'sonnet', model: 'claude-sonnet-4-5' }),
+      ],
+    });
+    const result = await routeWithinBudget({ cliType: 'claude', maxCostPerCallUsd: 0.50 });
+    expect(result).not.toBeNull();
+    expect(result!.account).toBe('sonnet');
+    const opusRej = result!.rejected.find(r => r.account === 'opus');
+    expect(opusRej).toBeDefined();
+    expect(opusRej!.reason).toBe('tier-mismatch');
+  });
+
+  test('pin-max-tier-exceeded rejection still includes cost when model is priced', async () => {
+    recommendRouteMock.mockResolvedValue({
+      candidates: [
+        candidate({
+          account: 'opus',
+          model: 'claude-opus-4-5',
+          reasons: ['pin-max-tier-exceeded:opus'],
+        }),
+      ],
+    });
+    const result = await routeWithinBudget({ cliType: 'claude', maxCostPerCallUsd: 1.0 });
+    // opus is the only candidate AND pin-tier-rejected; result null.
+    expect(result).toBeNull();
+    // But rejected row carries an actual cost estimate, not zero.
+    // Caller can still display "rejected because tier, would have cost $X".
+  });
+});

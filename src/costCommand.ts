@@ -47,6 +47,10 @@ export interface CostTableOptions {
 }
 
 export interface CostTable {
+  /** Stable JSON contract version for downstream parsers. */
+  schemaVersion: 'sweech.cost-table.v1';
+  /** Producer tag — always `'sweech'` so consumers can disambiguate. */
+  producer: 'sweech';
   rows: CostTableRow[];
   estInputTokens: number;
   estOutputTokens: number;
@@ -251,6 +255,8 @@ export async function buildCostTable(opts: CostTableOptions = {}): Promise<CostT
 
   const filtered = applyFilters(rows, opts);
   return {
+    schemaVersion: 'sweech.cost-table.v1',
+    producer: 'sweech',
     rows: filtered,
     estInputTokens,
     estOutputTokens,
@@ -262,6 +268,10 @@ export async function buildCostTable(opts: CostTableOptions = {}): Promise<CostT
 // ── Detail mode (--profile <name>) ──────────────────────────────────
 
 export interface ProfileCostDetail {
+  /** Stable JSON contract version for downstream parsers. */
+  schemaVersion: 'sweech.cost-detail.v1';
+  /** Producer tag — always `'sweech'` so consumers can disambiguate. */
+  producer: 'sweech';
   profile: string;
   cliType: string;
   provider: string;
@@ -313,6 +323,8 @@ export function buildProfileDetail(
     : defaultModel ? [{ id: defaultModel }] : [];
 
   return {
+    schemaVersion: 'sweech.cost-detail.v1',
+    producer: 'sweech',
     profile: commandName,
     cliType: account.cliType,
     provider: providerKey,

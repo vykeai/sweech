@@ -831,8 +831,13 @@ export async function recommendRoute(
   // `rejected` list with a clear reason for diagnostics.
   if (projectPin?.pin.maxTier) {
     const cap = projectPin.pin.maxTier;
+    // Build commandName→info lookup once; the prior `infos.find(...)` was
+    // O(n²) over the candidate list. With many profiles (the user has
+    // 22+ in the field), the inner scan dominates the recommendRoute
+    // hot path — the same pattern as `byCommand` above.
+    const infoByCommand = new Map(infos.map(i => [i.commandName, i]));
     for (const candidate of candidates) {
-      const info = infos.find(i => i.commandName === candidate.route.commandName);
+      const info = infoByCommand.get(candidate.route.commandName);
       const candidateTier = info?.rateLimitTier ?? info?.billingType ?? info?.live?.planType;
       if (exceedsMaxTier(candidateTier, cap)) {
         candidate.reasons.push(`pin-max-tier-exceeded:${candidateTier ?? 'unknown'}`);
@@ -863,24 +868,37 @@ export async function recommendRoute(
   }
 
   // Audit-log pin-influenced selections so we have a trail for routing
-  // decisions made on behalf of the user. Only logs when a pin was
-  // applied AND it actually changed the outcome (cliType, profile, or
-  // tier cap had to filter something). Best-effort — audit log failures
-  // never block the recommendation.
+  // decisions made on behalf of the user. Only logs when the pin
+  // actually shaped the outcome — a pin that's set but had no effect
+  // (profile not in candidates, no maxTier set, cliType matches what
+  // the caller asked for) is noise. Three "effect" signals:
+  //   (a) the pin's profile got selected (pin.profile === selected)
+  //   (b) the pin specified a cliType (always relevant — filters)
+  //   (c) the pin's maxTier rejected at least one candidate
+  // Best-effort — audit log failures never block the recommendation.
   if (projectPin && selected) {
-    try {
-      logAudit({
-        timestamp: new Date().toISOString(),
-        action: 'route_pin_applied',
-        account: selected.route.commandName,
-        details: {
-          source: projectPin.source,
-          projectRoot: projectPin.projectRoot,
-          pin: projectPin.pin,
-        },
-      });
-    } catch {
-      /* audit-log failures are non-fatal */
+    const pin = projectPin.pin;
+    const pinDirectedProfile = pin.profile === selected.route.commandName;
+    const pinNarrowedCli = !!pin.cliType;
+    const pinCapped = !!pin.maxTier && candidates.some(c =>
+      c.reasons.some(r => r.startsWith('pin-max-tier-exceeded:')),
+    );
+    if (pinDirectedProfile || pinNarrowedCli || pinCapped) {
+      try {
+        logAudit({
+          timestamp: new Date().toISOString(),
+          action: 'route_pin_applied',
+          account: selected.route.commandName,
+          details: {
+            source: projectPin.source,
+            projectRoot: projectPin.projectRoot,
+            pin: projectPin.pin,
+            effects: { directed: pinDirectedProfile, narrowed: pinNarrowedCli, capped: pinCapped },
+          },
+        });
+      } catch {
+        /* audit-log failures are non-fatal */
+      }
     }
   }
 
