@@ -1893,6 +1893,30 @@ program
     console.error();
   });
 
+// Hidden: regenerate session pointer files for past conversations
+// whose live pointer was deleted by claude on /exit. Without this,
+// /resume can't find conversations that exist on disk as jsonls.
+// Best-effort, silent, runs before `claude` exec in the wrapper so
+// /resume sees the synthetic pointers immediately.
+program
+  .command('_ensure-session-pointers', { hidden: true } as any)
+  .description('Internal: synthesize missing sessions/<pid>.json pointers from existing project jsonls so /resume can see prior conversations.')
+  .requiredOption('--profile <command-name>', 'Profile to operate on')
+  .option('--cwd <path>', 'Working directory (defaults to $PWD)')
+  .action((opts: { profile: string; cwd?: string }) => {
+    try {
+      const prior = ConfigManager.disableConstructorHeal;
+      ConfigManager.disableConstructorHeal = true;
+      let config: ConfigManager;
+      try { config = new ConfigManager(); }
+      finally { ConfigManager.disableConstructorHeal = prior; }
+      config.ensureSessionPointers(opts.profile, opts.cwd);
+    } catch {
+      // Silent — must never block launch.
+    }
+    process.exit(0);
+  });
+
 // Hidden: wrapper-script hot-path heal. Called from every generated
 // wrapper before exec'ing the CLI binary, so users who launch
 // workspaces directly (e.g. `claude-pole`, not via `sweech use`) still

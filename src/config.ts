@@ -645,6 +645,135 @@ export class ConfigManager {
   }
 
   /**
+   * Encode a working directory path the way Claude Code does for its
+   * `projects/<encoded>/` layout: replace every `/` (including the
+   * leading one) with `-`. Path normalisation: trailing slash dropped,
+   * relative segments rejected. Returns null for unsafe inputs.
+   */
+  public encodeCwdForClaude(cwd: string): string | null {
+    if (typeof cwd !== 'string' || cwd.length === 0) return null;
+    if (!path.isAbsolute(cwd)) return null;
+    const normalised = path.resolve(cwd).replace(/\/+$/, '');
+    if (normalised.includes('..')) return null;
+    return normalised.replace(/\//g, '-');
+  }
+
+  /**
+   * Regenerate session pointer files for past conversations whose live
+   * pointer has been removed by Claude Code (which deletes pointer
+   * files on /exit). Without this, `/resume` shows "No conversations
+   * found" even when the conversation jsonl is still on disk.
+   *
+   * For each `projects/<encoded-cwd>/*.jsonl` that has no matching
+   * `sessions/<pid>.json` pointer (by sessionId), writes a stub
+   * pointer with a synthetic high pid (>1e9 — guaranteed not to
+   * collide with a live process) so that Claude's `/resume`
+   * enumerator finds it AND treats it as "dead, available to resume".
+   *
+   * Best-effort: every I/O step is wrapped in try/catch. Returns the
+   * count of pointer files created so callers can log a digest.
+   *
+   * @param commandName  profile to operate on (must have sharedWith → sessions/ is shared)
+   * @param cwd          working directory of the launch (defaults to process.cwd())
+   */
+  public ensureSessionPointers(commandName: string, cwd?: string): number {
+    if (!/^[A-Za-z0-9_-]+$/.test(commandName)) return 0;
+    const profileDir = this.getProfileDir(commandName);
+    if (!fs.existsSync(profileDir)) return 0;
+
+    const resolvedCwd = cwd ?? (() => { try { return process.cwd(); } catch { return null; } })();
+    if (!resolvedCwd) return 0;
+    const encoded = this.encodeCwdForClaude(resolvedCwd);
+    if (!encoded) return 0;
+
+    const projectsDir = path.join(profileDir, 'projects', encoded);
+    if (!fs.existsSync(projectsDir)) return 0;
+
+    const sessionsDir = path.join(profileDir, 'sessions');
+    if (!fs.existsSync(sessionsDir)) {
+      try { fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o700 }); }
+      catch { return 0; }
+    }
+
+    // Index of existing pointers by sessionId so we don't write duplicates.
+    const existingSids = new Set<string>();
+    let pointerEntries: string[];
+    try { pointerEntries = fs.readdirSync(sessionsDir); }
+    catch { pointerEntries = []; }
+    for (const entry of pointerEntries) {
+      if (!entry.endsWith('.json')) continue;
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(sessionsDir, entry), 'utf-8'));
+        if (typeof data.sessionId === 'string') existingSids.add(data.sessionId);
+      } catch { /* ignore unreadable */ }
+    }
+
+    let jsonlEntries: string[];
+    try { jsonlEntries = fs.readdirSync(projectsDir); }
+    catch { return 0; }
+
+    let created = 0;
+    for (const entry of jsonlEntries) {
+      if (!entry.endsWith('.jsonl')) continue;
+      // jsonl filename IS the sessionId (claude convention).
+      const sid = entry.replace(/\.jsonl$/, '');
+      if (!/^[0-9a-f-]{36}$/i.test(sid)) continue;
+      if (existingSids.has(sid)) continue;
+
+      const jsonlPath = path.join(projectsDir, entry);
+      let mtimeMs: number;
+      try { mtimeMs = fs.statSync(jsonlPath).mtimeMs; }
+      catch { continue; }
+
+      // Synthetic pid in the [1e9, 2e9) range — well above any real
+      // pid_max on linux/macos, so os.kill(pid,0) will always ENOENT
+      // and claude will treat the pointer as "dead, resumable".
+      // Derived from sessionId so the same conversation always gets
+      // the same synthetic pid (no churn across re-runs).
+      const crypto = require('crypto');
+      const hash = crypto.createHash('sha256').update(sid).digest();
+      const synthPid = 1_000_000_000 + (hash.readUInt32BE(0) % 1_000_000_000);
+
+      const name = path.basename(resolvedCwd).toUpperCase().slice(0, 64);
+      const pointer = {
+        pid: synthPid,
+        sessionId: sid,
+        cwd: resolvedCwd,
+        startedAt: Math.floor(mtimeMs),
+        procStart: new Date(mtimeMs).toUTCString(),
+        version: this.readSweechVersion() ?? '0.0.0',
+        peerProtocol: 1,
+        kind: 'interactive',
+        entrypoint: 'cli',
+        name,
+        updatedAt: Math.floor(mtimeMs),
+        status: 'idle',
+        // Mark as sweech-synthetic so future tooling can identify
+        // these and (if necessary) clean them up.
+        _sweechSynthetic: true,
+      };
+
+      const pointerPath = path.join(sessionsDir, `${synthPid}.json`);
+      try {
+        // Refuse to overwrite a real pointer that already exists.
+        if (fs.existsSync(pointerPath)) continue;
+        fs.writeFileSync(pointerPath, JSON.stringify(pointer), { mode: 0o600 });
+        created++;
+        this.logLifecycle({
+          event: 'session_pointer.synthesized',
+          profile: commandName,
+          sessionId: sid,
+          syntheticPid: synthPid,
+          cwd: resolvedCwd,
+          pointerPath,
+        });
+      } catch { /* skip — best-effort */ }
+    }
+
+    return created;
+  }
+
+  /**
    * Fast hot-path heal for a SINGLE profile, used by `sweech use`,
    * `sweech run`, `sweech auto`. Only acts when:
    *   - the profile has sharedWith set (otherwise nothing to heal)
@@ -1425,15 +1554,45 @@ case "\${1:-}" in
   --help|-h|--version|-V) exec "${eCliCommand}" "$@" ;;
 esac
 
-# Auto-heal: re-link any drifted share topology BEFORE the CLI binary
-# starts reading projects/sessions/plugins. Without this, users who
-# launch workspaces directly (e.g. \`${eCommandName}\` rather than
-# \`sweech use ${eCommandName}\`) hit a stale state until something
-# else triggers ConfigManager construction. Synchronous + bounded
-# (~50ms for the common no-op case, one lstat per shareable).
-# Best-effort: a heal failure NEVER blocks launch.
+# ── Pre-launch maintenance ──────────────────────────────────────────────
+# Two checks, both gated by cheap bash pre-checks so the common
+# "everything's fine" case adds <10ms instead of ~340ms per subprocess.
+#
+# (1) Share-topology heal: re-link drifted shareable dirs/files. Only
+#     runs when a canary symlink (projects/) is broken.
+# (2) Session-pointer rebuild: claude removes its sessions/<pid>.json
+#     pointer on /exit, so /resume can't find prior conversations the
+#     next time you launch — even though the conversation jsonl still
+#     exists. We regenerate stub pointers from jsonls in the cwd's
+#     project dir so /resume sees them. Only runs when a jsonl is
+#     present whose sessionId isn't in sessions/.
+#
+# Both subprocess calls are best-effort and never block launch.
+_NEEDS_HEAL=0
+_NEEDS_POINTERS=0
+[ -L "${eProfileDir}/projects" ] || _NEEDS_HEAL=1
+[ -L "${eProfileDir}/sessions" ] || _NEEDS_HEAL=1
+# Quick pointer-drift check: scan current cwd's project dir for any
+# jsonl whose sessionId doesn't appear in any session pointer file.
+_ENCODED_CWD=\$(printf '%s' "\$PWD" | tr '/' '-')
+_CWD_PROJECT="${eProfileDir}/projects/\$_ENCODED_CWD"
+if [ -d "\$_CWD_PROJECT" ]; then
+  for _jsonl in "\$_CWD_PROJECT"/*.jsonl; do
+    [ -f "\$_jsonl" ] || continue
+    _sid=\$(basename "\$_jsonl" .jsonl)
+    if ! grep -lq "\\"\$_sid\\"" "${eProfileDir}"/sessions/*.json 2>/dev/null; then
+      _NEEDS_POINTERS=1
+      break
+    fi
+  done
+fi
 if command -v sweech &>/dev/null; then
-  sweech _heal-profile "${eCommandName}" --quiet 2>/dev/null || true
+  if [ "\$_NEEDS_HEAL" = "1" ]; then
+    sweech _heal-profile "${eCommandName}" --quiet 2>/dev/null || true
+  fi
+  if [ "\$_NEEDS_POINTERS" = "1" ]; then
+    sweech _ensure-session-pointers --profile "${eCommandName}" --cwd "\$PWD" --quiet 2>/dev/null || true
+  fi
 fi
 
 # Auto-scrub: when resuming a session, strip cross-provider thinking blocks

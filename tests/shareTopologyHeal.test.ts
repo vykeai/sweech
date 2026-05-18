@@ -307,12 +307,10 @@ describe('healShareTopology', () => {
   });
 });
 
-describe('createWrapperScript embeds heal call', () => {
-  test('wrapper template invokes `sweech _heal-profile` before exec', () => {
+describe('createWrapperScript embeds gated pre-launch maintenance', () => {
+  test('wrapper template gates _heal-profile behind bash lstat pre-check', () => {
     isolateHome();
     const cfg = new ConfigManager();
-    // We don't need an actual claude binary to verify wrapper content —
-    // just generate the script for a minimal CLIConfig and inspect.
     const cli = {
       name: 'claude',
       command: 'claude',
@@ -322,10 +320,100 @@ describe('createWrapperScript embeds heal call', () => {
     cfg.createWrapperScript('test-wrapper', cli);
     const wrapper = fs.readFileSync(path.join(cfg.getBinDir(), 'test-wrapper'), 'utf-8');
     expect(wrapper).toContain('sweech _heal-profile');
-    expect(wrapper).toContain('test-wrapper');
-    // Must be best-effort (` || true` follows the heal call).
-    const healLineIdx = wrapper.indexOf('sweech _heal-profile');
-    expect(wrapper.slice(healLineIdx, healLineIdx + 200)).toContain('|| true');
+    expect(wrapper).toContain('_NEEDS_HEAL=0');
+    // Heal call must be inside the `if [ "$_NEEDS_HEAL" = "1" ]` block.
+    const healCallIdx = wrapper.indexOf('sweech _heal-profile');
+    const preceding = wrapper.slice(0, healCallIdx);
+    expect(preceding).toMatch(/if \[ "\$_NEEDS_HEAL" = "1" \]/);
+    // Must be best-effort.
+    expect(wrapper.slice(healCallIdx, healCallIdx + 200)).toContain('|| true');
+  });
+
+  test('wrapper template gates _ensure-session-pointers behind cwd jsonl scan', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    const cli = {
+      name: 'claude',
+      command: 'claude',
+      displayName: 'Claude Code',
+      configDirEnvVar: 'CLAUDE_CONFIG_DIR',
+    } as any;
+    cfg.createWrapperScript('test-wrapper', cli);
+    const wrapper = fs.readFileSync(path.join(cfg.getBinDir(), 'test-wrapper'), 'utf-8');
+    expect(wrapper).toContain('sweech _ensure-session-pointers');
+    expect(wrapper).toContain('_NEEDS_POINTERS=0');
+    expect(wrapper).toContain('_ENCODED_CWD');
+    expect(wrapper).toContain('.jsonl');
+    // Pointer-regen call must reference --cwd "$PWD".
+    expect(wrapper).toMatch(/sweech _ensure-session-pointers .*--cwd "\$PWD"/);
+  });
+});
+
+describe('ensureSessionPointers', () => {
+  test('regenerates a pointer file for a jsonl with no matching pointer', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+
+    const cwd = '/Users/test/dev/myproject';
+    const encoded = '-Users-test-dev-myproject';
+    const profileDir = path.join(home, '.test-profile');
+    fs.mkdirSync(path.join(profileDir, 'projects', encoded), { recursive: true });
+    fs.mkdirSync(path.join(profileDir, 'sessions'), { recursive: true });
+
+    const sid = '8081375f-a174-49e7-bc3c-1e19a7b84f10';
+    fs.writeFileSync(
+      path.join(profileDir, 'projects', encoded, `${sid}.jsonl`),
+      '{"type":"user","text":"hi"}\n',
+    );
+
+    const created = cfg.ensureSessionPointers('test-profile', cwd);
+    expect(created).toBe(1);
+
+    const pointers = fs.readdirSync(path.join(profileDir, 'sessions'));
+    expect(pointers).toHaveLength(1);
+    const pointer = JSON.parse(fs.readFileSync(path.join(profileDir, 'sessions', pointers[0]), 'utf-8'));
+    expect(pointer.sessionId).toBe(sid);
+    expect(pointer.cwd).toBe(cwd);
+    expect(pointer.status).toBe('idle');
+    expect(pointer._sweechSynthetic).toBe(true);
+    expect(pointer.pid).toBeGreaterThanOrEqual(1_000_000_000);
+  });
+
+  test('skips jsonls that already have a pointer', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+
+    const cwd = '/Users/test/dev/myproject';
+    const encoded = '-Users-test-dev-myproject';
+    const profileDir = path.join(home, '.test-profile');
+    fs.mkdirSync(path.join(profileDir, 'projects', encoded), { recursive: true });
+    fs.mkdirSync(path.join(profileDir, 'sessions'), { recursive: true });
+
+    const sid = '8081375f-a174-49e7-bc3c-1e19a7b84f10';
+    fs.writeFileSync(
+      path.join(profileDir, 'projects', encoded, `${sid}.jsonl`),
+      '{"type":"user","text":"hi"}\n',
+    );
+    // Pre-existing pointer
+    fs.writeFileSync(
+      path.join(profileDir, 'sessions', '12345.json'),
+      JSON.stringify({ pid: 12345, sessionId: sid, cwd, status: 'idle' }),
+    );
+
+    const created = cfg.ensureSessionPointers('test-profile', cwd);
+    expect(created).toBe(0);
+  });
+
+  test('rejects unsafe commandName', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    expect(cfg.ensureSessionPointers('../bad', '/tmp')).toBe(0);
+  });
+
+  test('rejects non-absolute cwd', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    expect(cfg.ensureSessionPointers('test', 'relative/path')).toBe(0);
   });
 });
 
