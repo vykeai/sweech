@@ -81,6 +81,20 @@ export class UsageTracker {
     return stats.sort((a, b) => b.totalUses - a.totalUses);
   }
 
+  /**
+   * Returns the most-recent record's timestamp (ms epoch) — the natural
+   * `fetchedAt` for the usage launch log. Returns null when the file is
+   * empty/missing. Dashboard reads this to render staleness via
+   * src/freshness.ts:freshnessFromTimestamp.
+   */
+  public getLastRecordedAt(): number | null {
+    const records = this.getRecords()
+    if (records.length === 0) return null
+    const last = records[records.length - 1]
+    const t = Date.parse(last.timestamp)
+    return Number.isFinite(t) ? t : null
+  }
+
   public clearStats(commandName?: string): void {
     if (!commandName) {
       atomicWriteFileSync(this.usageFile, JSON.stringify([], null, 2));

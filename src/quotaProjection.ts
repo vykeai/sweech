@@ -33,6 +33,13 @@ export interface ProjectionSamplesFile {
   version: 1
   /** accountName (commandName) → samples (oldest first) */
   accounts: Record<string, ProjectionSample[]>
+  /**
+   * Unix ms when this file was last written. Optional for backwards
+   * compatibility with files written before this field existed — readers
+   * tolerate `undefined` and the dashboard falls back to file mtime via
+   * src/freshness.ts:freshnessFromFileMtime.
+   */
+  fetchedAt?: number
 }
 
 export interface Projection {
@@ -106,7 +113,8 @@ function readSamplesFile(): ProjectionSamplesFile {
       const clean = series.filter(isValidSample).slice(-MAX_SAMPLES_PER_ACCOUNT)
       accounts[name] = clean
     }
-    return { version: 1, accounts }
+    const fetchedAt = typeof data.fetchedAt === 'number' && Number.isFinite(data.fetchedAt) ? data.fetchedAt : undefined
+    return { version: 1, accounts, ...(fetchedAt !== undefined ? { fetchedAt } : {}) }
   } catch {
     return { version: 1, accounts: {} }
   }
@@ -115,7 +123,10 @@ function readSamplesFile(): ProjectionSamplesFile {
 function writeSamplesFile(file: ProjectionSamplesFile): void {
   const dir = path.dirname(_samplesFilePath)
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  atomicWriteFileSync(_samplesFilePath, JSON.stringify(file, null, 2))
+  // Stamp `fetchedAt` on every write so the dashboard can classify staleness
+  // without falling back to file mtime (which is unreliable on copy/rsync).
+  const stamped: ProjectionSamplesFile = { ...file, fetchedAt: Date.now() }
+  atomicWriteFileSync(_samplesFilePath, JSON.stringify(stamped, null, 2))
   // Match the project's existing pattern (vaultAssign.ts:218/260/270) — the
   // file holds per-workspace utilization patterns; not credentials, but worth
   // 0o600 so a co-resident user can't infer activity windows.

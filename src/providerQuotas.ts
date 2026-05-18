@@ -15,6 +15,12 @@ import { atomicWriteFileSync } from './atomicWrite'
 export interface ProviderQuotaInfo {
   provider: string
   capturedAt: number
+  /**
+   * Mirror of `capturedAt` — the dashboard reads `fetchedAt` uniformly across
+   * every sweech on-disk source. Backfilled on read for legacy entries.
+   * See src/freshness.ts.
+   */
+  fetchedAt?: number
   balanceUsd?: number
   credits?: number
   rateLimit?: {
@@ -34,8 +40,25 @@ const FETCH_TIMEOUT_MS = 5000
 
 interface CacheStore { [provider: string]: ProviderQuotaInfo }
 
+function cacheFileMtimeMs(): number | null {
+  try { return fs.statSync(CACHE_FILE).mtimeMs } catch { return null }
+}
+
 function readCache(): CacheStore {
-  try { return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8')) } catch { return {} }
+  let raw: CacheStore
+  try { raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8')) } catch { return {} }
+  // Backfill `fetchedAt` from `capturedAt` (or file mtime as last resort) so
+  // the dashboard's FreshnessStamp lookup never returns 'never' for a legacy
+  // entry that actually has a known capture time.
+  const mtime = cacheFileMtimeMs()
+  const out: CacheStore = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (!v || typeof v !== 'object') { out[k] = v; continue }
+    if (typeof v.fetchedAt === 'number' && Number.isFinite(v.fetchedAt)) { out[k] = v; continue }
+    const back = typeof v.capturedAt === 'number' && Number.isFinite(v.capturedAt) ? v.capturedAt : mtime
+    out[k] = back === null ? v : { ...v, fetchedAt: back }
+  }
+  return out
 }
 
 function writeCache(store: CacheStore): void {
@@ -52,8 +75,16 @@ export function getCachedQuota(provider: string): ProviderQuotaInfo | null {
 }
 
 function setCachedQuota(info: ProviderQuotaInfo): void {
+  // Stamp `fetchedAt` alongside `capturedAt` on every write so consumers
+  // can rely on the field never being absent on freshly-written entries.
+  const stamped: ProviderQuotaInfo = {
+    ...info,
+    fetchedAt: typeof info.fetchedAt === 'number' && Number.isFinite(info.fetchedAt)
+      ? info.fetchedAt
+      : info.capturedAt,
+  }
   const store = readCache()
-  store[info.provider] = info
+  store[stamped.provider] = stamped
   writeCache(store)
 }
 

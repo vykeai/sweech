@@ -50,8 +50,20 @@ export interface LiveRateLimitData {
   forbiddenReason?: string
   /** Plan type — "pro", "max", etc. */
   planType?: string
-  /** When this snapshot was captured (ms) */
+  /** When this snapshot was captured (ms). Historical field — see `fetchedAt`. */
   capturedAt: number
+  /**
+   * When this snapshot was last successfully refreshed from upstream (ms).
+   * Mirror of `capturedAt` — added so every sweech on-disk data source the
+   * dashboard reads has the same `fetchedAt` field name. Both fields are
+   * written together; readers may use either.
+   *
+   * Backfilled from `capturedAt` (and ultimately file mtime) by the one-shot
+   * migration in {@link readCache} for entries written before this field
+   * existed — a missing `fetchedAt` was the root cause of the codex-ted
+   * "reporting OK while rate-limited" regression.
+   */
+  fetchedAt?: number
   /** True when this is cached data returned because a fresh fetch failed */
   isStale?: boolean
 
@@ -195,12 +207,55 @@ interface CacheStore {
   [configDir: string]: LiveRateLimitData
 }
 
+/**
+ * Best-effort file mtime — used to backfill `fetchedAt` on entries written
+ * before the field existed. Returns null on stat failure so the migration
+ * leaves the entry alone rather than guessing 0.
+ */
+function cacheFileMtimeMs(): number | null {
+  try { return fs.statSync(CACHE_FILE).mtimeMs } catch { return null }
+}
+
+/**
+ * Backfill `fetchedAt` on every entry that's missing it. Preference order:
+ *   1. existing `fetchedAt`
+ *   2. existing `capturedAt`  (every entry written since this cache existed)
+ *   3. file mtime             (one-shot best-effort for pre-migration files)
+ *
+ * The migration is non-destructive — callers decide whether to rewrite the
+ * file. We keep it pure so getCached() can safely call it on every read.
+ */
+function migrateFreshness(store: CacheStore, mtimeFallbackMs: number | null): { store: CacheStore; mutated: boolean } {
+  let mutated = false
+  const out: CacheStore = {}
+  for (const [k, entry] of Object.entries(store)) {
+    if (!entry || typeof entry !== 'object') { out[k] = entry; continue }
+    const hasFetched = typeof entry.fetchedAt === 'number' && Number.isFinite(entry.fetchedAt)
+    if (hasFetched) { out[k] = entry; continue }
+    const backfilled = typeof entry.capturedAt === 'number' && Number.isFinite(entry.capturedAt)
+      ? entry.capturedAt
+      : mtimeFallbackMs
+    if (backfilled === null) { out[k] = entry; continue }
+    out[k] = { ...entry, fetchedAt: backfilled }
+    mutated = true
+  }
+  return { store: out, mutated }
+}
+
 function readCache(): CacheStore {
+  let raw: CacheStore
   try {
-    return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8')) as CacheStore
+    raw = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf-8')) as CacheStore
   } catch {
     return {}
   }
+  // One-shot migration: backfill `fetchedAt` on every entry that lacks it.
+  // The codex-ted "stale OK while rate-limited" regression happened because
+  // a pre-fetchedAt entry was returned from the cache and consumers had no
+  // way to detect staleness. Returning the migrated view here guarantees
+  // every reader sees a valid stamp without forcing them to handle null.
+  const { store } = migrateFreshness(raw, cacheFileMtimeMs())
+  return store
 }
 
 function writeCache(store: CacheStore): void {
@@ -288,9 +343,25 @@ export function getStaleCache(configDir: string): LiveRateLimitData | null {
 }
 
 function setCached(configDir: string, data: LiveRateLimitData): void {
+  // EVERY cache write must stamp `fetchedAt`. The codex-ted regression
+  // surfaced because a successful fetch returned an entry whose `capturedAt`
+  // was present but `fetchedAt` was not — the dashboard relies on
+  // `fetchedAt` to classify freshness via FreshnessStamp. Mirror it from
+  // `capturedAt` so the two fields never disagree.
+  //
+  // The branch on `typeof data.capturedAt === 'number'` is defensive: every
+  // fetcher in this file already sets capturedAt: Date.now() before calling
+  // setCached, but a future caller might forget — guarantee both fields are
+  // populated rather than persisting a half-stamped entry.
+  const now = Date.now()
+  const stamped: LiveRateLimitData = {
+    ...data,
+    capturedAt: typeof data.capturedAt === 'number' && Number.isFinite(data.capturedAt) ? data.capturedAt : now,
+    fetchedAt: typeof data.fetchedAt === 'number' && Number.isFinite(data.fetchedAt) ? data.fetchedAt : (typeof data.capturedAt === 'number' ? data.capturedAt : now),
+  }
   withCacheLock(() => {
     const store = readCache()
-    store[configDir] = data
+    store[configDir] = stamped
     writeCache(store)
   })
 }
@@ -760,7 +831,11 @@ export async function getLiveUsage(
   if (!result.token) {
     const stale = getStaleCache(configDir)
     if (stale) { stale.tokenStatus = result.tokenStatus; return stale }
-    return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus }
+    // Synthesized "no data" response — leave `fetchedAt` absent so the
+    // dashboard's freshness classifier surfaces 'never' rather than 'fresh'.
+    // Setting capturedAt: Date.now() on an empty-buckets payload would
+    // otherwise replay the codex-ted regression (look fresh, contain nothing).
+    return { buckets: [], capturedAt: 0, tokenStatus: result.tokenStatus }
   }
 
   const data = await fetchRateLimitHeaders(result.token.accessToken)
@@ -799,7 +874,11 @@ export async function refreshLiveUsage(
   if (!result.token) {
     const stale = getStaleCache(configDir)
     if (stale) { stale.tokenStatus = result.tokenStatus; return stale }
-    return { buckets: [], capturedAt: Date.now(), tokenStatus: result.tokenStatus }
+    // Synthesized "no data" response — leave `fetchedAt` absent so the
+    // dashboard's freshness classifier surfaces 'never' rather than 'fresh'.
+    // Setting capturedAt: Date.now() on an empty-buckets payload would
+    // otherwise replay the codex-ted regression (look fresh, contain nothing).
+    return { buckets: [], capturedAt: 0, tokenStatus: result.tokenStatus }
   }
 
   const data = await fetchRateLimitHeaders(result.token.accessToken)

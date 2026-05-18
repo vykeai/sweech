@@ -41,6 +41,14 @@ export function _resetHistoryFilePath(): void {
   _historyFilePath = HISTORY_FILE
 }
 
+/**
+ * On-disk shape: historically a bare `HistoryEntry[]`. We keep reading that
+ * legacy shape forever (existing files already on user disks), but new writes
+ * preserve it — the dashboard derives freshness from the last entry's
+ * `timestamp`, which is per-row and never absent, so wrapping the array would
+ * be churn for no benefit. {@link getHistoryFreshness} surfaces that signal
+ * to dashboard consumers without changing the storage format.
+ */
 function readHistoryFile(): HistoryEntry[] {
   try {
     const raw = fs.readFileSync(_historyFilePath, 'utf-8')
@@ -56,6 +64,20 @@ function writeHistoryFile(entries: HistoryEntry[]): void {
   const dir = path.dirname(_historyFilePath)
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   atomicWriteFileSync(_historyFilePath, JSON.stringify(entries, null, 2))
+}
+
+/**
+ * Return the most-recent entry timestamp (ms) — the natural `fetchedAt` for
+ * the history file. Returns null when the history file is empty or missing.
+ *
+ * Consumers should feed this to {@link freshnessFromTimestamp} to render the
+ * dashboard's freshness pill uniformly across data sources.
+ */
+export function getHistoryFreshness(): number | null {
+  const entries = readHistoryFile()
+  if (entries.length === 0) return null
+  const last = entries[entries.length - 1]
+  return typeof last?.timestamp === 'number' && Number.isFinite(last.timestamp) ? last.timestamp : null
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
