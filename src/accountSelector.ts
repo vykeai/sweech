@@ -538,7 +538,10 @@ function buildLaunchPlan(account: AccountEntry): RouteCandidate['route']['launch
 
 function routeQuota(info: AccountInfo): RouteCandidate['route']['quota'] {
   const live = info.live;
-  const primaryBucket = live?.buckets?.[0];
+  // Pick "All models" bucket when present — see pickPrimaryBucket()
+  // in liveUsage.ts for the codex-pole/codex bucket-order incident.
+  const { pickPrimaryBucket } = require('./liveUsage') as typeof import('./liveUsage');
+  const primaryBucket = pickPrimaryBucket(live);
   return {
     source: live ? 'live-cache' : (info.meta.plan || info.meta.limits ? 'manual-plan' : 'unknown'),
     status: live?.status ?? null,

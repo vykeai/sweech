@@ -76,35 +76,57 @@ export interface LiveRateLimitData {
 // ── Bucket accessors ──────────────────────────────────────────────────────────
 
 /**
- * Read the session (5h) utilization (0.0–1.0) from the canonical first bucket.
+ * Pick the "primary" bucket — the one whose utilization should drive
+ * SweechBar's progress bars, the CLI's `usage` table, and the
+ * launcher's "use first" tiering.
+ *
+ * Codex's rate-limit API returns buckets in arbitrary order: for some
+ * accounts it's `[All models, GPT-5.3-Codex-Spark]`, for others it's
+ * `[GPT-5.3-Codex-Spark, All models]`. Blindly reading `buckets[0]`
+ * (the prior behaviour) made the user-facing progress bar reflect the
+ * Spark tier — which sits at 0% for accounts that don't pay extra —
+ * so codex / codex-pole displayed 0% utilization while the All-models
+ * bucket was actually at 8% / 34%.
+ *
+ * Always prefer the "All models" bucket; only fall back to index 0
+ * when the catalog is missing or the API doesn't surface that bucket
+ * at all (older non-codex providers).
+ */
+export function pickPrimaryBucket(live: LiveRateLimitData | null | undefined): RateLimitBucket | undefined {
+  if (!live?.buckets || live.buckets.length === 0) return undefined
+  return live.buckets.find(b => b.label === 'All models') ?? live.buckets[0]
+}
+
+/**
+ * Read the session (5h) utilization (0.0–1.0) from the primary bucket.
  * Returns undefined when the bucket or window is absent.
  */
 export function getSessionUtilization(live: LiveRateLimitData | null | undefined): number | undefined {
-  return live?.buckets?.[0]?.session?.utilization
+  return pickPrimaryBucket(live)?.session?.utilization
 }
 
 /**
- * Read the weekly (7d) utilization (0.0–1.0) from the canonical first bucket.
+ * Read the weekly (7d) utilization (0.0–1.0) from the primary bucket.
  * Returns undefined when the bucket or window is absent.
  */
 export function getWeeklyUtilization(live: LiveRateLimitData | null | undefined): number | undefined {
-  return live?.buckets?.[0]?.weekly?.utilization
+  return pickPrimaryBucket(live)?.weekly?.utilization
 }
 
 /**
- * Read the session (5h) reset time (Unix seconds) from the canonical first bucket.
+ * Read the session (5h) reset time (Unix seconds) from the primary bucket.
  * Returns undefined when the bucket or window is absent.
  */
 export function getSessionResetsAt(live: LiveRateLimitData | null | undefined): number | undefined {
-  return live?.buckets?.[0]?.session?.resetsAt
+  return pickPrimaryBucket(live)?.session?.resetsAt
 }
 
 /**
- * Read the weekly (7d) reset time (Unix seconds) from the canonical first bucket.
+ * Read the weekly (7d) reset time (Unix seconds) from the primary bucket.
  * Returns undefined when the bucket or window is absent.
  */
 export function getWeeklyResetsAt(live: LiveRateLimitData | null | undefined): number | undefined {
-  return live?.buckets?.[0]?.weekly?.resetsAt
+  return pickPrimaryBucket(live)?.weekly?.resetsAt
 }
 
 // ── Shared scoring ───────────────────────────────────────────────────────────

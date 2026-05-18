@@ -61,8 +61,12 @@ export function checkUsageThresholds(account: string, live: LiveRateLimitData | 
   const state = getState(account);
   const now = new Date().toISOString();
 
-  // We check the primary bucket (index 0) which represents overall utilization
-  const primary = live.buckets[0];
+  // Pick the "All models" bucket when codex returns it (see
+  // pickPrimaryBucket() — codex sometimes lists Spark tier first,
+  // which would otherwise alert on its always-zero utilization).
+  const { pickPrimaryBucket } = require('./liveUsage') as typeof import('./liveUsage');
+  const primary = pickPrimaryBucket(live);
+  if (!primary) return;
 
   // --- Session (5h) window ---
   if (primary.session) {

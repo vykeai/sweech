@@ -375,8 +375,18 @@ document.getElementById('generated-at').textContent =
   var html = '<table><thead><tr><th>Account</th><th>5h usage</th><th>Weekly usage</th><th>Messages (5h/7d)</th><th>Last active</th></tr></thead><tbody>';
   accounts.forEach(function(a) {
     var live = a.live || {};
-    var u5h = live.buckets && live.buckets[0] && live.buckets[0].session ? live.buckets[0].session.utilization : null;
-    var u7d = live.buckets && live.buckets[0] && live.buckets[0].weekly ? live.buckets[0].weekly.utilization : null;
+    // Prefer "All models" bucket — codex returns Spark tier first for
+    // some accounts, which sits at 0% utilization and would otherwise
+    // mislead the dashboard. Same heuristic as pickPrimaryBucket() in
+    // liveUsage.ts.
+    var buckets = live.buckets || [];
+    var primary = null;
+    for (var i = 0; i < buckets.length; i++) {
+      if (buckets[i] && buckets[i].label === 'All models') { primary = buckets[i]; break; }
+    }
+    if (!primary && buckets.length > 0) primary = buckets[0];
+    var u5h = primary && primary.session ? primary.session.utilization : null;
+    var u7d = primary && primary.weekly ? primary.weekly.utilization : null;
 
     html += '<tr><td><strong>' + a.commandName + '</strong></td>';
 
