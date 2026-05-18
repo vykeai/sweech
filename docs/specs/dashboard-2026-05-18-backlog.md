@@ -244,6 +244,47 @@ Backend `fetchedAt` infrastructure already landed in commit 1554355.
 - 10+ tests covering registration + wrapper.
 - Reference: `gh repo view 1jehuang/jcode`, install script at `master/scripts/install.sh`.
 
+### T-DASH-026 · mDNS sweech.local hostname
+**Files:** edits to existing `src/fedServer.ts` mDNS announcer + `src/cli.ts` dashboard command.
+**Depends:** T-DASH-007.
+**Tasks:**
+- Register `sweech.local` A record via the fed daemon's existing mDNS responder (Bonjour).
+- Dashboard URL becomes `http://sweech.local:<port>/` when mDNS is up; fall back to `127.0.0.1:<port>` silently when not.
+- Browser auto-open uses the prettiest available URL.
+- Collision handling: if `sweech.local` is already claimed (another sweech instance, conflicting service), prefix with hostname: `<short-hostname>-sweech.local`.
+- 5+ tests: URL resolution priority, fallback path, collision suffix.
+
+### T-DASH-027 · cute-hud notification integration
+**Files:** `src/notify.ts` (new, cute-hud broker), edits to `src/briefing.ts` to use it.
+**Depends:** T-DASH-020 (briefing).
+**Tasks:**
+- Detect cute-hud install (`which cute-hud`). If missing, fall back to `osascript display notification`.
+- JSON-line protocol per `vykeai/cute-hud` README: `{mode,title,badge,action,countdown,...}` piped to stdin.
+- Map briefing severities → cute-hud modes: at-risk subs → `warning`, on-track → `info`, summary read → `idle`.
+- Respect macOS Focus mode — cute-hud already does; sweech also adds a settings flag `briefing.skipDuringFocus: true` default.
+- Tests: command construction, fallback path when cute-hud absent.
+
+### T-DASH-028 · cmd+K command palette
+**Files:** `apps/dashboard/src/components/CommandPalette.tsx`, registry of palette commands per panel.
+**Depends:** T-DASH-001.
+**Tasks:**
+- Keyboard shortcut `cmd+K` (mac) / `ctrl+K` (linux) opens a centered modal with search input.
+- Fuzzy search across: sessions (by workspace/cwd/title), workspaces, accounts, audit findings, settings keys.
+- Each result has a default action: `enter` triggers (jump to session, open workspace edit, fix audit, toggle setting).
+- Recent commands ring-buffer in zustand store, surfaced when input is empty.
+- Keyboard navigation: ↑↓ + enter; ESC to close.
+- 12+ tests: fuzzy matching, action dispatch, recent ring buffer.
+
+### T-DASH-029 · sweech bare-invocation dashboard auto-open
+**Files:** `src/cli.ts` default action handler (currently shows help on no args).
+**Depends:** T-DASH-007.
+**Tasks:**
+- New setting: `dashboard.openOnBareInvocation: false` default.
+- When `true` and `sweech` is run with no args, behave as `sweech dashboard`.
+- When `false`, current behaviour (show help) — print one hint line "tip: run `sweech dashboard` to open the control panel".
+- `sweech dash` registered as alias of `sweech dashboard`.
+- 5+ tests covering the toggle.
+
 ### T-DASH-025 · Cloud-vs-local provider classification
 **Files:** `src/providers.ts` (add `pricingModel` field on every entry), `src/usageProxy.ts` (new, Tier 2/3 estimators), `~/.sweech/balance-manual.json` (Tier 4 manual entries), tests.
 **Depends:** none — independent foundation for T-DASH-019.
@@ -317,7 +358,7 @@ PARALLEL Wave 2 (4 agents):
   ┣━ T-DASH-008 (sessionSummarizer)
   ┗━ T-DASH-009 (federation routes)
                 ↓ merge
-PARALLEL Wave 3 (13 agents):
+PARALLEL Wave 3 (17 agents):
   ┣━ T-DASH-010 (Sessions panel)
   ┣━ T-DASH-011 (Workspaces/Accounts/Cost)
   ┣━ T-DASH-012 (Audit/Failover/Routing/Billing)
@@ -330,7 +371,11 @@ PARALLEL Wave 3 (13 agents):
   ┣━ T-DASH-022 (gemini-cli cliType)
   ┣━ T-DASH-023 (goose cliType)
   ┣━ T-DASH-024 (jcode cliType)
-  ┗━ T-DASH-025 (cloud-vs-local classification + usageProxy)
+  ┣━ T-DASH-025 (cloud-vs-local classification + usageProxy)
+  ┣━ T-DASH-026 (sweech.local mDNS)
+  ┣━ T-DASH-027 (cute-hud notification integration)
+  ┣━ T-DASH-028 (cmd+K command palette)
+  ┗━ T-DASH-029 (sweech bare-invocation auto-open + sweech dash alias)
                 ↓ merge
 SEQUENTIAL Wave 4:
   ┣━ T-DASH-016 (E2E)
@@ -338,7 +383,7 @@ SEQUENTIAL Wave 4:
   ┗━ T-DASH-018 (ship)
 ```
 
-Total: **25 tasks across 4 waves**, ~13 unique agents in parallel at peak.
+Total: **29 tasks across 4 waves**, ~17 unique agents in parallel at peak.
 
 Acceptance criteria for "done with backlog":
 - `sweech dashboard` opens new React app in default browser
