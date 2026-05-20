@@ -3,16 +3,26 @@
  * so they survive terminal closure and can be re-attached remotely.
  */
 
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as path from 'path';
 
+let cachedTmuxAvailable: boolean | null = null;
+
 export function isTmuxAvailable(): boolean {
+  return tmuxAvailable();
+}
+
+export function tmuxAvailable(): boolean {
+  if (cachedTmuxAvailable !== null) return cachedTmuxAvailable;
+
   try {
-    execSync('which tmux', { stdio: 'ignore' });
-    return true;
+    execFileSync('tmux', ['-V'], { stdio: 'ignore' });
+    cachedTmuxAvailable = true;
   } catch {
-    return false;
+    cachedTmuxAvailable = false;
   }
+
+  return cachedTmuxAvailable;
 }
 
 export function isInsideTmux(): boolean {
@@ -21,16 +31,107 @@ export function isInsideTmux(): boolean {
 
 function tmuxSessionExists(name: string): boolean {
   try {
-    execSync(`tmux has-session -t ${shellQuote(name)}`, { stdio: 'ignore' });
+    execFileSync('tmux', ['has-session', '-t', name], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
   }
 }
 
+function safeSegment(value: string, fallback: string): string {
+  const cleaned = value.replace(/[^a-zA-Z0-9_.-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+  return cleaned || fallback;
+}
+
 function shellQuote(s: string): string {
   if (/^[a-zA-Z0-9_./:@=+-]+$/.test(s)) return s;
   return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+export function nameForSession(workspace: string, cwd: string, sid?: string | null): string {
+  const project = safeSegment(path.basename(cwd), 'workspace');
+  const commandName = safeSegment(workspace, 'default');
+  const baseName = `${project}-${commandName}-sweech`;
+
+  if (!tmuxSessionExists(baseName)) return baseName;
+
+  const sid8 = safeSegment((sid || '').slice(0, 8), 'collision');
+  return `${baseName}-${sid8}`;
+}
+
+export interface WrappedTmuxCommand {
+  command: string;
+  args: string[];
+}
+
+export interface WrapCommandOpts {
+  detached?: boolean;
+  cwd?: string;
+  env?: Record<string, string | undefined | null>;
+}
+
+export function wrapCommand(
+  cmd: string,
+  args: string[],
+  sessionName: string,
+  opts: WrapCommandOpts = {},
+): WrappedTmuxCommand {
+  const envParts = Object.entries(opts.env || {})
+    .filter((entry): entry is [string, string] => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(entry[0]) && entry[1] !== undefined && entry[1] !== null)
+    .map(([key, value]) => `${key}=${shellQuote(value)}`);
+  const cdPart = opts.cwd ? [`cd`, shellQuote(opts.cwd), '&&'] : [];
+  const shellCmd = [
+    ...cdPart,
+    'unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT;',
+    ...envParts,
+    shellQuote(cmd),
+    ...args.map(shellQuote),
+  ].join(' ');
+
+  return {
+    command: 'tmux',
+    args: ['new-session', ...(opts.detached === false ? [] : ['-d']), '-s', sessionName, '--', shellCmd],
+  };
+}
+
+export interface LiveTmuxSession {
+  name: string;
+  attached: number;
+  activity: number;
+}
+
+export function listLiveSessions(): LiveTmuxSession[] {
+  try {
+    const output = execFileSync('tmux', [
+      'list-sessions',
+      '-F',
+      '#{session_name}|#{session_attached}|#{session_activity}',
+    ], { encoding: 'utf8' });
+
+    return output
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [name, attached, activity] = line.split('|');
+        return {
+          name,
+          attached: Number.parseInt(attached || '0', 10) || 0,
+          activity: Number.parseInt(activity || '0', 10) || 0,
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
+export function attachClients(sessionName: string): number {
+  try {
+    const output = execFileSync('tmux', ['list-clients', '-t', sessionName], { encoding: 'utf8' });
+    if (!output.trim()) return 0;
+    return output.trim().split('\n').length;
+  } catch {
+    return 0;
+  }
 }
 
 export interface TmuxLaunchOpts {
@@ -62,7 +163,6 @@ export function launchInTmux(opts: TmuxLaunchOpts): number {
     hasResume = false,
   } = opts;
 
-  // Strip redundant command prefix from profile name (e.g. "codex" profile + "codex" command → just use dir)
   const strippedProfile = profileName.replace(new RegExp(`^${command}-?`, 'i'), '') || null;
   const safeProfile = strippedProfile
     ? strippedProfile.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 30)
@@ -72,7 +172,6 @@ export function launchInTmux(opts: TmuxLaunchOpts): number {
     ? `sweech-${command}-${safeProfile}-${safeDir}`
     : `sweech-${command}-${safeDir}`;
 
-  // Build env prefix — only sweech-specific vars; rest comes from shell
   const envParts: string[] = [];
   if (configDirEnvVar && configDir) {
     envParts.push(`${configDirEnvVar}=${shellQuote(configDir)}`);
@@ -106,7 +205,6 @@ export function launchInTmux(opts: TmuxLaunchOpts): number {
     return result.status ?? 0;
   }
 
-  // Create detached session, then attach so the terminal is connected
   spawnSync('tmux', ['new-session', '-d', '-s', sessionName, shellCmd], { stdio: 'pipe' });
   const result = spawnSync('tmux', ['attach-session', '-t', sessionName], { stdio: 'inherit' });
   return result.status ?? 0;

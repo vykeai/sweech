@@ -139,7 +139,7 @@ describe('tmux module', () => {
     test('returns true when `which tmux` exits 0', () => {
       jest.resetModules();
       jest.mock('child_process', () => ({
-        execSync: jest.fn(() => '/usr/bin/tmux\n'),
+        execFileSync: jest.fn(() => '/usr/bin/tmux\n'),
         spawnSync: jest.fn(() => ({ status: 0 })),
       }));
       const { isTmuxAvailable } = require('../src/tmux');
@@ -149,7 +149,7 @@ describe('tmux module', () => {
     test('returns false when `which tmux` throws (tmux not installed)', () => {
       jest.resetModules();
       jest.mock('child_process', () => ({
-        execSync: jest.fn(() => { throw new Error('not found'); }),
+        execFileSync: jest.fn(() => { throw new Error('not found'); }),
         spawnSync: jest.fn(() => ({ status: 0 })),
       }));
       const { isTmuxAvailable } = require('../src/tmux');
@@ -186,7 +186,7 @@ describe('tmux module', () => {
     function setupMocks(spawnResult: { status: number }) {
       const spawnSync = jest.fn(() => spawnResult);
       jest.mock('child_process', () => ({
-        execSync: jest.fn(() => ''), // tmux has-session → no throw = exists
+        execFileSync: jest.fn(() => ''),
         spawnSync,
       }));
       return spawnSync;
@@ -214,9 +214,8 @@ describe('tmux module', () => {
     test('outside tmux, session exists: attaches to existing session', () => {
       jest.resetModules();
       const spawnSync = jest.fn(() => ({ status: 0 }));
-      // execSync for `which tmux` succeeds, for `has-session` succeeds (session exists)
-      const execSync = jest.fn(() => '');
-      jest.mock('child_process', () => ({ execSync, spawnSync }));
+      const execFileSync = jest.fn(() => '');
+      jest.mock('child_process', () => ({ execFileSync, spawnSync }));
       delete process.env.TMUX;
 
       const { launchInTmux } = require('../src/tmux');
@@ -230,12 +229,11 @@ describe('tmux module', () => {
     test('outside tmux, no session: creates new session then attaches', () => {
       jest.resetModules();
       const spawnSync = jest.fn(() => ({ status: 0 }));
-      // execSync for `has-session` throws → session does not exist
-      const execSync = jest.fn((cmd: string) => {
-        if (cmd.includes('has-session')) throw new Error('no session');
+      const execFileSync = jest.fn((_cmd: string, args: string[]) => {
+        if (args.includes('has-session')) throw new Error('no session');
         return '';
       });
-      jest.mock('child_process', () => ({ execSync, spawnSync }));
+      jest.mock('child_process', () => ({ execFileSync, spawnSync }));
       delete process.env.TMUX;
 
       const { launchInTmux } = require('../src/tmux');
@@ -251,11 +249,11 @@ describe('tmux module', () => {
     test('session name encodes command and profile', () => {
       jest.resetModules();
       const spawnSync = jest.fn(() => ({ status: 0 }));
-      const execSync = jest.fn((cmd: string) => {
-        if (cmd.includes('has-session')) throw new Error('no session');
+      const execFileSync = jest.fn((_cmd: string, args: string[]) => {
+        if (args.includes('has-session')) throw new Error('no session');
         return '';
       });
-      jest.mock('child_process', () => ({ execSync, spawnSync }));
+      jest.mock('child_process', () => ({ execFileSync, spawnSync }));
       delete process.env.TMUX;
 
       const { launchInTmux } = require('../src/tmux');
@@ -273,11 +271,11 @@ describe('tmux module', () => {
     test('resume fallback shell cmd includes fallback on failure', () => {
       jest.resetModules();
       const spawnSync = jest.fn(() => ({ status: 0 }));
-      const execSync = jest.fn((cmd: string) => {
-        if (cmd.includes('has-session')) throw new Error('no session');
+      const execFileSync = jest.fn((_cmd: string, args: string[]) => {
+        if (args.includes('has-session')) throw new Error('no session');
         return '';
       });
-      jest.mock('child_process', () => ({ execSync, spawnSync }));
+      jest.mock('child_process', () => ({ execFileSync, spawnSync }));
       process.env.TMUX = '/tmp/tmux/x,1,0'; // inside tmux → new-window
 
       const { launchInTmux } = require('../src/tmux');
