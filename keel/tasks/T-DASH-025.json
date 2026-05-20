@@ -3,13 +3,13 @@
   "title": "ProviderConfig pricingModel + usageProxy.ts (cloud/metered/free)",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
-  "description": "Add pricingModel: 'paid'|'free'|'metered' to ProviderConfig. Annotate every entry: anthropic/openai/kimi/glm/minimax/dashscope/openrouter/ollama-cloud/kimi-coding \u2192 paid; groq/deepseek/gemini/nvidia \u2192 metered; ollama-local + custom-with-localhost \u2192 free. Auto-classifier for user-created customs. usageProxy.ts: Tier 2 cost-from-tokens + Tier 3 launch-count fallback.",
+  "assignee": "codex",
+  "description": "Add pricingModel: 'paid'|'free'|'metered' to ProviderConfig. Annotate every entry: anthropic/openai/kimi/glm/minimax/dashscope/openrouter/ollama-cloud/kimi-coding → paid; groq/deepseek/gemini/nvidia → metered; ollama-local + custom-with-localhost → free. Auto-classifier for user-created customs. usageProxy.ts: Tier 2 cost-from-tokens + Tier 3 launch-count fallback.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-20T22:51:00.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "done",
+      "ts": "2026-05-20T22:51:00.000Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "M",
@@ -27,6 +32,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "ts": "2026-05-20T22:51:10.000Z",
+      "text": "Done via /vy-go 2026-05-20. Merged work/T-DASH-025 into main via merge commit 7036407 after worker commit dc07ad8. Added ProviderConfig pricingModel annotations, custom provider classifier, and usageProxy Tier 2 token-cost plus Tier 3 launch-count estimators with focused tests. Proof: npm test -- --runInBand passed with 99 suites passed, 2383 tests passed, 5 skipped; npm run build passed; npx tsc --noEmit passed; npm audit --audit-level=moderate found 0 vulnerabilities; cd macos-menubar/SweechBar && swift build passed; git diff --check passed. E2E/UI proof shared with T-DASH-015 at ~/Desktop/screenshots/sweech/dashboard-merged-T-DASH-015-025-2026-05-20.png.",
+      "by": "human"
     }
   ]
 }

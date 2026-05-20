@@ -3,13 +3,13 @@
   "title": "Hero strip + FreshnessChip + ViewerCountBadge components",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
-  "description": "Hero: live/recoverable/cost-MTD/doctor counts. FreshnessChip per R13 4-state. ViewerCountBadge (Q5, hide when \u22641). 8+ component tests.",
+  "assignee": "codex",
+  "description": "Hero: live/recoverable/cost-MTD/doctor counts. FreshnessChip per R13 4-state. ViewerCountBadge (Q5, hide when ≤1). 8+ component tests.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-20T22:51:00.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "done",
+      "ts": "2026-05-20T22:51:00.000Z"
+    }
+  ],
   "dependsOn": [
     "T-DASH-001"
   ],
@@ -29,6 +34,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "ts": "2026-05-20T22:51:10.000Z",
+      "text": "Done via /vy-go 2026-05-20. Merged work/T-DASH-015 into main via merge commit 323a81c after worker commit be80360. Added dashboard HeroStrip, FreshnessChip, ViewerCountBadge, hero stat derivation and component tests. Proof: npm test -- --runInBand passed with 99 suites passed, 2383 tests passed, 5 skipped; npm run build passed; npx tsc --noEmit passed; npm audit --audit-level=moderate found 0 vulnerabilities; cd macos-menubar/SweechBar && swift build passed; git diff --check passed. UI proof: dashboard served at http://127.0.0.1:47941/, /dashboard/state returned JSON, screenshot saved at ~/Desktop/screenshots/sweech/dashboard-merged-T-DASH-015-025-2026-05-20.png and reviewed for layout overlap/clipping.",
+      "by": "human"
     }
   ]
 }
