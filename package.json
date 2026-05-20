@@ -7,7 +7,8 @@
     "sweech": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build -w apps/dashboard",
+    "build:cli": "tsc",
     "postbuild": "chmod +x dist/cli.js",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
@@ -78,6 +79,10 @@
     "openai": "^6.18.0",
     "unzipper": "^0.10.14"
   },
+  "workspaces": [
+    "apps/dashboard",
+    "packages/vysual-react"
+  ],
   "devDependencies": {
     "@types/archiver": "^6.0.2",
     "@types/inquirer": "^9.0.7",
