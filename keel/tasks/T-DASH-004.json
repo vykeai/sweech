@@ -1,15 +1,15 @@
 {
   "id": "T-DASH-004",
-  "title": "tmux.ts integration \u2014 naming + lifecycle",
+  "title": "tmux.ts integration — naming + lifecycle",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "active",
   "priority": "critical",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "tmuxAvailable, nameForSession (<basename(cwd)>-<workspace>-sweech with -<sid8> on collision), wrapCommand for wrapper, listLiveSessions, attachClients for Q5 viewer count. 12+ tests.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-20T14:41:01.955Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-20T14:41:01.955Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "M",

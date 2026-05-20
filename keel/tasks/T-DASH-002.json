@@ -3,13 +3,13 @@
   "title": "sessions.ts + sessions.db sqlite driver",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "active",
   "priority": "critical",
   "platform": null,
-  "assignee": null,
-  "description": "node:sqlite driver for ~/.sweech/sessions.db. Schema per spec \u00a7Data model. WAL mode, no fsync. CRUD: insert/updateStatus/markActivity/list/byId/bulkWipe. Reconcile job on daemon startup. 20+ tests.",
+  "assignee": "codex",
+  "description": "node:sqlite driver for ~/.sweech/sessions.db. Schema per spec §Data model. WAL mode, no fsync. CRUD: insert/updateStatus/markActivity/list/byId/bulkWipe. Reconcile job on daemon startup. 20+ tests.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-20T14:41:01.885Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-20T14:41:01.885Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "M",

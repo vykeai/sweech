@@ -1,15 +1,15 @@
 {
   "id": "T-DASH-001",
-  "title": "apps/dashboard scaffold \u2014 Vite + React + @vykeai/vysual-react",
+  "title": "apps/dashboard scaffold — Vite + React + @vykeai/vysual-react",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "active",
   "priority": "critical",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "Set up apps/dashboard/ as npm workspace. Vite + React 19 + TypeScript + Tailwind + @vykeai/vysual-react. ThemeProvider with themes.sweech. Empty grid layout: hero strip + sessions row + 3-col mid. Stub panels as Card placeholders. Zustand store with slices per panel. useSSE hook with exp-backoff reconnect. Root npm run build wires tsc + vite build into dist/dashboard/.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-20T14:41:01.848Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-20T14:41:01.848Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "M",

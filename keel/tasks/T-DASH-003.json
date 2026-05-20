@@ -1,15 +1,15 @@
 {
   "id": "T-DASH-003",
-  "title": "terminalLauncher.ts \u2014 Ghostty/iTerm2/Terminal.app/generic",
+  "title": "terminalLauncher.ts — Ghostty/iTerm2/Terminal.app/generic",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "active",
   "priority": "critical",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "Detect installed terminals via mdfind/which. launchTerminal({terminal,command,cwd,newWindow,title}) API. Per-terminal: Ghostty URL scheme, iTerm2/Terminal AppleScript, generic -e. Refuse-with-hint on missing binary.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-20T14:41:01.920Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-20T14:41:01.920Z"
+    }
+  ],
   "dependsOn": [],
   "runStatus": null,
   "size": "M",
