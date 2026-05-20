@@ -41,7 +41,14 @@ describe('tmux integration', () => {
     mockChildProcess(jest.fn(() => ''));
     const { nameForSession } = require('../src/tmux');
 
-    expect(nameForSession('claude', '/Users/luke/dev/sweech', 'abcdef123456')).toBe('sweech-claude-sweech-abcdef12');
+    expect(nameForSession('claude', '/Users/luke/dev/sweech', 'abcdef123456')).toBe('sweech-claude-sweech-ef123456');
+  });
+
+  test('nameForSession collision suffix uses random launch-id tail', () => {
+    mockChildProcess(jest.fn(() => ''));
+    const { nameForSession } = require('../src/tmux');
+
+    expect(nameForSession('claude-work', '/Users/luke/dev/project-a', 'claude-work-project-a-1779310180995-12345-a1b2c3d4')).toBe('project-a-claude-work-sweech-a1b2c3d4');
   });
 
   test('nameForSession sanitizes unsafe characters', () => {
@@ -165,7 +172,10 @@ describe('tmux integration', () => {
 
     const calls = spawnSync.mock.calls as unknown as Array<[string, string[]]>;
     const newSession = calls.find(call => call[1]?.[0] === 'new-session');
-    expect(newSession?.[1]?.[newSession[1].length - 1]).toBe("unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; 'bad;touch /tmp/pwned' --continue");
+    const shellCmd = newSession?.[1]?.[newSession[1].length - 1];
+    expect(shellCmd).toContain("unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT;");
+    expect(shellCmd).toContain("SWEECH_TMUX_NAME=sweech-bad-work-sweech");
+    expect(shellCmd).toContain("'bad;touch /tmp/pwned' --continue");
   });
 
   test('launchInTmux returns new-session failure before attach', () => {

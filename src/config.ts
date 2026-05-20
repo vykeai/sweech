@@ -1875,6 +1875,13 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+_SWEECH_SESSION_ID="\${SWEECH_SESSION_ID:-${eCommandName}-\$(date -u +"%Y%m%dT%H%M%SZ")-\$\$}"
+_SWEECH_TMUX_NAME="\${SWEECH_TMUX_NAME:-}"
+_SWEECH_LAUNCHED_AFTER_MS="\$(($(date +%s) * 1000))"
+if command -v sweech &>/dev/null; then
+  sweech _session-launched --quiet --no-scan-jsonl --id "\$_SWEECH_SESSION_ID" --workspace "${eCommandName}" --cwd "\$PWD" --config-dir "${eProfileDir}" --tmux-name "\$_SWEECH_TMUX_NAME" --pid "\$\$" --terminal-app "\${TERM_PROGRAM:-wrapper}" 2>/dev/null || true
+fi
+
 export ${eConfigDirEnvVar}="${eProfileDir}"
 
 # Codex CLI does NOT read env vars from settings.json the way Claude Code
@@ -1900,7 +1907,13 @@ except Exception:
   fi
 fi
 
-exec "${eCliCommand}" "\${ARGS[@]}"
+"${eCliCommand}" "\${ARGS[@]}"
+_SWEECH_EXIT=\$?
+if command -v sweech &>/dev/null; then
+  sweech _session-launched --quiet --id "\$_SWEECH_SESSION_ID" --workspace "${eCommandName}" --cwd "\$PWD" --config-dir "${eProfileDir}" --tmux-name "\$_SWEECH_TMUX_NAME" --pid "\$\$" --terminal-app "\${TERM_PROGRAM:-wrapper}" --jsonl-after-ms "\$_SWEECH_LAUNCHED_AFTER_MS" 2>/dev/null || true
+  sweech _session-closed --quiet --id "\$_SWEECH_SESSION_ID" --tmux-name "\$_SWEECH_TMUX_NAME" 2>/dev/null || true
+fi
+exit "\$_SWEECH_EXIT"
 `;
 
     fs.writeFileSync(wrapperPath, wrapperContent, { mode: 0o755 });

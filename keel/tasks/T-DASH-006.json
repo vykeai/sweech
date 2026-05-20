@@ -3,13 +3,13 @@
   "title": "Wrapper writes sessions.db + tmux-wraps",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "done",
   "priority": "critical",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "Wrapper inserts sessions.db row on launch (sid from claude jsonl). tmux new -d -s <name> when enabled. Bash pre-check creates row if missing. Hidden _session-launched / _session-closed CLI subcommands.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-20T21:23:54.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,16 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-20T20:43:09.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-20T21:23:54.000Z"
+    }
+  ],
   "dependsOn": [
     "T-DASH-002",
     "T-DASH-004"
@@ -30,6 +39,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "ts": "2026-05-20T21:23:54.000Z",
+      "text": "Implemented session ledger lifecycle for wrapper/CLI/TUI/tmux launches: idempotent sessions.db upsert/close, hidden _session-launched/_session-closed commands, stale-jsonl-safe postlaunch linkage, stable tmux session identities, tmux self-registration on new sessions, attach-only paths that do not create duplicate phantom live rows, tmux close footer, and responsive dashboard proof. Verified npm test -- --runInBand, npm run build, npx tsc --noEmit, npm audit --audit-level=moderate, git diff --check, swift build, live dashboard E2E, desktop/mobile screenshots, and Codex adversarial review.",
+      "by": "human"
     }
   ]
 }

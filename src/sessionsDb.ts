@@ -193,6 +193,72 @@ export class SessionsDb {
     return session;
   }
 
+  upsert(input: InsertDashboardSessionInput): DashboardSession {
+    const now = Date.now();
+    const session = normalizeInsert(input, now);
+
+    this.db.prepare(`
+      INSERT INTO sessions (
+        id, workspace, cwd, cwd_basename, machine, tmux_name, claude_sid,
+        jsonl_path, pid, terminal_app, launched_at, last_active_at, closed_at,
+        status, message_count, msg_count_first, msg_count_last, summary_one,
+        summary_bullets, summary_provider, summary_model, summary_cost_usd,
+        summary_at, summary_stale, summary_msg_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        workspace = excluded.workspace,
+        cwd = excluded.cwd,
+        cwd_basename = excluded.cwd_basename,
+        machine = excluded.machine,
+        tmux_name = excluded.tmux_name,
+        claude_sid = COALESCE(excluded.claude_sid, sessions.claude_sid),
+        jsonl_path = COALESCE(excluded.jsonl_path, sessions.jsonl_path),
+        pid = excluded.pid,
+        terminal_app = COALESCE(excluded.terminal_app, sessions.terminal_app),
+        last_active_at = excluded.last_active_at,
+        closed_at = excluded.closed_at,
+        status = excluded.status,
+        message_count = MAX(sessions.message_count, excluded.message_count),
+        msg_count_first = CASE
+          WHEN sessions.msg_count_first = 0 THEN excluded.msg_count_first
+          ELSE sessions.msg_count_first
+        END,
+        msg_count_last = MAX(sessions.msg_count_last, excluded.msg_count_last),
+        summary_stale = CASE
+          WHEN excluded.message_count > sessions.summary_msg_at OR sessions.summary_msg_at IS NULL THEN 1
+          ELSE sessions.summary_stale
+        END
+    `).run(
+      session.id,
+      session.workspace,
+      session.cwd,
+      session.cwdBasename,
+      session.machine,
+      session.tmuxName,
+      session.claudeSid,
+      session.jsonlPath,
+      session.pid,
+      session.terminalApp,
+      session.launchedAt,
+      session.lastActiveAt,
+      session.closedAt,
+      session.status,
+      session.messageCount,
+      session.msgCountFirst,
+      session.msgCountLast,
+      session.summaryOne,
+      session.summaryBullets,
+      session.summaryProvider,
+      session.summaryModel,
+      session.summaryCostUsd,
+      session.summaryAt,
+      session.summaryStale ? 1 : 0,
+      session.summaryMsgAt
+    );
+
+    return this.byId(session.id) ?? session;
+  }
+
   updateStatus(id: string, status: DashboardSessionStatus, now = Date.now()): DashboardSession | null {
     assertStatus(status);
     const closedAt = status === 'closed' ? now : null;
@@ -267,6 +333,17 @@ export class SessionsDb {
   byId(id: string): DashboardSession | null {
     const row = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as SessionRow | undefined;
     return row ? rowToSession(row) : null;
+  }
+
+  byTmuxName(tmuxName: string): DashboardSession | null {
+    const row = this.db.prepare('SELECT * FROM sessions WHERE tmux_name = ? ORDER BY last_active_at DESC LIMIT 1').get(tmuxName) as SessionRow | undefined;
+    return row ? rowToSession(row) : null;
+  }
+
+  updateStatusByTmuxName(tmuxName: string, status: DashboardSessionStatus, now = Date.now()): DashboardSession | null {
+    const row = this.byTmuxName(tmuxName);
+    if (!row) return null;
+    return this.updateStatus(row.id, status, now);
   }
 
   bulkWipe(filter: BulkWipeDashboardSessionsFilter = {}): number {

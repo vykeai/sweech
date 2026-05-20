@@ -192,8 +192,13 @@ describe('tmux module', () => {
       return spawnSync;
     }
 
-    test('inside tmux: opens a new window and returns its exit status', () => {
-      const spawnSync = setupMocks({ status: 0 });
+    test('inside tmux: creates a named session and switches to it', () => {
+      const spawnSync = jest.fn(() => ({ status: 0 }));
+      const execFileSync = jest.fn((_cmd: string, args: string[]) => {
+        if (args.includes('has-session')) throw new Error('no session');
+        return '';
+      });
+      jest.mock('child_process', () => ({ execFileSync, spawnSync }));
       process.env.TMUX = '/tmp/tmux-1000/default,1234,0';
 
       const { launchInTmux } = require('../src/tmux');
@@ -204,9 +209,10 @@ describe('tmux module', () => {
       });
 
       expect(status).toBe(0);
-      const call = spawnSync.mock.calls[0] as any[];
-      expect(call[0]).toBe('tmux');
-      expect(call[1][0]).toBe('new-window');
+      const calls = spawnSync.mock.calls as any[][];
+      expect(calls[0][0]).toBe('tmux');
+      expect(calls[0][1][0]).toBe('new-session');
+      expect(calls[1][1]).toEqual(['switch-client', '-t', 'sweech-claude-pole-sweech']);
 
       delete process.env.TMUX;
     });
@@ -268,6 +274,60 @@ describe('tmux module', () => {
       expect(sessionName).toMatch(/sweech-claude-pole/);
     });
 
+    test('launchInTmux uses provided dashboard session identity', () => {
+      jest.resetModules();
+      const spawnSync = jest.fn(() => ({ status: 0 }));
+      const execFileSync = jest.fn((_cmd: string, args: string[]) => {
+        if (args.includes('has-session')) throw new Error('no session');
+        return '';
+      });
+      jest.mock('child_process', () => ({ execFileSync, spawnSync }));
+      delete process.env.TMUX;
+
+      const { launchInTmux } = require('../src/tmux');
+      launchInTmux({
+        command: 'claude',
+        args: ['--print'],
+        profileName: 'claude-pole',
+        sessionId: 'dash-1',
+        tmuxName: 'project-a-claude-pole-sweech',
+      });
+
+      const calls = spawnSync.mock.calls as any[][];
+      const newSessionCall = calls.find(c => c[1] && c[1][0] === 'new-session');
+      expect(newSessionCall).toBeDefined();
+      const sArgs: string[] = newSessionCall![1];
+      expect(sArgs[sArgs.indexOf('-s') + 1]).toBe('project-a-claude-pole-sweech');
+      const shellCmd = sArgs[sArgs.length - 1];
+      expect(shellCmd).toContain('SWEECH_SESSION_ID=dash-1');
+      expect(shellCmd).toContain('SWEECH_TMUX_NAME=project-a-claude-pole-sweech');
+      expect(shellCmd).toContain('sweech _session-launched --quiet --no-scan-jsonl');
+      expect(shellCmd).toContain('sweech _session-launched --quiet');
+      expect(shellCmd).toContain('sweech _session-closed --quiet');
+      expect(shellCmd).toContain('exit "$_SWEECH_EXIT"');
+    });
+
+    test('existing tmux session with dashboard identity only attaches', () => {
+      jest.resetModules();
+      const spawnSync = jest.fn(() => ({ status: 0 }));
+      const execFileSync = jest.fn(() => '');
+      jest.mock('child_process', () => ({ execFileSync, spawnSync }));
+      delete process.env.TMUX;
+
+      const { launchInTmux } = require('../src/tmux');
+      launchInTmux({
+        command: 'claude',
+        args: [],
+        profileName: 'claude-pole',
+        sessionId: 'dash-existing',
+        tmuxName: 'project-a-claude-pole-sweech',
+      });
+
+      const calls = spawnSync.mock.calls as any[][];
+      expect(calls).toHaveLength(1);
+      expect(calls[0][1]).toEqual(['attach-session', '-t', 'project-a-claude-pole-sweech']);
+    });
+
     test('resume fallback shell cmd includes fallback on failure', () => {
       jest.resetModules();
       const spawnSync = jest.fn(() => ({ status: 0 }));
@@ -276,7 +336,7 @@ describe('tmux module', () => {
         return '';
       });
       jest.mock('child_process', () => ({ execFileSync, spawnSync }));
-      process.env.TMUX = '/tmp/tmux/x,1,0'; // inside tmux → new-window
+      process.env.TMUX = '/tmp/tmux/x,1,0'; // inside tmux → named session + switch-client
 
       const { launchInTmux } = require('../src/tmux');
       launchInTmux({
@@ -288,9 +348,8 @@ describe('tmux module', () => {
       });
 
       const calls = spawnSync.mock.calls as any[][];
-      const newWinCall = calls.find(c => c[1] && c[1][0] === 'new-window');
-      // tmux new-window args: ['new-window', '-n', sessionName, shellCmd]
-      const shellCmd: string = newWinCall![1][3];
+      const newSessionCall = calls.find(c => c[1] && c[1][0] === 'new-session');
+      const shellCmd: string = newSessionCall![1][newSessionCall![1].length - 1];
       // Shell cmd should have fallback (||) to fresh session on resume failure
       expect(shellCmd).toContain('||');
       expect(shellCmd).toContain('--continue');

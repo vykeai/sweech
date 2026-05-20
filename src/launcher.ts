@@ -17,7 +17,8 @@ import { appendSnapshot, allAccountSparklines } from './usageHistory';
 import { recordProjectionSamples, getAccountProjection, formatEta } from './quotaProjection';
 import { sweechEvents } from './events';
 import { runHook } from './plugins';
-import { isTmuxAvailable, launchInTmux } from './tmux';
+import { baseNameForSession, isTmuxAvailable, launchInTmux } from './tmux';
+import { closeDashboardSession, createDashboardLaunchId, recordDashboardSessionLaunch } from './dashboardSessionLifecycle';
 import { scrubSecrets } from './scrubSecrets';
 import { formatExpiry } from './expiryFormat';
 
@@ -1023,6 +1024,10 @@ export async function runLauncher(): Promise<void> {
         tmux: useTmuxNow,
       });
 
+      const launchedAfterMs = Date.now();
+      const launchId = createDashboardLaunchId(entry.name, process.cwd());
+      const tmuxName = useTmuxNow ? baseNameForSession(entry.name, process.cwd()) : null;
+
       if (useTmuxNow) {
         const status = launchInTmux({
           command: entry.command,
@@ -1032,8 +1037,27 @@ export async function runLauncher(): Promise<void> {
           profileName: entry.name,
           resumeArgs: entry.resumeFlag.split(' ').filter(Boolean),
           hasResume: state.resume,
+          sessionId: launchId,
+          tmuxName,
+          launchedAfterMs,
         });
         process.exit(status);
+      }
+
+      try {
+        recordDashboardSessionLaunch({
+          id: launchId,
+          workspace: entry.name,
+          cwd: process.cwd(),
+          configDir: entry.configDir,
+          tmuxName,
+          pid: process.pid,
+          terminalApp: process.env.TERM_PROGRAM ?? 'tui',
+          source: 'tui',
+          scanJsonl: false,
+        });
+      } catch {
+        // Dashboard ledger writes are best-effort; launch must remain reliable.
       }
 
       const { spawnSync } = require('child_process');
@@ -1044,9 +1068,37 @@ export async function runLauncher(): Promise<void> {
         const freshArgs = launchArgs.filter(a => !entry.resumeFlag.split(' ').includes(a));
         console.log(chalk.dim('No conversation to resume — starting fresh session\n'));
         const retry = spawnSync(entry.command, freshArgs, { env, stdio: 'inherit' });
+        try {
+          recordDashboardSessionLaunch({
+            id: launchId,
+            workspace: entry.name,
+            cwd: process.cwd(),
+            configDir: entry.configDir,
+            tmuxName,
+            pid: process.pid,
+            terminalApp: process.env.TERM_PROGRAM ?? 'tui',
+            source: 'tui',
+            jsonlAfterMs: launchedAfterMs,
+          });
+        } catch { /* best effort */ }
+        try { closeDashboardSession({ id: launchId }); } catch { /* best effort */ }
         process.exit(retry.status || 0);
       }
 
+      try {
+        recordDashboardSessionLaunch({
+          id: launchId,
+          workspace: entry.name,
+          cwd: process.cwd(),
+          configDir: entry.configDir,
+          tmuxName,
+          pid: process.pid,
+          terminalApp: process.env.TERM_PROGRAM ?? 'tui',
+          source: 'tui',
+          jsonlAfterMs: launchedAfterMs,
+        });
+      } catch { /* best effort */ }
+      try { closeDashboardSession({ id: launchId }); } catch { /* best effort */ }
       process.exit(result.status || 0);
     };
 

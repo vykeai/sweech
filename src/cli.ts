@@ -30,8 +30,9 @@ import { runInit, isFirstRun } from './init';
 import { createProfile } from './profileCreation';
 import { createManagedProfile, getManageableProviders, removeManagedProfile, renameManagedProfile } from './profileManagement';
 import { runLauncher } from './launcher';
-import { isTmuxAvailable, launchInTmux } from './tmux';
+import { baseNameForSession, isTmuxAvailable, launchInTmux } from './tmux';
 import { buildLaunchArgs, shouldUseTmux, SWEECH_LAUNCH_FLAGS } from './launchCommand';
+import { closeDashboardSession, createDashboardLaunchId, recordDashboardSessionLaunch } from './dashboardSessionLifecycle';
 import { getAccountInfo, getKnownAccounts, setMeta } from './subscriptions';
 import { kickBackgroundRefresh } from './backgroundRefresh';
 import { recommendRoute, suggestBestAccount } from './accountSelector';
@@ -1203,21 +1204,74 @@ program
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
 
-    if (isTmuxAvailable()) {
+    const launchedAfterMs = Date.now();
+    const launchId = createDashboardLaunchId(profile?.commandName ?? cli.command, process.cwd());
+    const tmuxName = isTmuxAvailable()
+      ? baseNameForSession(profile?.commandName ?? cli.command, process.cwd())
+      : null;
+
+    if (tmuxName) {
       const status = launchInTmux({
         command: cli.command,
         args: passthroughArgs,
         configDirEnvVar: cli.configDirEnvVar,
         configDir: profileDir,
         profileName: profile?.commandName ?? cli.command,
+        sessionId: launchId,
+        tmuxName,
+        launchedAfterMs,
       });
       process.exit(status);
     }
 
     try {
+      recordDashboardSessionLaunch({
+        id: launchId,
+        workspace: profile?.commandName ?? cli.command,
+        cwd: process.cwd(),
+        configDir: profileDir,
+        tmuxName,
+        pid: process.pid,
+        terminalApp: process.env.TERM_PROGRAM ?? 'cli',
+        source: 'use',
+        scanJsonl: false,
+      });
+    } catch {
+      // Dashboard ledger writes are best-effort; launch must remain reliable.
+    }
+
+    try {
       const { execFileSync } = require('child_process');
       execFileSync(cli.command, passthroughArgs, { env, stdio: 'inherit' });
+      try {
+        recordDashboardSessionLaunch({
+          id: launchId,
+          workspace: profile?.commandName ?? cli.command,
+          cwd: process.cwd(),
+          configDir: profileDir,
+          tmuxName,
+          pid: process.pid,
+          terminalApp: process.env.TERM_PROGRAM ?? 'cli',
+          source: 'use',
+          jsonlAfterMs: launchedAfterMs,
+        });
+      } catch { /* best effort */ }
+      try { closeDashboardSession({ id: launchId }); } catch { /* best effort */ }
     } catch (error: unknown) {
+      try {
+        recordDashboardSessionLaunch({
+          id: launchId,
+          workspace: profile?.commandName ?? cli.command,
+          cwd: process.cwd(),
+          configDir: profileDir,
+          tmuxName,
+          pid: process.pid,
+          terminalApp: process.env.TERM_PROGRAM ?? 'cli',
+          source: 'use',
+          jsonlAfterMs: launchedAfterMs,
+        });
+      } catch { /* best effort */ }
+      try { closeDashboardSession({ id: launchId }); } catch { /* best effort */ }
       if (error && typeof error === 'object' && 'status' in error) {
         process.exit((error as { status: number }).status ?? 1);
       }
@@ -1516,6 +1570,10 @@ program
       forced: !!opts.force,
     });
 
+    const launchedAfterMs = Date.now();
+    const launchId = createDashboardLaunchId(profileName, process.cwd());
+    const tmuxName = useTmux ? baseNameForSession(profileName, process.cwd()) : null;
+
     if (useTmux) {
       const status = launchInTmux({
         command: cli.command,
@@ -1525,14 +1583,61 @@ program
         profileName,
         resumeArgs: (cli.resumeFlag || '--continue').split(' ').filter(Boolean),
         hasResume: !!opts.resume,
+        sessionId: launchId,
+        tmuxName,
+        launchedAfterMs,
       });
       process.exit(status);
     }
 
     try {
+      recordDashboardSessionLaunch({
+        id: launchId,
+        workspace: profileName,
+        cwd: process.cwd(),
+        configDir: profileDir,
+        tmuxName,
+        pid: process.pid,
+        terminalApp: process.env.TERM_PROGRAM ?? 'cli',
+        source: 'launch',
+        scanJsonl: false,
+      });
+    } catch {
+      // Dashboard ledger writes are best-effort; launch must remain reliable.
+    }
+
+    try {
       const { execFileSync } = require('child_process');
       execFileSync(cli.command, launchArgs, { env, stdio: 'inherit' });
+      try {
+        recordDashboardSessionLaunch({
+          id: launchId,
+          workspace: profileName,
+          cwd: process.cwd(),
+          configDir: profileDir,
+          tmuxName,
+          pid: process.pid,
+          terminalApp: process.env.TERM_PROGRAM ?? 'cli',
+          source: 'launch',
+          jsonlAfterMs: launchedAfterMs,
+        });
+      } catch { /* best effort */ }
+      try { closeDashboardSession({ id: launchId }); } catch { /* best effort */ }
     } catch (error: unknown) {
+      try {
+        recordDashboardSessionLaunch({
+          id: launchId,
+          workspace: profileName,
+          cwd: process.cwd(),
+          configDir: profileDir,
+          tmuxName,
+          pid: process.pid,
+          terminalApp: process.env.TERM_PROGRAM ?? 'cli',
+          source: 'launch',
+          jsonlAfterMs: launchedAfterMs,
+        });
+      } catch { /* best effort */ }
+      try { closeDashboardSession({ id: launchId }); } catch { /* best effort */ }
       if (error && typeof error === 'object' && 'status' in error) {
         process.exit((error as { status: number }).status ?? 1);
       }
@@ -1892,6 +1997,75 @@ program
     }
 
     console.error();
+  });
+
+program
+  .command('_session-launched', { hidden: true } as any)
+  .description('Internal: record a dashboard session launch row.')
+  .requiredOption('--workspace <name>', 'Workspace/profile name')
+  .option('--id <id>', 'Dashboard session id')
+  .option('--cwd <path>', 'Working directory')
+  .option('--config-dir <path>', 'CLI config directory')
+  .option('--tmux-name <name>', 'tmux session name')
+  .option('--pid <pid>', 'Launcher process id')
+  .option('--terminal-app <name>', 'Terminal application/source')
+  .option('--claude-sid <sid>', 'Claude conversation sid')
+  .option('--jsonl-path <path>', 'Claude jsonl path')
+  .option('--jsonl-after-ms <ms>', 'Only attach jsonls modified after this epoch millis')
+  .option('--no-scan-jsonl', 'Do not scan project jsonls')
+  .option('--quiet', 'Suppress output')
+  .action((opts: {
+    workspace: string;
+    id?: string;
+    cwd?: string;
+    configDir?: string;
+    tmuxName?: string;
+    pid?: string;
+    terminalApp?: string;
+    claudeSid?: string;
+    jsonlPath?: string;
+    jsonlAfterMs?: string;
+    scanJsonl?: boolean;
+    quiet?: boolean;
+  }) => {
+    try {
+      const jsonlAfterMs = opts.jsonlAfterMs ? Number.parseInt(opts.jsonlAfterMs, 10) : undefined;
+      const session = recordDashboardSessionLaunch({
+        id: opts.id,
+        workspace: opts.workspace,
+        cwd: opts.cwd,
+        configDir: opts.configDir,
+        tmuxName: opts.tmuxName,
+        pid: opts.pid ? Number.parseInt(opts.pid, 10) : process.pid,
+        terminalApp: opts.terminalApp,
+        claudeSid: opts.claudeSid,
+        jsonlPath: opts.jsonlPath,
+        scanJsonl: opts.scanJsonl,
+        jsonlAfterMs: Number.isFinite(jsonlAfterMs) ? jsonlAfterMs : undefined,
+      });
+      if (!opts.quiet) console.log(JSON.stringify({ id: session.id, status: session.status }));
+      process.exit(0);
+    } catch (error: unknown) {
+      if (!opts.quiet) console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('_session-closed', { hidden: true } as any)
+  .description('Internal: mark a dashboard session closed.')
+  .option('--id <id>', 'Dashboard session id')
+  .option('--tmux-name <name>', 'tmux session name')
+  .option('--quiet', 'Suppress output')
+  .action((opts: { id?: string; tmuxName?: string; quiet?: boolean }) => {
+    try {
+      const session = closeDashboardSession({ id: opts.id, tmuxName: opts.tmuxName });
+      if (!opts.quiet) console.log(JSON.stringify({ id: session?.id ?? null, status: session?.status ?? null }));
+      process.exit(0);
+    } catch (error: unknown) {
+      if (!opts.quiet) console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exit(1);
+    }
   });
 
 // Hidden: regenerate session pointer files for past conversations

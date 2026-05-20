@@ -415,7 +415,10 @@ describe('ConfigManager', () => {
       const scriptContent = callArgs[1] as string;
       expect(scriptContent).toContain('#!/bin/bash');
       expect(scriptContent).toContain('CLAUDE_CONFIG_DIR');
-      expect(scriptContent).toContain('exec "claude" "${ARGS[@]}"');
+      expect(scriptContent).toContain('"claude" "${ARGS[@]}"');
+      expect(scriptContent).toContain('sweech _session-launched');
+      expect(scriptContent).toContain('sweech _session-closed');
+      expect(scriptContent).toContain('exit "$_SWEECH_EXIT"');
       expect(scriptContent).toContain('--yolo');
       expect(scriptContent).toContain('--dangerously-skip-permissions');
 

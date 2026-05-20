@@ -163,6 +163,42 @@ describe('SessionsDb', () => {
     expect(row).toMatchObject({ status: 'closed', closedAt: 2000, lastActiveAt: 2000 });
   });
 
+  test('upserts launch rows idempotently without replacing original launch time', () => {
+    db.upsert({
+      id: 's1',
+      workspace: 'claude-work',
+      cwd: path.join(tmp, 'project-a'),
+      tmuxName: 'project-a-claude-work-sweech',
+      launchedAt: 1000,
+      lastActiveAt: 1000,
+      pid: 111,
+    });
+    const row = db.upsert({
+      id: 's1',
+      workspace: 'claude-work',
+      cwd: path.join(tmp, 'project-a'),
+      tmuxName: 'project-a-claude-work-sweech',
+      launchedAt: 2000,
+      lastActiveAt: 2000,
+      pid: 222,
+    });
+
+    expect(row).toMatchObject({
+      id: 's1',
+      launchedAt: 1000,
+      lastActiveAt: 2000,
+      pid: 222,
+      status: 'live',
+      tmuxName: 'project-a-claude-work-sweech',
+    });
+  });
+
+  test('updates status by tmux name', () => {
+    insert('s1', { tmuxName: 'project-a-claude-work-sweech' });
+    const row = db.updateStatusByTmuxName('project-a-claude-work-sweech', 'closed', 2000);
+    expect(row).toMatchObject({ id: 's1', status: 'closed', closedAt: 2000 });
+  });
+
   test('updates status away from closed and clears closed_at', () => {
     insert('s1', { status: 'closed', closedAt: 1500 });
     const row = db.updateStatus('s1', 'crash-recoverable', 2000);

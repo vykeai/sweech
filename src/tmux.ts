@@ -48,19 +48,19 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 export function nameForSession(workspace: string, cwd: string, sid?: string | null): string {
-  const project = safeSegment(path.basename(cwd), 'workspace');
-  const commandName = safeSegment(workspace, 'default');
-  const baseName = `${project}-${commandName}-sweech`;
+  const baseName = baseNameForSession(workspace, cwd);
 
   if (!tmuxSessionExists(baseName)) return baseName;
 
-  const sid8 = safeSegment((sid || '').slice(0, 8), 'collision');
+  const sid8 = safeSegment(sid || '', 'collision').slice(-8) || 'collision';
   return `${baseName}-${sid8}`;
+}
+
+export function baseNameForSession(workspace: string, cwd: string): string {
+  const project = safeSegment(path.basename(cwd), 'workspace');
+  const commandName = safeSegment(workspace, 'default');
+  return `${project}-${commandName}-sweech`;
 }
 
 export interface WrappedTmuxCommand {
@@ -146,6 +146,9 @@ export interface TmuxLaunchOpts {
   profileName: string;
   resumeArgs?: string[];
   hasResume?: boolean;
+  sessionId?: string | null;
+  tmuxName?: string | null;
+  launchedAfterMs?: number | null;
 }
 
 /**
@@ -165,40 +168,104 @@ export function launchInTmux(opts: TmuxLaunchOpts): number {
     profileName,
     resumeArgs = [],
     hasResume = false,
+    sessionId = null,
+    tmuxName = null,
+    launchedAfterMs = null,
   } = opts;
 
-  const strippedProfile = profileName.replace(new RegExp(`^${escapeRegex(command)}-?`, 'i'), '') || null;
-  const safeProfile = strippedProfile
-    ? strippedProfile.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 30)
-    : null;
-  const safeCommand = command.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 30) || 'cli';
-  const safeDir = path.basename(process.cwd()).replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 20);
-  const sessionName = safeProfile
-    ? `sweech-${safeCommand}-${safeProfile}-${safeDir}`
-    : `sweech-${safeCommand}-${safeDir}`;
+  const sessionName = tmuxName || baseNameForSession(profileName, process.cwd());
 
   const envParts: string[] = [];
   if (configDirEnvVar && configDir) {
     envParts.push(`${configDirEnvVar}=${shellQuote(configDir)}`);
   }
+  if (sessionId) {
+    envParts.push(`SWEECH_SESSION_ID=${shellQuote(sessionId)}`);
+  }
+  envParts.push(`SWEECH_TMUX_NAME=${shellQuote(sessionName)}`);
+  envParts.push(`SWEECH_WORKSPACE_NAME=${shellQuote(profileName)}`);
+  if (launchedAfterMs) {
+    envParts.push(`SWEECH_LAUNCHED_AFTER_MS=${shellQuote(String(launchedAfterMs))}`);
+  }
 
   const cmdParts = [...envParts, shellQuote(command), ...args.map(shellQuote)].join(' ');
+  const openSessionCommand = sessionId
+    ? [
+        'if command -v sweech >/dev/null 2>&1; then',
+        'sweech _session-launched --quiet --no-scan-jsonl',
+        `--id ${shellQuote(sessionId)}`,
+        `--workspace ${shellQuote(profileName)}`,
+        '--cwd "$PWD"',
+        configDir ? `--config-dir ${shellQuote(configDir)}` : '',
+        `--tmux-name ${shellQuote(sessionName)}`,
+        '--pid "$$"',
+        '--terminal-app "${TERM_PROGRAM:-tmux}"',
+        '2>/dev/null || true; fi',
+      ].filter(Boolean).join(' ')
+    : '';
+  const refreshSessionCommand = sessionId
+    ? [
+          'sweech _session-launched --quiet',
+          `--id ${shellQuote(sessionId)}`,
+          `--workspace ${shellQuote(profileName)}`,
+          '--cwd "$PWD"',
+          configDir ? `--config-dir ${shellQuote(configDir)}` : '',
+          `--tmux-name ${shellQuote(sessionName)}`,
+          '--pid "$$"',
+          '--terminal-app "${TERM_PROGRAM:-tmux}"',
+          launchedAfterMs ? `--jsonl-after-ms ${shellQuote(String(launchedAfterMs))}` : '',
+        ].filter(Boolean).join(' ')
+    : '';
+  const closeParts = sessionId
+    ? [
+        '_SWEECH_EXIT=$?',
+        'if command -v sweech >/dev/null 2>&1; then',
+        `${refreshSessionCommand} 2>/dev/null || true`,
+        `sweech _session-closed --quiet --id ${shellQuote(sessionId)} --tmux-name ${shellQuote(sessionName)} 2>/dev/null || true`,
+        'fi',
+        'exit "$_SWEECH_EXIT"',
+      ].join('; ')
+    : '';
 
   let shellCmd: string;
+  let bodyCmd: string;
   if (hasResume && resumeArgs.length > 0) {
     const freshArgs = args.filter(a => !resumeArgs.includes(a));
     const freshCmd = [...envParts, shellQuote(command), ...freshArgs.map(shellQuote)].join(' ');
-    shellCmd =
-      `unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; ` +
-      `${cmdParts} || (echo 'No conversation to resume — starting fresh session'; ${freshCmd})`;
+    bodyCmd = `${cmdParts} || (echo 'No conversation to resume — starting fresh session'; ${freshCmd})`;
   } else {
-    shellCmd = `unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT; ${cmdParts}`;
+    bodyCmd = cmdParts;
   }
+  shellCmd = [
+    'unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT',
+    openSessionCommand,
+    bodyCmd,
+    closeParts,
+  ].filter(Boolean).join('; ');
 
   if (isInsideTmux()) {
-    const result = spawnSync('tmux', ['new-window', '-n', sessionName, shellCmd], {
-      stdio: 'inherit',
+    if (tmuxSessionExists(sessionName)) {
+      process.stderr.write(`sweech: switching to existing tmux session '${sessionName}'\n`);
+      const result = spawnSync('tmux', ['switch-client', '-t', sessionName], {
+        stdio: 'inherit',
+      });
+      return result.status ?? 0;
+    }
+
+    const createResult = spawnSync('tmux', ['new-session', '-d', '-s', sessionName, shellCmd], {
+      encoding: 'utf8',
+      stdio: 'pipe',
     });
+    if (createResult.error) {
+      process.stderr.write(`sweech: failed to create tmux session '${sessionName}': ${createResult.error.message}\n`);
+      return 1;
+    }
+    if ((createResult.status ?? 0) !== 0) {
+      const stderr = String(createResult.stderr || '').trim();
+      process.stderr.write(`sweech: failed to create tmux session '${sessionName}'${stderr ? `: ${stderr}` : ''}\n`);
+      return createResult.status ?? 1;
+    }
+    const result = spawnSync('tmux', ['switch-client', '-t', sessionName], { stdio: 'inherit' });
     return result.status ?? 0;
   }
 

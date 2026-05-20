@@ -414,6 +414,26 @@ describe('createWrapperScript embeds gated pre-launch maintenance', () => {
     // Pointer-regen call must reference --cwd "$PWD".
     expect(wrapper).toMatch(/sweech _ensure-session-pointers .*--cwd "\$PWD"/);
   });
+
+  test('wrapper records and closes dashboard session ledger rows', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    const cli = {
+      name: 'claude',
+      command: 'claude',
+      displayName: 'Claude Code',
+      configDirEnvVar: 'CLAUDE_CONFIG_DIR',
+    } as any;
+    cfg.createWrapperScript('test-wrapper', cli);
+    const wrapper = fs.readFileSync(path.join(cfg.getBinDir(), 'test-wrapper'), 'utf-8');
+    expect(wrapper).toContain('sweech _session-launched');
+    expect(wrapper).toContain('--no-scan-jsonl');
+    expect(wrapper).toContain('--jsonl-after-ms "$_SWEECH_LAUNCHED_AFTER_MS"');
+    expect(wrapper).toContain('--workspace "test-wrapper"');
+    expect(wrapper).toContain('--config-dir');
+    expect(wrapper).toContain('sweech _session-closed');
+    expect(wrapper).toContain('exit "$_SWEECH_EXIT"');
+  });
 });
 
 describe('sweech run prelaunch maintenance', () => {
