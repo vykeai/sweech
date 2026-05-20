@@ -11,7 +11,7 @@ process.title = 'sweech'
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { DEFAULT_DAEMON_PORT, envOrDefaultDaemonPort } from './constants';
-import { ConfigManager, resolveApiKey } from './config';
+import { ConfigManager, resolveApiKey, type ProfileConfig } from './config';
 import { getProvider, getProviderList, PROVIDERS, displayGroup, isExternalProvider, parseCliType, type CLIType } from './providers';
 import { interactiveAddProvider, confirmRemoveProvider } from './interactive';
 import { getDefaultCLI, getCLI, SUPPORTED_CLIS } from './clis';
@@ -85,6 +85,18 @@ if (completeIdx !== -1) {
 }
 
 const program = new Command();
+
+function prelaunchShareHeal(config: ConfigManager, profile: ProfileConfig | undefined): void {
+  if (!profile?.sharedWith) return;
+  try {
+    if (
+      !config.isProfileShareFingerprintCurrent(profile.commandName, profile.cliType)
+      || !config.isProfileShareTopologyHealthy(profile.commandName)
+    ) {
+      config.healProfileSharedDirs(profile.commandName);
+    }
+  } catch { /* silent — heal must never block launch */ }
+}
 
 program
   .name('sweech')
@@ -1175,13 +1187,7 @@ program
     }
     const cli = cliConfig!; // safe: guarded above
 
-    // T-077: always-on share-topology heal for the resolved profile.
-    // Fast path is sub-millisecond when nothing's wrong (single lstat
-    // per shareable). Best-effort: never block launch on heal failure.
-    if (profile && profile.sharedWith) {
-      try { config.healProfileSharedDirs(profile.commandName); }
-      catch { /* silent — heal must never block launch */ }
-    }
+    prelaunchShareHeal(config, profile);
 
     const profileDir = profile
       ? config.getProfileDir(profile.commandName)
@@ -1495,12 +1501,7 @@ program
     const profileName = profile?.commandName ?? cli.command;
     const useTmux = shouldUseTmux(isTmuxAvailable(), opts);
 
-    // T-077 hot-path heal: re-link drifted shareables before launch.
-    // Best-effort + silent; never blocks the user.
-    if (profile && profile.sharedWith) {
-      try { config.healProfileSharedDirs(profile.commandName); }
-      catch { /* swallow */ }
-    }
+    prelaunchShareHeal(config, profile);
 
     logLaunch({
       source: useTmux ? 'tmux' : 'cli',
@@ -4703,6 +4704,14 @@ program
       process.exit(1);
     }
 
+    if (flags.account || flags.profile) {
+      const config = new ConfigManager();
+      const profiles = config.getProfiles();
+      const profile = (flags.account ? profiles.find(p => p.commandName === flags.account) : undefined)
+        ?? (flags.profile ? profiles.find(p => p.commandName === flags.profile) : undefined);
+      prelaunchShareHeal(config, profile);
+    }
+
     // Build request body
     const body: Record<string, unknown> = {
       prompt,
@@ -5165,9 +5174,7 @@ program
           console.error(chalk.red(`Unknown cliType '${result.cliType}' — cannot --exec`));
           process.exit(1);
         }
-        // T-077 hot-path heal: ensure the chosen profile's share links
-        // are intact before exec'ing. Best-effort + silent.
-        try { config.healProfileSharedDirs(result.account); } catch { /* swallow */ }
+        prelaunchShareHeal(config, config.getProfiles().find(p => p.commandName === result.account));
         const { spawn } = require('child_process');
         const settingsEnv = readSettingsEnv(dir);
         const env = buildAutoExecEnv(cli, dir, process.env, settingsEnv);
@@ -5228,8 +5235,7 @@ program
         console.error(chalk.red(`Unknown cliType '${pick.cliType}' — cannot --exec`));
         process.exit(1);
       }
-      // T-077 hot-path heal: re-link any drifted shareables before exec.
-      try { config.healProfileSharedDirs(pick.commandName); } catch { /* silent */ }
+      prelaunchShareHeal(config, config.getProfiles().find(p => p.commandName === pick.commandName));
       const { spawn } = require('child_process');
       // Hoist the picked profile's settings.env so codex sees its API key
       // at runtime — direct spawn bypasses the wrapper script which would
@@ -5359,11 +5365,10 @@ program
       // Record AFTER we've decided to actually rotate (spawn), so audit
       // history reflects real switches not just dry-run lookups.
       recordFailover(from ?? '(unspecified)', pick.commandName, target.reason);
-      // T-077 hot-path heal: re-link drifted shareables before spawning.
-      try {
+      {
         const cfg = new ConfigManager();
-        cfg.healProfileSharedDirs(pick.commandName);
-      } catch { /* silent */ }
+        prelaunchShareHeal(cfg, cfg.getProfiles().find(p => p.commandName === pick.commandName));
+      }
       const { spawn } = require('child_process');
       // Hoist the picked profile's settings.env so codex sees its API key
       // at runtime — direct spawn bypasses the wrapper script which would

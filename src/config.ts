@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as crypto from 'crypto';
 import { execSync } from 'child_process';
 import { ProviderConfig } from './providers';
 import { CLIConfig } from './clis';
@@ -378,6 +379,127 @@ export class ConfigManager {
   public getLogsDir(): string { return this.logsDir; }
   public getBackupsDir(): string { return this.backupsDir; }
   public getShareSnapshotsDir(): string { return this.shareSnapshotsDir; }
+
+  public getProfileShareFingerprintPath(commandName: string): string {
+    return path.join(this.getProfileDir(commandName), '.sweech-share-fingerprint');
+  }
+
+  public buildProfileShareFingerprint(commandName: string, cliType?: string): string {
+    const profile = this.getProfiles().find(p => p.commandName === commandName);
+    const effectiveCliType = cliType || profile?.cliType || 'claude';
+    const payload = {
+      cliType: effectiveCliType,
+      claudeDirs: SHAREABLE_DIRS,
+      claudeFiles: SHAREABLE_FILES,
+      codexDirs: CODEX_SHAREABLE_DIRS,
+      codexFiles: CODEX_SHAREABLE_FILES,
+      codexDbs: CODEX_SHAREABLE_DBS,
+      kimiDirs: KIMI_SHAREABLE_DIRS,
+      kimiFiles: KIMI_SHAREABLE_FILES,
+    };
+    return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  }
+
+  public isProfileShareFingerprintCurrent(commandName: string, cliType?: string): boolean {
+    try {
+      const expected = this.buildProfileShareFingerprint(commandName, cliType);
+      return fs.readFileSync(this.getProfileShareFingerprintPath(commandName), 'utf-8').trim() === expected;
+    } catch {
+      return false;
+    }
+  }
+
+  public writeProfileShareFingerprint(commandName: string, cliType?: string): void {
+    const profileDir = this.getProfileDir(commandName);
+    if (!fs.existsSync(profileDir)) return;
+    const fingerprintPath = this.getProfileShareFingerprintPath(commandName);
+    const nofollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+    try {
+      const stat = fs.lstatSync(fingerprintPath);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1) return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return;
+    }
+    const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | nofollow;
+    const fd = fs.openSync(fingerprintPath, flags, 0o600);
+    try {
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile() || stat.nlink > 1) return;
+      fs.ftruncateSync(fd, 0);
+      fs.writeFileSync(fd, this.buildProfileShareFingerprint(commandName, cliType) + '\n', 'utf-8');
+      fs.fchmodSync(fd, 0o600);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  private logShareHealAudit(commandName: string, repaired: number): void {
+    if (repaired <= 0) return;
+    try {
+      const auditPath = path.join(this.configDir, 'audit.log');
+      const nofollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+      try {
+        const stat = fs.lstatSync(auditPath);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1) return;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return;
+      }
+      const safeName = commandName.replace(/[\n\r]/g, '');
+      const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | nofollow;
+      const fd = fs.openSync(auditPath, flags, 0o600);
+      try {
+        const stat = fs.fstatSync(fd);
+        if (!stat.isFile() || stat.nlink > 1) return;
+        fs.writeSync(fd, `${new Date().toISOString()} share-heal profile=${safeName} repaired=${repaired}\n`, undefined, 'utf-8');
+        fs.fchmodSync(fd, 0o600);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch { /* audit logging is best-effort */ }
+  }
+
+  public isProfileShareTopologyHealthy(commandName: string): boolean {
+    const profile = this.getProfiles().find(p => p.commandName === commandName);
+    if (!profile || !profile.sharedWith) return true;
+
+    const profileDir = this.getProfileDir(commandName);
+    if (!fs.existsSync(profileDir)) return false;
+
+    const isCodex = profile.cliType === 'codex'
+      || profile.sharedWith === 'codex'
+      || commandName.startsWith('codex');
+    const isKimi = profile.cliType === 'kimi'
+      || profile.sharedWith === 'kimi'
+      || commandName.startsWith('kimi');
+    const defaultDirs = ['claude', 'codex', 'kimi'];
+    const masterDir = defaultDirs.includes(profile.sharedWith)
+      ? path.join(os.homedir(), `.${profile.sharedWith}`)
+      : this.getProfileDir(profile.sharedWith);
+    if (!fs.existsSync(masterDir)) return false;
+
+    const dirs = isCodex ? CODEX_SHAREABLE_DIRS
+      : isKimi ? KIMI_SHAREABLE_DIRS
+      : SHAREABLE_DIRS;
+    const files = isCodex ? [...CODEX_SHAREABLE_FILES, ...CODEX_SHAREABLE_DBS]
+      : isKimi ? KIMI_SHAREABLE_FILES
+      : SHAREABLE_FILES;
+    const optionalMissingFiles = isCodex ? CODEX_SHAREABLE_DBS : [];
+
+    for (const item of [...dirs, ...files]) {
+      const linkPath = path.join(profileDir, item);
+      const targetPath = path.join(masterDir, item);
+      if (!fs.existsSync(targetPath) && (optionalMissingFiles as readonly string[]).includes(item)) continue;
+      if (!fs.existsSync(targetPath)) return false;
+      try {
+        const stat = fs.lstatSync(linkPath);
+        if ((optionalMissingFiles as readonly string[]).includes(item) && !stat.isSymbolicLink()) continue;
+        if (!stat.isSymbolicLink() || fs.readlinkSync(linkPath) !== targetPath) return false;
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  }
 
   /**
    * Migrate any plaintext apiKey fields from config.json to the platform
@@ -823,6 +945,7 @@ export class ConfigManager {
       // Fast path: already the correct symlink → skip.
       try {
         const stat = fs.lstatSync(linkPath);
+        if ((sqliteFiles as readonly string[]).includes(item) && !stat.isSymbolicLink()) continue;
         if (stat.isSymbolicLink() && fs.readlinkSync(linkPath) === targetPath) {
           if (fs.existsSync(targetPath)) continue;
           if ((dirs as readonly string[]).includes(item)) {
@@ -878,6 +1001,10 @@ export class ConfigManager {
       } catch { /* best-effort — skip */ }
     }
 
+    if (this.isProfileShareTopologyHealthy(commandName)) {
+      this.writeProfileShareFingerprint(commandName, profile.cliType);
+    }
+    this.logShareHealAudit(commandName, repaired);
     return repaired;
   }
 
@@ -1595,6 +1722,7 @@ export class ConfigManager {
     const profileDir = this.getProfileDir(commandName);
     const wrapperPath = path.join(this.binDir, commandName);
     const usageFile = path.join(this.configDir, 'usage.json');
+    const profile = this.getProfiles().find(p => p.commandName === commandName);
 
     // Escape all interpolated values for safe bash inclusion
     const eCommandName = bashEscape(commandName);
@@ -1603,6 +1731,30 @@ export class ConfigManager {
     const eCliCommand = bashEscape(cli.command);
     const eProfileDir = bashEscape(profileDir);
     const eConfigDirEnvVar = bashEscape(cli.configDirEnvVar);
+    const eShareHealEnabled = profile?.sharedWith ? '1' : '0';
+    const defaultDirs = ['claude', 'codex', 'kimi'];
+    const masterDir = profile?.sharedWith
+      ? defaultDirs.includes(profile.sharedWith)
+        ? path.join(os.homedir(), `.${profile.sharedWith}`)
+        : this.getProfileDir(profile.sharedWith)
+      : '';
+    const shareDriftChecks = profile?.sharedWith
+      ? [
+          ...(profile.cliType === 'codex' ? CODEX_SHAREABLE_DIRS : profile.cliType === 'kimi' ? KIMI_SHAREABLE_DIRS : SHAREABLE_DIRS)
+            .map(item => ({ item, optional: false })),
+          ...(profile.cliType === 'codex' ? CODEX_SHAREABLE_FILES : profile.cliType === 'kimi' ? KIMI_SHAREABLE_FILES : SHAREABLE_FILES)
+            .map(item => ({ item, optional: false })),
+          ...(profile.cliType === 'codex' ? CODEX_SHAREABLE_DBS : [])
+            .map(item => ({ item, optional: true })),
+        ].map(({ item, optional }) => {
+          const eItem = bashEscape(item);
+          const eTarget = bashEscape(path.join(masterDir, item));
+          if (optional) {
+            return `[ ! -e "${eTarget}" ] || { [ -e "${eProfileDir}/${eItem}" ] && [ ! -L "${eProfileDir}/${eItem}" ]; } || [ "$(readlink "${eProfileDir}/${eItem}" 2>/dev/null)" = "${eTarget}" ] || _NEEDS_HEAL=1`;
+          }
+          return `[ -e "${eTarget}" ] && [ "$(readlink "${eProfileDir}/${eItem}" 2>/dev/null)" = "${eTarget}" ] || _NEEDS_HEAL=1`;
+        }).join('\n')
+      : '';
 
     // Create bash wrapper script with usage tracking
     const wrapperContent = `#!/bin/bash
@@ -1647,8 +1799,8 @@ esac
 # Both subprocess calls are best-effort and never block launch.
 _NEEDS_HEAL=0
 _NEEDS_POINTERS=0
-[ -L "${eProfileDir}/projects" ] || _NEEDS_HEAL=1
-[ -L "${eProfileDir}/sessions" ] || _NEEDS_HEAL=1
+_SHARE_HEAL_ENABLED=${eShareHealEnabled}
+${shareDriftChecks}
 # Quick pointer-drift check: scan current cwd's project dir for any
 # jsonl whose sessionId doesn't appear in any session pointer file.
 _ENCODED_CWD=\$(printf '%s' "\$PWD" | tr '/' '-')

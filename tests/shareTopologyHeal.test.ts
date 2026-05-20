@@ -37,7 +37,8 @@ jest.mock('node:os', () => {
 import * as os from 'os';
 function setHomedir(p: string | null): void { __mockHome = p; }
 
-import { ConfigManager } from '../src/config';
+import { ConfigManager, type ProfileConfig } from '../src/config';
+import type { CLIConfig } from '../src/clis';
 
 function isolateHome(): string {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sweech-heal-test-'));
@@ -308,25 +309,91 @@ describe('healShareTopology', () => {
 });
 
 describe('createWrapperScript embeds gated pre-launch maintenance', () => {
-  test('wrapper template gates _heal-profile behind bash lstat pre-check', () => {
+  test('wrapper template gates _heal-profile behind target-aware drift checks', () => {
     isolateHome();
     const cfg = new ConfigManager();
-    const cli = {
+    const profile: ProfileConfig = {
+      name: 'test-wrapper',
+      commandName: 'test-wrapper',
+      cliType: 'claude',
+      provider: 'anthropic',
+      createdAt: '2026-05-20T00:00:00Z',
+      sharedWith: 'claude',
+    };
+    cfg.writeProfiles([profile]);
+    const cli: CLIConfig = {
       name: 'claude',
       command: 'claude',
       displayName: 'Claude Code',
       configDirEnvVar: 'CLAUDE_CONFIG_DIR',
-    } as any;
+      description: 'Anthropic Claude Code CLI',
+    };
     cfg.createWrapperScript('test-wrapper', cli);
     const wrapper = fs.readFileSync(path.join(cfg.getBinDir(), 'test-wrapper'), 'utf-8');
     expect(wrapper).toContain('sweech _heal-profile');
     expect(wrapper).toContain('_NEEDS_HEAL=0');
+    expect(wrapper).toContain('_SHARE_HEAL_ENABLED=1');
+    expect(wrapper).not.toContain('_SHARE_FP=');
+    expect(wrapper).toContain('readlink');
+    expect(wrapper).toContain(path.join(os.homedir(), '.claude', 'projects'));
     // Heal call must be inside the `if [ "$_NEEDS_HEAL" = "1" ]` block.
     const healCallIdx = wrapper.indexOf('sweech _heal-profile');
     const preceding = wrapper.slice(0, healCallIdx);
     expect(preceding).toMatch(/if \[ "\$_NEEDS_HEAL" = "1" \]/);
     // Must be best-effort.
     expect(wrapper.slice(healCallIdx, healCallIdx + 200)).toContain('|| true');
+  });
+
+  test('wrapper template skips share heal gate for non-shared profiles', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    const cli: CLIConfig = {
+      name: 'claude',
+      command: 'claude',
+      displayName: 'Claude Code',
+      configDirEnvVar: 'CLAUDE_CONFIG_DIR',
+      description: 'Anthropic Claude Code CLI',
+    };
+    cfg.createWrapperScript('test-wrapper', cli);
+    const wrapper = fs.readFileSync(path.join(cfg.getBinDir(), 'test-wrapper'), 'utf-8');
+    expect(wrapper).toContain('_SHARE_HEAL_ENABLED=0');
+    expect(wrapper).toContain('sweech _heal-profile');
+  });
+
+  test('wrapper template checks optional codex shared db when master db exists', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    const profile: ProfileConfig = {
+      name: 'codex-test',
+      commandName: 'codex-test',
+      cliType: 'codex',
+      provider: 'openai',
+      createdAt: '2026-05-20T00:00:00Z',
+      sharedWith: 'codex',
+    };
+    cfg.writeProfiles([profile]);
+    const cli: CLIConfig = {
+      name: 'codex',
+      command: 'codex',
+      displayName: 'Codex',
+      configDirEnvVar: 'CODEX_HOME',
+      description: 'OpenAI Codex CLI',
+    };
+    cfg.createWrapperScript('codex-test', cli);
+    const wrapper = fs.readFileSync(path.join(cfg.getBinDir(), 'codex-test'), 'utf-8');
+    expect(wrapper).toContain('logs_1.sqlite');
+    expect(wrapper).toContain('[ ! -e ');
+    expect(wrapper).toContain('[ ! -L ');
+  });
+
+  test('share fingerprint ignores package version so wrappers survive upgrades', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    const first = cfg.buildProfileShareFingerprint('test-wrapper', 'claude');
+    const versionShim = cfg as unknown as { readSweechVersion: () => string };
+    versionShim.readSweechVersion = () => '999.999.999';
+
+    expect(cfg.buildProfileShareFingerprint('test-wrapper', 'claude')).toBe(first);
   });
 
   test('wrapper template gates _ensure-session-pointers behind cwd jsonl scan', () => {
@@ -346,6 +413,44 @@ describe('createWrapperScript embeds gated pre-launch maintenance', () => {
     expect(wrapper).toContain('.jsonl');
     // Pointer-regen call must reference --cwd "$PWD".
     expect(wrapper).toMatch(/sweech _ensure-session-pointers .*--cwd "\$PWD"/);
+  });
+});
+
+describe('sweech run prelaunch maintenance', () => {
+  test('prelaunch helper checks topology even when fingerprint is current', () => {
+    const cliSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'cli.ts'), 'utf-8');
+    const helperBlock = cliSource.slice(
+      cliSource.indexOf('function prelaunchShareHeal'),
+      cliSource.indexOf('program', cliSource.indexOf('function prelaunchShareHeal')),
+    );
+    expect(helperBlock).toContain('isProfileShareFingerprintCurrent');
+    expect(helperBlock).toContain('isProfileShareTopologyHealthy');
+  });
+
+  test('run resolves local --account before --profile for share heal', () => {
+    const cliSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'cli.ts'), 'utf-8');
+    const runBlock = cliSource.slice(
+      cliSource.indexOf(".command('run <prompt>')"),
+      cliSource.indexOf('// Build request body'),
+    );
+    expect(runBlock).toContain('flags.account || flags.profile');
+    expect(runBlock).toMatch(/flags\.account[\s\S]*profiles\.find\(p => p\.commandName === flags\.account\)[\s\S]*flags\.profile[\s\S]*profiles\.find\(p => p\.commandName === flags\.profile\)/);
+    expect(runBlock).toContain('prelaunchShareHeal(config, profile)');
+  });
+});
+
+describe('launcher prelaunch maintenance', () => {
+  test('interactive launcher heals shared entries before spawning native CLI', () => {
+    const launcherSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'launcher.ts'), 'utf-8');
+    const launchStart = launcherSource.indexOf('const launch = async () =>');
+    const launchBlock = launcherSource.slice(
+      launchStart,
+      launcherSource.indexOf('const preview = buildCommandPreview', launchStart),
+    );
+    expect(launchBlock).toContain('entry.sharedWith');
+    expect(launchBlock).toContain('isProfileShareFingerprintCurrent');
+    expect(launchBlock).toContain('isProfileShareTopologyHealthy');
+    expect(launchBlock).toContain('healProfileSharedDirs(entry.name)');
   });
 });
 
@@ -457,5 +562,161 @@ describe('healProfileSharedDirs (hot-path)', () => {
     expect(repaired).toBeGreaterThan(0);
     expect(fs.lstatSync(path.join(profileDir, 'projects')).isSymbolicLink()).toBe(true);
     expect(fs.lstatSync(path.join(profileDir, 'sessions')).isSymbolicLink()).toBe(true);
+  });
+
+  test('writes share fingerprint and audit log after repairing drift', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+
+    fs.mkdirSync(path.join(home, '.claude', 'projects'), { recursive: true });
+    const profileDir = path.join(home, '.test-fingerprint');
+    fs.mkdirSync(profileDir);
+    const profile: ProfileConfig = {
+      name: 'test-fingerprint',
+      commandName: 'test-fingerprint',
+      cliType: 'claude',
+      provider: 'anthropic',
+      createdAt: '2026-05-20T00:00:00Z',
+      sharedWith: 'claude',
+    };
+    cfg.writeProfiles([profile]);
+
+    expect(cfg.isProfileShareFingerprintCurrent('test-fingerprint')).toBe(false);
+    const repaired = cfg.healProfileSharedDirs('test-fingerprint');
+
+    expect(repaired).toBeGreaterThan(0);
+    expect(cfg.isProfileShareFingerprintCurrent('test-fingerprint')).toBe(true);
+    const audit = fs.readFileSync(path.join(home, '.sweech', 'audit.log'), 'utf-8');
+    expect(audit).toContain('share-heal profile=test-fingerprint');
+    expect(audit).toMatch(/repaired=\d+/);
+  });
+
+  test('topology health detects drift after fingerprint was written', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+
+    fs.mkdirSync(path.join(home, '.claude', 'projects'), { recursive: true });
+    const profileDir = path.join(home, '.test-drift');
+    fs.mkdirSync(profileDir);
+    const profile: ProfileConfig = {
+      name: 'test-drift',
+      commandName: 'test-drift',
+      cliType: 'claude',
+      provider: 'anthropic',
+      createdAt: '2026-05-20T00:00:00Z',
+      sharedWith: 'claude',
+    };
+    cfg.writeProfiles([profile]);
+
+    cfg.healProfileSharedDirs('test-drift');
+    expect(cfg.isProfileShareFingerprintCurrent('test-drift')).toBe(true);
+    fs.unlinkSync(path.join(profileDir, 'projects'));
+
+    expect(cfg.isProfileShareFingerprintCurrent('test-drift')).toBe(true);
+    expect(cfg.isProfileShareTopologyHealthy('test-drift')).toBe(false);
+  });
+
+  test('does not replace a real codex transcript db during hot-path heal', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+    const masterDir = path.join(home, '.codex');
+    const profileDir = path.join(home, '.codex-real-db');
+    fs.mkdirSync(path.join(masterDir, 'sessions'), { recursive: true });
+    fs.mkdirSync(profileDir);
+    fs.writeFileSync(path.join(masterDir, 'logs_1.sqlite'), 'master');
+    fs.writeFileSync(path.join(profileDir, 'logs_1.sqlite'), 'local');
+    cfg.writeProfiles([{
+      name: 'codex-real-db',
+      commandName: 'codex-real-db',
+      cliType: 'codex',
+      provider: 'openai',
+      createdAt: '2026-05-20T00:00:00Z',
+      sharedWith: 'codex',
+    }]);
+
+    cfg.healProfileSharedDirs('codex-real-db');
+
+    const dbPath = path.join(profileDir, 'logs_1.sqlite');
+    expect(fs.lstatSync(dbPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(dbPath, 'utf-8')).toBe('local');
+    expect(cfg.isProfileShareTopologyHealthy('codex-real-db')).toBe(true);
+    expect(cfg.isProfileShareFingerprintCurrent('codex-real-db')).toBe(true);
+  });
+
+  test('does not follow symlinked share fingerprint path', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+    const profileDir = path.join(home, '.test-fp-symlink');
+    fs.mkdirSync(profileDir);
+    const victim = path.join(home, 'victim.txt');
+    fs.writeFileSync(victim, 'keep');
+    fs.symlinkSync(victim, path.join(profileDir, '.sweech-share-fingerprint'));
+
+    cfg.writeProfileShareFingerprint('test-fp-symlink', 'claude');
+
+    expect(fs.readFileSync(victim, 'utf-8')).toBe('keep');
+  });
+
+  test('does not truncate hardlinked share fingerprint path', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+    const profileDir = path.join(home, '.test-fp-hardlink');
+    fs.mkdirSync(profileDir);
+    const victim = path.join(home, 'hardlink-victim.txt');
+    fs.writeFileSync(victim, 'keep');
+    fs.linkSync(victim, path.join(profileDir, '.sweech-share-fingerprint'));
+
+    cfg.writeProfileShareFingerprint('test-fp-hardlink', 'claude');
+
+    expect(fs.readFileSync(victim, 'utf-8')).toBe('keep');
+  });
+
+  test('does not follow symlinked audit log path', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+
+    fs.mkdirSync(path.join(home, '.claude', 'projects'), { recursive: true });
+    const profileDir = path.join(home, '.test-audit-symlink');
+    fs.mkdirSync(profileDir);
+    const profile: ProfileConfig = {
+      name: 'test-audit-symlink',
+      commandName: 'test-audit-symlink',
+      cliType: 'claude',
+      provider: 'anthropic',
+      createdAt: '2026-05-20T00:00:00Z',
+      sharedWith: 'claude',
+    };
+    cfg.writeProfiles([profile]);
+    const victim = path.join(home, 'audit-victim.txt');
+    fs.writeFileSync(victim, 'keep');
+    fs.symlinkSync(victim, path.join(home, '.sweech', 'audit.log'));
+
+    cfg.healProfileSharedDirs('test-audit-symlink');
+
+    expect(fs.readFileSync(victim, 'utf-8')).toBe('keep');
+  });
+
+  test('does not append to hardlinked audit log path', () => {
+    const home = isolateHome();
+    const cfg = new ConfigManager();
+
+    fs.mkdirSync(path.join(home, '.claude', 'projects'), { recursive: true });
+    const profileDir = path.join(home, '.test-audit-hardlink');
+    fs.mkdirSync(profileDir);
+    cfg.writeProfiles([{
+      name: 'test-audit-hardlink',
+      commandName: 'test-audit-hardlink',
+      cliType: 'claude',
+      provider: 'anthropic',
+      createdAt: '2026-05-20T00:00:00Z',
+      sharedWith: 'claude',
+    }]);
+    const victim = path.join(home, 'audit-hardlink-victim.txt');
+    fs.writeFileSync(victim, 'keep');
+    fs.linkSync(victim, path.join(home, '.sweech', 'audit.log'));
+
+    cfg.healProfileSharedDirs('test-audit-hardlink');
+
+    expect(fs.readFileSync(victim, 'utf-8')).toBe('keep');
   });
 });

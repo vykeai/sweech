@@ -3,13 +3,13 @@
   "title": "Auto-heal shared symlinks on `sweech use` / `sweech run` invocation",
   "wave": "wave-5",
   "space": "space-cli",
-  "status": "todo",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "Even with `sweech doctor` (T-076), users will hit broken shared dirs again whenever sweech upgrades and the SHAREABLE_DIRS list expands. The friction surfaces as `Unknown command: /<skill>` errors deep inside a Claude session — by which point the user has lost context.\n\nFix: when sweech routes a profile invocation (`sweech use <name>`, `sweech run`, `<profile>` wrapper script), do a cheap symlink integrity check first. If symlinks for any SHAREABLE_DIRS entry are missing or dangling, repair them silently and log to ~/.sweech/audit.log (no interactive prompt unless --verbose).\n\nKey constraint: must be FAST. Should add <50ms to invocation latency. Strategy:\n- Cache a `profile-symlinks.fingerprint` keyed on (SHAREABLE_DIRS hash + sweech version) in the profile dir\n- Skip the check entirely if fingerprint matches current\n- If fingerprint missing or mismatched, run full reconcile (≈10ms for an existing-symlinks scenario)\n\nThis is the long-term version of T-076 — T-076 is the one-shot heal; T-077 is the always-on heal.",
   "createdAt": "2026-05-17T22:00:00Z",
-  "updatedAt": "2026-05-17T22:00:00Z",
+  "updatedAt": "2026-05-20T11:46:27.300Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,8 +18,21 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
-  "dependsOn": ["T-076"],
+  "statusHistory": [
+    {
+      "at": "2026-05-20T11:43:09.346Z",
+      "status": "active",
+      "by": "codex"
+    },
+    {
+      "at": "2026-05-20T11:46:27.300Z",
+      "status": "done",
+      "by": "codex"
+    }
+  ],
+  "dependsOn": [
+    "T-076"
+  ],
   "runStatus": null,
   "size": "M",
   "context": [
@@ -27,6 +40,11 @@
       "at": "2026-05-17T22:00:00Z",
       "by": "luke",
       "text": "Without this, every sweech version bump that adds a new entry to SHAREABLE_DIRS leaves existing users silently broken until they hit the failure mode and have to remember `sweech doctor`."
+    },
+    {
+      "at": "2026-05-20T11:46:27.300Z",
+      "by": "codex",
+      "text": "Implemented wrapper fingerprint gating plus healProfileSharedDirs fingerprint/audit writes. Verified with focused Jest, full Jest, tsc, swift build, and isolated HOME E2E smoke."
     }
   ],
   "acceptanceCriteria": [

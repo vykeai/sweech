@@ -974,6 +974,17 @@ export async function runLauncher(): Promise<void> {
       if (state.yolo) launchArgs.push(entry.yoloFlag);
       if (state.resume) launchArgs.push(...entry.resumeFlag.split(' '));
 
+      if (entry.sharedWith) {
+        try {
+          if (
+            !config.isProfileShareFingerprintCurrent(entry.name, entry.command)
+            || !config.isProfileShareTopologyHealthy(entry.name)
+          ) {
+            config.healProfileSharedDirs(entry.name);
+          }
+        } catch { /* silent — heal must never block launch */ }
+      }
+
       // Autoname new sessions from cwd basename (Claude only — codex has no equivalent flag).
       const launchCli = getCLI(entry.command);
       if (!state.resume && launchCli?.sessionNameFlag && !launchArgs.includes(launchCli.sessionNameFlag)) {
