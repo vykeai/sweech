@@ -4,6 +4,7 @@
 
 export type CLIType = 'claude' | 'codex' | 'kimi';
 export type APIFormat = 'anthropic' | 'openai';
+export type PricingModel = 'paid' | 'free' | 'metered';
 
 export const CLI_TYPES: readonly CLIType[] = ['claude', 'codex', 'kimi'] as const;
 
@@ -36,11 +37,69 @@ export interface ProviderConfig {
   smallFastModel?: string;
   description: string;
   pricing?: string;
+  pricingModel: PricingModel;
   compatibility: CLIType[]; // Which CLIs support this provider
   apiFormat: APIFormat; // API format (for validation and custom providers)
   isCustom?: boolean; // True for user-defined custom providers
   authOptional?: boolean; // True for local/self-hosted providers that don't require auth
   availableModels?: ModelInfo[]; // Catalog of models this provider supports
+}
+
+const PRICING_MODEL_BY_PROVIDER: Record<string, PricingModel> = {
+  anthropic: 'paid',
+  openai: 'paid',
+  minimax: 'paid',
+  kimi: 'paid',
+  'kimi-coding': 'paid',
+  glm: 'paid',
+  dashscope: 'paid',
+  'dashscope-openai': 'paid',
+  openrouter: 'paid',
+  'ollama-cloud': 'paid',
+
+  qwen: 'metered',
+  'qwen-openai': 'metered',
+  deepseek: 'metered',
+  'deepseek-openai': 'metered',
+  grok: 'metered',
+  groq: 'metered',
+  gemini: 'metered',
+  nvidia: 'metered',
+
+  ollama: 'free',
+  'local-ollama': 'free',
+  'local-proxy': 'free',
+  xortron: 'free',
+};
+
+export function isLocalProviderBaseUrl(baseUrl?: string): boolean {
+  if (!baseUrl || !baseUrl.trim()) return false;
+  let hostname = '';
+  try {
+    hostname = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    hostname = baseUrl.trim().toLowerCase();
+  }
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '::1' ||
+    hostname.endsWith('.local')
+  );
+}
+
+export function classifyPricingModel(provider: {
+  name?: string;
+  baseUrl?: string;
+  pricingModel?: PricingModel;
+  isCustom?: boolean;
+  authOptional?: boolean;
+}): PricingModel {
+  if (provider.pricingModel) return provider.pricingModel;
+  if (provider.authOptional) return 'free';
+  if (provider.isCustom && isLocalProviderBaseUrl(provider.baseUrl)) return 'free';
+  if (provider.name && PRICING_MODEL_BY_PROVIDER[provider.name]) return PRICING_MODEL_BY_PROVIDER[provider.name];
+  return 'paid';
 }
 
 export const PROVIDERS: Record<string, ProviderConfig> = {
@@ -56,6 +115,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'claude-haiku-4-5-20251001',
     description: 'Official Anthropic Claude models',
     pricing: 'Varies by model',
+    pricingModel: 'paid',
     compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
@@ -71,6 +131,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'gpt-5.4',
     description: 'Official OpenAI models via Codex CLI',
     pricing: 'ChatGPT Plus/Pro subscription',
+    pricingModel: 'paid',
     compatibility: ['codex'],
     apiFormat: 'openai'
   },
@@ -82,6 +143,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen-flash',
     description: 'Alibaba Qwen models via DashScope Anthropic API',
     pricing: '$0.14-$2.49 per million tokens',
+    pricingModel: 'metered',
     compatibility: ['claude'],
     apiFormat: 'anthropic'
   },
@@ -92,6 +154,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'MiniMax-M2.7',
     description: 'MiniMax coding models',
     pricing: '$10/month coding plan',
+    pricingModel: 'paid',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
@@ -109,6 +172,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'kimi-k2.6',
     description: 'Moonshot Kimi K2.6 — long-horizon coding, 256K context',
     pricing: '$0.14-$2.49 per million tokens',
+    pricingModel: 'paid',
     compatibility: ['claude', 'kimi'],
     apiFormat: 'anthropic',
     availableModels: [
@@ -127,6 +191,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'kimi-k2.6',
     description: 'Kimi for Coding subscription — K2.6, 256K context',
     pricing: 'Subscription plan',
+    pricingModel: 'paid',
     compatibility: ['claude', 'kimi'],
     apiFormat: 'anthropic',
     availableModels: [
@@ -145,6 +210,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'deepseek-chat',
     description: 'DeepSeek V3.2 via Anthropic-compatible API',
     pricing: '$0.28-$0.42 per million tokens (lowest cost)',
+    pricingModel: 'metered',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
@@ -159,6 +225,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: 'glm-5.1',
     description: 'Zhipu GLM models via z.ai direct API',
     pricing: '$3/month coding plan',
+    pricingModel: 'paid',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
@@ -178,6 +245,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen3-coder-flash',
     description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via Anthropic-compat API (sk-sp-... key)',
     pricing: 'Subscription plan',
+    pricingModel: 'paid',
     compatibility: ['claude'],
     apiFormat: 'anthropic',
     availableModels: [
@@ -210,6 +278,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'deepseek-reasoner',
     description: 'DeepSeek via native OpenAI-compatible API',
     pricing: '$0.28-$0.42 per million tokens (lowest cost)',
+    pricingModel: 'metered',
     compatibility: ['codex'],
     apiFormat: 'openai'
   },
@@ -221,6 +290,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen-turbo',
     description: 'Alibaba Qwen via OpenAI-compatible DashScope API',
     pricing: '$0.14-$2.49 per million tokens',
+    pricingModel: 'metered',
     compatibility: ['codex'],
     apiFormat: 'openai'
   },
@@ -232,6 +302,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'qwen3-coder-plus',
     description: 'Alibaba Coding Plan — Qwen3/Zhipu/Kimi/MiniMax via OpenAI-compat API (sk-sp-... key)',
     pricing: 'Subscription plan',
+    pricingModel: 'paid',
     compatibility: ['codex'],
     apiFormat: 'openai'
   },
@@ -243,6 +314,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'anthropic/claude-3.5-haiku',
     description: '300+ models: Claude, Gemini, GPT, Grok, Llama, etc.',
     pricing: 'Varies by model',
+    pricingModel: 'paid',
     compatibility: ['codex'],
     apiFormat: 'openai',
     availableModels: [
@@ -263,6 +335,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     smallFastModel: 'grok-4-1-fast-reasoning',
     description: 'xAI Grok — native OpenAI-compatible API (NOT Anthropic-compat; pair with Codex CLI)',
     pricing: 'Pay-per-token; subscription does NOT include API',
+    pricingModel: 'metered',
     compatibility: ['codex'],
     apiFormat: 'openai',
     availableModels: [
@@ -286,6 +359,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: '',
     description: 'Local Ollama — no auth required',
     pricing: 'Free (local)',
+    pricingModel: 'free',
     compatibility: ['claude', 'codex'],
     apiFormat: 'anthropic',
     authOptional: true,
@@ -302,6 +376,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     defaultModel: '', // User will provide
     description: 'Custom/local LLM (localhost, LAN, or self-hosted)',
     pricing: 'Varies',
+    pricingModel: 'paid',
     compatibility: ['claude', 'codex'], // User chooses API format
     apiFormat: 'openai', // Default, user can change
     isCustom: true

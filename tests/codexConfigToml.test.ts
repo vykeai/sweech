@@ -391,6 +391,7 @@ describe('writeCodexProviderTomlForProfile', () => {
       baseUrl: 'https://api.moonshot.ai/v1',
       defaultModel: 'moonshot-v1-128k',
       description: 'test',
+      pricingModel: 'paid',
       compatibility: ['codex'],
       apiFormat: 'openai',
       ...over,

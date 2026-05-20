@@ -128,6 +128,7 @@ describe('Custom Provider', () => {
       expect(config.smallFastModel).toBe('llama-3.1-8b-fast');
       expect(config.apiFormat).toBe('openai');
       expect(config.isCustom).toBe(true);
+      expect(config.pricingModel).toBe('free');
     });
 
     test('generates display name from hostname when not provided', () => {
@@ -141,6 +142,7 @@ describe('Custom Provider', () => {
 
       expect(config.displayName).toContain('192.168.1.100');
       expect(config.displayName).toContain('Custom');
+      expect(config.pricingModel).toBe('paid');
     });
 
     test('sets compatibility based on OpenAI format', () => {
@@ -205,6 +207,7 @@ describe('Custom Provider', () => {
 
       expect(config.baseUrl).toBe('http://localhost:1234');
       expect(config.displayName).toContain('localhost');
+      expect(config.pricingModel).toBe('free');
     });
 
     test('handles LAN IPs', () => {
@@ -218,6 +221,7 @@ describe('Custom Provider', () => {
 
       expect(config.baseUrl).toBe('http://192.168.1.100:8080');
       expect(config.displayName).toContain('192.168.1.100');
+      expect(config.pricingModel).toBe('paid');
     });
 
     test('handles custom domains', () => {
@@ -231,6 +235,7 @@ describe('Custom Provider', () => {
 
       expect(config.baseUrl).toBe('https://api.mycompany.com');
       expect(config.displayName).toContain('api.mycompany.com');
+      expect(config.pricingModel).toBe('paid');
     });
   });
 
@@ -484,6 +489,7 @@ describe('Custom Provider', () => {
       expect(config.compatibility).toBeDefined();
       expect(config.apiFormat).toBeDefined();
       expect(config.isCustom).toBeDefined();
+      expect(config.pricingModel).toBeDefined();
     });
 
     test('maintains type compatibility with ProviderConfig', () => {

@@ -10,7 +10,9 @@ import {
   getProvidersByFormat,
   parseCliType,
   CLI_TYPES,
-  PROVIDERS
+  PROVIDERS,
+  classifyPricingModel,
+  isLocalProviderBaseUrl
 } from '../src/providers';
 
 describe('Provider Management', () => {
@@ -35,6 +37,8 @@ describe('Provider Management', () => {
         expect(provider.baseUrl).toBeDefined();
         expect(provider.defaultModel).toBeDefined();
         expect(provider.description).toBeDefined();
+        expect(provider.pricingModel).toBeDefined();
+        expect(['paid', 'free', 'metered']).toContain(provider.pricingModel);
         expect(provider.compatibility).toBeDefined();
         expect(Array.isArray(provider.compatibility)).toBe(true);
         expect(provider.apiFormat).toBeDefined();
@@ -284,6 +288,43 @@ describe('Provider Management', () => {
 
       expect(custom?.baseUrl).toBe('');
       expect(custom?.defaultModel).toBe('');
+    });
+  });
+
+  describe('Pricing Model Classification', () => {
+    test('annotates subscription-style built-ins as paid', () => {
+      for (const id of ['anthropic', 'openai', 'minimax', 'kimi', 'kimi-coding', 'glm', 'dashscope', 'dashscope-openai', 'openrouter']) {
+        expect(PROVIDERS[id]?.pricingModel).toBe('paid');
+      }
+      expect(classifyPricingModel({ name: 'ollama-cloud' })).toBe('paid');
+    });
+
+    test('annotates pay-per-token built-ins as metered', () => {
+      for (const id of ['qwen', 'qwen-openai', 'deepseek', 'deepseek-openai', 'grok']) {
+        expect(PROVIDERS[id]?.pricingModel).toBe('metered');
+      }
+      for (const id of ['groq', 'gemini', 'nvidia']) {
+        expect(classifyPricingModel({ name: id })).toBe('metered');
+      }
+    });
+
+    test('annotates local providers as free', () => {
+      expect(PROVIDERS.ollama.pricingModel).toBe('free');
+      for (const id of ['local-ollama', 'local-proxy', 'xortron']) {
+        expect(classifyPricingModel({ name: id })).toBe('free');
+      }
+    });
+
+    test('classifies custom localhost and .local URLs as free', () => {
+      expect(classifyPricingModel({ isCustom: true, baseUrl: 'http://localhost:1234' })).toBe('free');
+      expect(classifyPricingModel({ name: 'deepseek', isCustom: true, baseUrl: 'http://localhost:1234' })).toBe('free');
+      expect(classifyPricingModel({ isCustom: true, baseUrl: 'http://127.0.0.1:11434/v1' })).toBe('free');
+      expect(classifyPricingModel({ isCustom: true, baseUrl: 'http://llm.company.local:8080' })).toBe('free');
+      expect(isLocalProviderBaseUrl('http://localhost:1234')).toBe(true);
+    });
+
+    test('classifies remote custom providers as paid by default', () => {
+      expect(classifyPricingModel({ isCustom: true, baseUrl: 'https://api.company.com' })).toBe('paid');
     });
   });
 

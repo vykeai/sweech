@@ -5,7 +5,7 @@
 
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import { ProviderConfig, APIFormat } from './providers';
+import { ProviderConfig, APIFormat, classifyPricingModel } from './providers';
 
 export interface CustomProviderPrompts {
   baseUrl: string;
@@ -156,6 +156,7 @@ export function createCustomProviderConfig(
     smallFastModel: prompts.smallFastModel,
     description: `Custom ${prompts.apiFormat}-compatible provider`,
     pricing: 'Self-hosted / varies',
+    pricingModel: classifyPricingModel({ name, baseUrl: prompts.baseUrl, isCustom: true }),
     compatibility,
     apiFormat: prompts.apiFormat,
     isCustom: true
