@@ -156,7 +156,7 @@ describe('sweech dashboard CLI', () => {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end('not sweech');
     });
-    await new Promise<void>((resolve) => otherServer.listen(port, resolve));
+    await new Promise<void>((resolve) => otherServer.listen(port, '127.0.0.1', resolve));
 
     try {
       const child = spawnCli(['dashboard', '--port', String(port), '--no-open'], home);
