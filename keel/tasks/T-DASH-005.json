@@ -7,7 +7,7 @@
   "priority": "critical",
   "platform": null,
   "assignee": null,
-  "description": "Extend fedServer with /dashboard/* routes per spec \u00a7API. SSE handler at /dashboard/events with typed events (session.changed, audit.flagged, doctor.tick, peer.online/offline, cost.tick, summary.updated). Heartbeat every 15s. Static serve dist/dashboard/. Localhost-only refuses external.",
+  "description": "Extend fedServer with /dashboard/* routes per spec §API. SSE handler at /dashboard/events with typed events (session.changed, audit.flagged, doctor.tick, peer.online/offline, cost.tick, summary.updated). Heartbeat every 15s. Static serve dist/dashboard/. Localhost-only refuses external.",
   "createdAt": "2026-05-18T11:00:00Z",
   "updatedAt": "2026-05-18T11:00:00Z",
   "product": null,
@@ -27,6 +27,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "at": "2026-05-20T19:56:31.535Z",
+      "by": "codex",
+      "text": "Partial prerequisite landed during T-DASH-001 hardening: sweech dashboard now serves dist/dashboard, /dashboard/state, /dashboard/sessions, and /dashboard/events with session.changed + heartbeat from 127.0.0.1. Full fedServer /dashboard/* typed events from spec remain open."
     }
   ]
 }

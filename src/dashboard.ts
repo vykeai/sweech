@@ -13,12 +13,15 @@
 
 import * as http from 'http'
 import * as os from 'os'
+import * as fs from 'fs'
+import * as path from 'path'
 import { exec } from 'child_process'
 import { getHistory, type HistoryEntry } from './usageHistory'
 import { UsageTracker } from './usage'
 import { ConfigManager } from './config'
 import { getAccountInfo, getKnownAccounts, type AccountInfo } from './subscriptions'
 import { isMacOS, isWindows } from './platform'
+import { SessionsDb, type DashboardSession } from './sessionsDb'
 
 // ── Data collection ──────────────────────────────────────────────────────────
 
@@ -27,6 +30,11 @@ interface DashboardData {
   history: HistoryEntry[]
   launchStats: Array<{ commandName: string; totalUses: number; lastUsed: string }>
   accounts: AccountInfo[]
+}
+
+interface ReactDashboardState {
+  generatedAt: string
+  sessions: DashboardSession[]
 }
 
 async function collectDashboardData(): Promise<DashboardData> {
@@ -239,6 +247,15 @@ function badgeLabel(status, needsReauth) {
   return status.replace(/_/g, ' ');
 }
 
+function escapeHTML(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── Generated-at ──
 document.getElementById('generated-at').textContent =
   'Generated ' + new Date(DATA.generatedAt).toLocaleString();
@@ -315,7 +332,7 @@ document.getElementById('generated-at').textContent =
   var legend = '<div class="chart-legend">';
   names.forEach(function(name, idx) {
     var color = colors[idx % colors.length];
-    legend += '<span><span class="swatch" style="background:' + color + '"></span>' + name + '</span>';
+    legend += '<span><span class="swatch" style="background:' + color + '"></span>' + escapeHTML(name) + '</span>';
   });
   legend += '</div>';
 
@@ -334,7 +351,7 @@ document.getElementById('generated-at').textContent =
   var html = '<table><thead><tr><th>Profile</th><th>Launches</th><th>Last used</th></tr></thead><tbody>';
   stats.forEach(function(s) {
     var pct = Math.round((s.totalUses / maxUses) * 100);
-    html += '<tr><td><strong>' + s.commandName + '</strong></td>';
+    html += '<tr><td><strong>' + escapeHTML(s.commandName) + '</strong></td>';
     html += '<td><div class="bar-container" style="min-width:120px"><div class="bar-fill" style="width:' + pct + '%;background:var(--accent)"></div><span class="bar-label">' + s.totalUses + '</span></div></td>';
     html += '<td style="color:var(--text-dim)">' + timeAgo(s.lastUsed) + '</td></tr>';
   });
@@ -356,9 +373,9 @@ document.getElementById('generated-at').textContent =
     var sc = statusClass(live.status, a.needsReauth);
     var bc = badgeClass(live.status, a.needsReauth);
     var bl = badgeLabel(live.status, a.needsReauth);
-    html += '<tr><td><span class="status-dot ' + sc + '"></span><strong>' + a.commandName + '</strong></td>';
-    html += '<td><span class="badge ' + bc + '">' + bl + '</span></td>';
-    html += '<td>' + (a.meta && a.meta.plan ? a.meta.plan : '<span style="color:var(--text-dim)">-</span>') + '</td></tr>';
+    html += '<tr><td><span class="status-dot ' + sc + '"></span><strong>' + escapeHTML(a.commandName) + '</strong></td>';
+    html += '<td><span class="badge ' + bc + '">' + escapeHTML(bl) + '</span></td>';
+    html += '<td>' + (a.meta && a.meta.plan ? escapeHTML(a.meta.plan) : '<span style="color:var(--text-dim)">-</span>') + '</td></tr>';
   });
   html += '</tbody></table>';
   el.innerHTML = html;
@@ -388,7 +405,7 @@ document.getElementById('generated-at').textContent =
     var u5h = primary && primary.session ? primary.session.utilization : null;
     var u7d = primary && primary.weekly ? primary.weekly.utilization : null;
 
-    html += '<tr><td><strong>' + a.commandName + '</strong></td>';
+    html += '<tr><td><strong>' + escapeHTML(a.commandName) + '</strong></td>';
 
     // 5h bar
     if (u5h != null) {
@@ -424,18 +441,13 @@ document.getElementById('generated-at').textContent =
  * Returns the server instance and the chosen port for test use.
  */
 export async function startDashboard(options?: { port?: number; open?: boolean }): Promise<{ server: http.Server; port: number }> {
-  const data = await collectDashboardData()
-  const html = generateHTML(data)
   const requestedPort = options?.port ?? 0 // 0 = random available port
   const shouldOpen = options?.open !== false
+  const assetsDir = path.join(__dirname, 'dashboard')
 
   return new Promise((resolve, reject) => {
-    const server = http.createServer((_req, res) => {
-      res.writeHead(200, {
-        'Content-Type': 'text/html; charset=utf-8',
-        'Cache-Control': 'no-cache',
-      })
-      res.end(html)
+    const server = http.createServer((req, res) => {
+      void handleDashboardRequest(req, res, assetsDir)
     })
 
     server.listen(requestedPort, '127.0.0.1', () => {
@@ -456,6 +468,123 @@ export async function startDashboard(options?: { port?: number; open?: boolean }
 
     server.on('error', reject)
   })
+}
+
+async function collectReactDashboardState(): Promise<ReactDashboardState> {
+  const db = new SessionsDb()
+  try {
+    return {
+      generatedAt: new Date().toISOString(),
+      sessions: db.list({ limit: 200 }),
+    }
+  } finally {
+    db.close()
+  }
+}
+
+async function handleDashboardRequest(req: http.IncomingMessage, res: http.ServerResponse, assetsDir: string): Promise<void> {
+  let url: URL
+  try {
+    url = new URL(req.url ?? '/', 'http://127.0.0.1')
+  } catch {
+    sendDashboardJson(res, 400, { error: 'Bad path encoding' })
+    return
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    sendDashboardJson(res, 405, { error: 'Method not allowed' })
+    return
+  }
+
+  if (url.pathname === '/dashboard/state' || url.pathname === '/dashboard/sessions') {
+    sendDashboardJson(res, 200, await collectReactDashboardState())
+    return
+  }
+
+  if (url.pathname === '/dashboard/events') {
+    sendDashboardEvents(req, res)
+    return
+  }
+
+  serveDashboardAsset(req, res, assetsDir, url.pathname)
+}
+
+function sendDashboardJson(res: http.ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': 'http://127.0.0.1',
+  })
+  res.end(JSON.stringify(body))
+}
+
+function sendDashboardEvents(req: http.IncomingMessage, res: http.ServerResponse): void {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })
+  res.write(': connected\n\n')
+  void emitSessionChanges(res, 0).catch(() => undefined)
+  let since = Date.now()
+  const timer = setInterval(() => {
+    void emitSessionChanges(res, since).then((latest) => {
+      since = Math.max(since, latest)
+      res.write(`event: heartbeat\ndata: ${JSON.stringify({ at: Date.now() })}\n\n`)
+    }).catch(() => undefined)
+  }, 2000)
+  timer.unref()
+  req.on('close', () => clearInterval(timer))
+}
+
+async function emitSessionChanges(res: http.ServerResponse, since: number): Promise<number> {
+  let latest = since
+  const state = await collectReactDashboardState()
+  for (const session of state.sessions) {
+    if (session.lastActiveAt <= since) continue
+    latest = Math.max(latest, session.lastActiveAt)
+    res.write(`event: session.changed\ndata: ${JSON.stringify({ session })}\n\n`)
+  }
+  return latest
+}
+
+function serveDashboardAsset(req: http.IncomingMessage, res: http.ServerResponse, assetsDir: string, pathname: string): void {
+  let relative: string
+  try {
+    relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname.replace(/^\/+/, ''))
+  } catch {
+    sendDashboardJson(res, 400, { error: 'Bad path encoding' })
+    return
+  }
+  const root = path.resolve(assetsDir)
+  const requestedPath = path.resolve(root, relative)
+  const filePath = requestedPath === root || requestedPath.startsWith(root + path.sep)
+    ? requestedPath
+    : path.join(root, 'index.html')
+  const finalPath = fs.existsSync(filePath) && fs.statSync(filePath).isFile()
+    ? filePath
+    : path.join(root, 'index.html')
+
+  fs.readFile(finalPath, (error, data) => {
+    if (error) {
+      sendDashboardJson(res, 503, { error: 'Dashboard assets not built. Run npm run build.' })
+      return
+    }
+    res.writeHead(200, {
+      'Content-Type': contentTypeFor(finalPath),
+      'Cache-Control': finalPath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+    })
+    if (req.method === 'HEAD') res.end()
+    else res.end(data)
+  })
+}
+
+function contentTypeFor(filePath: string): string {
+  if (filePath.endsWith('.html')) return 'text/html; charset=utf-8'
+  if (filePath.endsWith('.js')) return 'text/javascript; charset=utf-8'
+  if (filePath.endsWith('.css')) return 'text/css; charset=utf-8'
+  if (filePath.endsWith('.svg')) return 'image/svg+xml'
+  return 'application/octet-stream'
 }
 
 function openBrowser(url: string): void {

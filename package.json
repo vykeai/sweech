@@ -2,7 +2,7 @@
   "name": "sweech",
   "version": "0.3.0",
   "description": "AI CLI switcher — isolated profile dirs per provider. Switch between Claude Code, Codex, and 10+ AI providers seamlessly.",
-  "main": "dist/cli.js",
+  "main": "dist/index.js",
   "bin": {
     "sweech": "./dist/cli.js"
   },
@@ -68,7 +68,7 @@
   },
   "homepage": "https://github.com/vykeai/sweech#readme",
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.73.0",

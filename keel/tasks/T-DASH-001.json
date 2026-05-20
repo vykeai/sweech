@@ -3,13 +3,13 @@
   "title": "apps/dashboard scaffold — Vite + React + @vykeai/vysual-react",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "active",
+  "status": "done",
   "priority": "critical",
   "platform": null,
   "assignee": "codex",
   "description": "Set up apps/dashboard/ as npm workspace. Vite + React 19 + TypeScript + Tailwind + @vykeai/vysual-react. ThemeProvider with themes.sweech. Empty grid layout: hero strip + sessions row + 3-col mid. Stub panels as Card placeholders. Zustand store with slices per panel. useSSE hook with exp-backoff reconnect. Root npm run build wires tsc + vite build into dist/dashboard/.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-20T14:41:01.848Z",
+  "updatedAt": "2026-05-20T19:56:31.535Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -22,6 +22,10 @@
     {
       "status": "active",
       "ts": "2026-05-20T14:41:01.848Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-20T19:56:31.535Z"
     }
   ],
   "dependsOn": [],
@@ -32,6 +36,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "at": "2026-05-20T19:56:31.535Z",
+      "by": "codex",
+      "text": "Done via /vy-go 2026-05-20. Verified: npm run build 0; npm test -- --runInBand 94 suites passed, 2330 passed, 5 skipped; npx tsc --noEmit 0; npm audit --audit-level=moderate found 0 vulnerabilities; cd macos-menubar/SweechBar && swift build 0; git diff --check 0; dashboard screenshot ~/Desktop/screenshots/sweech/dashboard-cli-react-final-2026-05-20.png; Playwright browser assertions passed; adversarial review reported no blockers."
     }
   ]
 }

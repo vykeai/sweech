@@ -78,6 +78,17 @@ function useSSE(url: string) {
         retry = 500;
         setConnected(true);
       };
+      const handleSessionChanged = (event: MessageEvent) => {
+        try {
+          const payload = JSON.parse(event.data);
+          const session = payload.session ?? payload.data?.session;
+          if (session?.id) {
+            upsertSession(session);
+          }
+        } catch {
+          return;
+        }
+      };
       source.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
@@ -89,6 +100,7 @@ function useSSE(url: string) {
           return;
         }
       };
+      source.addEventListener('session.changed', handleSessionChanged);
       source.onerror = () => {
         setConnected(false);
         source?.close();
