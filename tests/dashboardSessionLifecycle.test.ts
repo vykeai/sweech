@@ -1,6 +1,17 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+const mockSummarizeNow = jest.fn();
+const mockSummarizerClose = jest.fn();
+
+jest.mock('../src/sessionSummarizer', () => ({
+  SessionSummarizer: jest.fn().mockImplementation(() => ({
+    summarizeNow: mockSummarizeNow,
+    close: mockSummarizerClose,
+  })),
+}));
+
 import { closeDashboardSession, findLatestClaudeJsonl, recordDashboardSessionLaunch } from '../src/dashboardSessionLifecycle';
 import { SessionsDb } from '../src/sessionsDb';
 
@@ -17,10 +28,12 @@ describe('dashboard session lifecycle', () => {
     configDir = path.join(tmp, '.claude-work');
     fs.mkdirSync(cwd, { recursive: true });
     fs.mkdirSync(configDir, { recursive: true });
+    mockSummarizeNow.mockResolvedValue(null);
   });
 
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
+    jest.clearAllMocks();
   });
 
   test('records a launch row and closes it by tmux name', () => {
@@ -45,6 +58,7 @@ describe('dashboard session lifecycle', () => {
 
     const closed = closeDashboardSession({ tmuxName: 'project-a-claude-work-sweech', dbPath, now: 2000 });
     expect(closed).toMatchObject({ id: 'launch-1', status: 'closed', closedAt: 2000 });
+    expect(mockSummarizeNow).toHaveBeenCalledWith('launch-1', 'session-end');
   });
 
   test('attaches the newest claude jsonl metadata when present', () => {

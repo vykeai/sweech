@@ -1,15 +1,15 @@
 {
   "id": "T-DASH-008",
-  "title": "sessionSummarizer.ts \u2014 AI tile summaries (hybrid local\u2192cloud)",
+  "title": "sessionSummarizer.ts — AI tile summaries (hybrid local→cloud)",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "active",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "Reads last 20-30 jsonl events + aiTitle. Hybrid provider: ollama first via sweech auto --provider ollama, fallback to sweech auto --budget 0.005. Writes summary_one/bullets/provider/model/cost/at to sessions.db. Debounced queue; eager every 50 msgs + on session-end; lazy on viewport scroll. SSE summary.updated events.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-21T00:30:36.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-21T00:30:36.000Z"
+    }
+  ],
   "dependsOn": [
     "T-DASH-002"
   ],

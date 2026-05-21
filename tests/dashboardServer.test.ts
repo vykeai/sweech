@@ -7,11 +7,20 @@ import { createDashboardRequestHandler } from '../src/dashboardServer';
 
 const mockList = jest.fn();
 const mockClose = jest.fn();
+const mockSummarizeNow = jest.fn();
+const mockSummarizerClose = jest.fn();
 
 jest.mock('../src/sessionsDb', () => ({
   SessionsDb: jest.fn().mockImplementation(() => ({
     list: mockList,
     close: mockClose,
+  })),
+}));
+
+jest.mock('../src/sessionSummarizer', () => ({
+  SessionSummarizer: jest.fn().mockImplementation(() => ({
+    summarizeNow: mockSummarizeNow,
+    close: mockSummarizerClose,
   })),
 }));
 
@@ -58,6 +67,16 @@ describe('dashboard server', () => {
         summaryMsgAt: null,
       },
     ]);
+    mockSummarizeNow.mockResolvedValue({
+      sessionId: 's1',
+      summaryOne: 'Dashboard route summary.',
+      summaryBullets: ['Read viewport trigger'],
+      summaryProvider: 'ollama',
+      summaryModel: 'llama3',
+      summaryCostUsd: 0,
+      summaryAt: 123,
+      summaryMsgAt: 50,
+    });
     server = http.createServer((req, res) => {
       void createDashboardRequestHandler({ assetsDir: tmp, catchAllAssets: true })(req, res).then((handled) => {
         if (!handled) {
@@ -86,13 +105,15 @@ describe('dashboard server', () => {
     jest.clearAllMocks();
   });
 
-  function request(path: string): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
+  function request(path: string, method = 'GET'): Promise<{ status: number; body: string; headers: http.IncomingHttpHeaders }> {
     return new Promise((resolve, reject) => {
-      http.get({ hostname: '127.0.0.1', port, path, headers: path.startsWith('/dashboard/') ? { Origin: 'http://127.0.0.1' } : {} }, (res) => {
+      const req = http.request({ hostname: '127.0.0.1', port, path, method, headers: path.startsWith('/dashboard/') ? { Origin: 'http://127.0.0.1' } : {} }, (res) => {
         let body = '';
         res.on('data', (chunk) => { body += chunk; });
         res.on('end', () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }));
-      }).on('error', reject);
+      });
+      req.on('error', reject);
+      req.end();
     });
   }
 
@@ -111,6 +132,32 @@ describe('dashboard server', () => {
     const body = JSON.parse(res.body);
     expect(res.status).toBe(200);
     expect(body.sessions[0].id).toBe('s1');
+  });
+
+  test('POST /dashboard/sessions/:id/summary triggers viewport summarization', async () => {
+    const res = await request('/dashboard/sessions/s1/summary', 'POST');
+    const body = JSON.parse(res.body);
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({
+      status: 'ok',
+      summary: {
+        sessionId: 's1',
+        summaryOne: 'Dashboard route summary.',
+        summaryProvider: 'ollama',
+      },
+    });
+    expect(mockSummarizeNow).toHaveBeenCalledWith('s1', 'viewport');
+    expect(mockSummarizerClose).toHaveBeenCalled();
+  });
+
+  test('summary route returns accepted when session is not ready', async () => {
+    mockSummarizeNow.mockResolvedValueOnce(null);
+
+    const res = await request('/dashboard/sessions/s1/summary', 'POST');
+
+    expect(res.status).toBe(202);
+    expect(JSON.parse(res.body)).toMatchObject({ status: 'skipped' });
   });
 
   test('opens an SSE stream for dashboard events', async () => {

@@ -90,6 +90,16 @@ export interface StartupReconcileResult {
   crashRecoverable: number;
 }
 
+export interface SessionSummaryUpdate {
+  summaryOne: string;
+  summaryBullets: string[] | string;
+  summaryProvider: string;
+  summaryModel?: string | null;
+  summaryCostUsd?: number | null;
+  summaryAt?: number;
+  summaryMsgAt: number;
+}
+
 interface SessionRow {
   id: string;
   workspace: string;
@@ -289,6 +299,45 @@ export class SessionsDb {
           summary_stale = CASE WHEN summary_msg_at IS NULL OR summary_msg_at < ? THEN 1 ELSE summary_stale END
       WHERE id = ?
     `).run(at, messageCount, msgCountFirst, messageCount, messageCount, id);
+
+    return this.byId(id);
+  }
+
+  updateSummary(id: string, input: SessionSummaryUpdate): DashboardSession | null {
+    const current = this.byId(id);
+    if (!current) return null;
+    if (!input.summaryOne.trim()) throw new Error('summaryOne is required');
+    if (!input.summaryProvider.trim()) throw new Error('summaryProvider is required');
+    if (!Number.isFinite(input.summaryMsgAt) || input.summaryMsgAt < 0) {
+      throw new Error('summaryMsgAt must be a non-negative number');
+    }
+    const summaryAt = input.summaryAt ?? Date.now();
+    const bullets = Array.isArray(input.summaryBullets)
+      ? JSON.stringify(input.summaryBullets)
+      : input.summaryBullets;
+
+    this.db.prepare(`
+      UPDATE sessions
+      SET summary_one = ?,
+          summary_bullets = ?,
+          summary_provider = ?,
+          summary_model = ?,
+          summary_cost_usd = ?,
+          summary_at = ?,
+          summary_msg_at = ?,
+          summary_stale = CASE WHEN message_count > ? THEN 1 ELSE 0 END
+      WHERE id = ?
+    `).run(
+      input.summaryOne,
+      bullets,
+      input.summaryProvider,
+      input.summaryModel ?? null,
+      input.summaryCostUsd ?? null,
+      summaryAt,
+      Math.floor(input.summaryMsgAt),
+      Math.floor(input.summaryMsgAt),
+      id,
+    );
 
     return this.byId(id);
   }

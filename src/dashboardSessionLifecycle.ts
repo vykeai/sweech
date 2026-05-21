@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { SessionsDb, type DashboardSession } from './sessionsDb';
+import { SessionSummarizer } from './sessionSummarizer';
 
 export interface RecordDashboardSessionLaunchInput {
   id?: string | null;
@@ -65,15 +66,28 @@ export function closeDashboardSession(input: CloseDashboardSessionInput): Dashbo
   try {
     if (input.id) {
       const byId = db.updateStatus(input.id, 'closed', input.now);
-      if (byId) return byId;
+      if (byId) {
+        summarizeClosedSession(byId.id, input.dbPath || undefined);
+        return byId;
+      }
     }
     if (input.tmuxName) {
-      return db.updateStatusByTmuxName(input.tmuxName, 'closed', input.now);
+      const byTmux = db.updateStatusByTmuxName(input.tmuxName, 'closed', input.now);
+      if (byTmux) summarizeClosedSession(byTmux.id, input.dbPath || undefined);
+      return byTmux;
     }
     return null;
   } finally {
     db.close();
   }
+}
+
+function summarizeClosedSession(sessionId: string, dbPath?: string | null): void {
+  const db = new SessionsDb(dbPath || undefined);
+  const summarizer = new SessionSummarizer({ db });
+  void summarizer.summarizeNow(sessionId, 'session-end')
+    .catch(() => undefined)
+    .finally(() => summarizer.close());
 }
 
 export function findLatestClaudeJsonl(

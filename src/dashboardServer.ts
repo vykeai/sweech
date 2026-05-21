@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { SessionsDb, type DashboardSession, type DashboardSessionStatus, type ListDashboardSessionsFilter } from './sessionsDb';
+import { SessionSummarizer } from './sessionSummarizer';
 
 export type DashboardEventName =
   | 'session.changed'
@@ -120,6 +121,28 @@ export function createDashboardRequestHandler(options: DashboardRequestHandlerOp
       return true;
     }
 
+    const summaryMatch = url.pathname.match(/^\/dashboard\/sessions\/([^/]+)\/summary$/);
+    if (summaryMatch) {
+      if (req.method !== 'POST') {
+        sendDashboardJson(res, 405, { error: 'Method not allowed' });
+        return true;
+      }
+      try {
+        const summary = await summarizeDashboardSession(decodeURIComponent(summaryMatch[1]));
+        if (!summary) {
+          sendDashboardJson(res, 202, { status: 'skipped', reason: 'session not ready for summary' });
+          return true;
+        }
+        sendDashboardJson(res, 200, { status: 'ok', summary });
+      } catch (error) {
+        sendDashboardJson(res, 500, {
+          error: 'Dashboard summary unavailable',
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return true;
+    }
+
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendDashboardJson(res, 405, { error: 'Method not allowed' });
       return true;
@@ -163,6 +186,15 @@ export function createDashboardRequestHandler(options: DashboardRequestHandlerOp
 
 export async function collectDashboardState(): Promise<DashboardState> {
   return collectDashboardSessions();
+}
+
+export async function summarizeDashboardSession(sessionId: string) {
+  const summarizer = new SessionSummarizer();
+  try {
+    return await summarizer.summarizeNow(sessionId, 'viewport');
+  } finally {
+    summarizer.close();
+  }
 }
 
 export async function collectDashboardSessions(url?: URL): Promise<DashboardState> {
@@ -402,6 +434,7 @@ function isAllowedDashboardOrigin(origin: string | undefined, fetchSite: string 
     if (site === 'same-origin' || site === 'none') return true;
     return pathname !== '/dashboard/state'
       && pathname !== '/dashboard/sessions'
+      && !/^\/dashboard\/sessions\/[^/]+\/summary$/.test(pathname)
       && pathname !== '/dashboard/events';
   }
   try {

@@ -24,6 +24,10 @@ type DashboardSession = {
   summary_at?: number | null;
   summaryStale?: boolean;
   summary_stale?: boolean;
+  summaryOne?: string | null;
+  summary_one?: string | null;
+  summaryBullets?: string[] | string | null;
+  summary_bullets?: string[] | string | null;
   attachClients?: number;
   attach_clients?: number;
 };
@@ -128,6 +132,7 @@ function useSSE(url: string) {
         }
       };
       source.addEventListener('session.changed', handleSessionChanged);
+      source.addEventListener('summary.updated', handleSessionChanged);
       source.addEventListener('doctor.tick', handleDoctorTick);
       source.onerror = () => {
         setConnected(false);
@@ -147,6 +152,22 @@ function useSSE(url: string) {
   }, [applyDoctorTick, setConnected, upsertSession, url]);
 }
 
+function useSummaryRequests(sessions: DashboardSession[]) {
+  const requested = React.useRef(new Set<string>());
+  React.useEffect(() => {
+    for (const session of sessions) {
+      const stale = session.summaryStale ?? session.summary_stale ?? true;
+      const summary = session.summaryOne ?? session.summary_one;
+      if (!session.id || requested.current.has(session.id) || (!stale && summary)) continue;
+      requested.current.add(session.id);
+      fetch(`/dashboard/sessions/${encodeURIComponent(session.id)}/summary`, { method: 'POST' })
+        .catch(() => {
+          requested.current.delete(session.id);
+        });
+    }
+  }, [sessions]);
+}
+
 function PlaceholderPanel({ title, detail }: { title: string; detail: string }) {
   return (
     <Card className="panel">
@@ -160,6 +181,7 @@ function App() {
   useInitialState('/dashboard/state');
   useSSE('/dashboard/events');
   const { connected, sessions, doctorChecks } = useDashboardStore();
+  useSummaryRequests(sessions);
   const heroSessions = sessions.map((session) => ({
     ...session,
     summaryCostUsd: session.summaryCostUsd ?? session.summary_cost_usd ?? null,
@@ -191,6 +213,14 @@ function App() {
                   <span className={`status-dot status-${session.status}`} />
                   <strong>{session.workspace}</strong>
                   <p>{session.cwd}</p>
+                  <p className="session-summary">{session.summaryOne ?? session.summary_one ?? 'Summary pending'}</p>
+                  {normalizeBullets(session.summaryBullets ?? session.summary_bullets).length > 0 && (
+                    <ul className="session-activities">
+                      {normalizeBullets(session.summaryBullets ?? session.summary_bullets).map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  )}
                   <div className="session-meta">
                     <span>{session.machine}</span>
                     <FreshnessChip state={session.summaryStale ?? session.summary_stale ? 'stale' : 'fresh'} />
@@ -213,6 +243,18 @@ function App() {
       </main>
     </ThemeProvider>
   );
+}
+
+function normalizeBullets(value: DashboardSession['summaryBullets']): string[] {
+  if (Array.isArray(value)) return value.map(String).filter(Boolean);
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+  } catch {
+    return value.split(/\n+/).map((item) => item.replace(/^[-*]\s*/, '').trim()).filter(Boolean);
+  }
+  return [];
 }
 
 function doctorChecksFromPayload(payload: unknown): DoctorCheck[] {
