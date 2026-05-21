@@ -61,6 +61,21 @@ test('workspaces accounts and cost panels render real dashboard state', async ({
   await expect(page.getByTestId('plugin-row-sweech-plugin-export')).toContainText('enabled');
   await expect(page.getByTestId('template-row-claude-pro')).toContainText('built-in');
   await expect(page.getByTestId('template-row-local-fast')).toContainText('custom');
+  await expect(page.getByTestId('federation-peer-studio-mini')).toContainText('dashboard-v1');
+  await expect(page.getByTestId('settings-summary-row')).toContainText('studio-main');
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByText('General')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Summaries' })).toBeVisible();
+  await page.getByLabel('Preferred terminal').selectOption('kitty');
+  await page.screenshot({
+    path: path.join(screenshotDir, 'T-DASH-014-settings-drawer-desktop.png'),
+    fullPage: false,
+  });
+  const settingsPatchPromise = page.waitForRequest((request) => request.url().endsWith('/dashboard/settings') && request.method() === 'PATCH');
+  await page.getByTestId('settings-save').click();
+  const settingsPatch = await settingsPatchPromise;
+  expect(JSON.parse(settingsPatch.postData())).toMatchObject({ terminal: { preferred: 'kitty' } });
   await page.getByTestId('workspace-card-claude-main').click();
   await expect(page.getByRole('dialog', { name: 'Edit claude-main' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Model', exact: true })).toHaveValue('claude-sonnet-4-5');
@@ -89,7 +104,7 @@ test('workspaces accounts and cost panels render real dashboard state', async ({
       overflowCount: overflow.length,
     };
   });
-  expect(layout).toMatchObject({ workspaceCards: 2, accountCards: 2, costBars: 7, auditRows: 1, cooldownRows: 1, opsRows: 7, billingDays: 30, overflowCount: 0 });
+  expect(layout).toMatchObject({ workspaceCards: 2, accountCards: 2, costBars: 7, auditRows: 1, cooldownRows: 1, opsRows: 9, billingDays: 30, overflowCount: 0 });
   expect(layout.logRows).toBeGreaterThan(0);
 
   await page.getByTestId('workspace-card-claude-main').scrollIntoViewIfNeeded();
@@ -137,6 +152,29 @@ test('dashboard data panels remain usable on mobile width', async ({ page }) => 
   expect(JSON.parse(pluginInstallRequest.postData())).toMatchObject({ package: '@vykeai/sweech-plugin-test' });
   await expect(page.getByTestId('plugin-row-sweech-plugin-export')).toBeVisible();
   await expect(page.getByTestId('template-row-claude-pro')).toBeVisible();
+  await expect(page.getByTestId('federation-peer-studio-mini')).toBeVisible();
+  await page.getByTestId('settings-open').scrollIntoViewIfNeeded();
+  await page.getByTestId('settings-open').click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await page.screenshot({
+    path: path.join(screenshotDir, 'T-DASH-014-settings-drawer-mobile.png'),
+    fullPage: false,
+  });
+  await page.getByLabel('Close settings drawer').click();
+  await page.getByTestId('setup-wizard-open').scrollIntoViewIfNeeded();
+  await page.getByTestId('setup-wizard-open').click();
+  await expect(page.getByRole('dialog', { name: 'Setup Wizard' })).toBeVisible();
+  await page.getByTestId('setup-wizard-next').click();
+  await expect(page.getByTestId('setup-step-provider')).toBeVisible();
+  await page.getByTestId('setup-wizard-next').click();
+  await expect(page.getByTestId('setup-step-workspace')).toBeVisible();
+  await page.getByTestId('setup-wizard-next').click();
+  await expect(page.getByTestId('setup-step-done')).toBeVisible();
+  await page.screenshot({
+    path: path.join(screenshotDir, 'T-DASH-014-setup-wizard-mobile.png'),
+    fullPage: false,
+  });
+  await page.getByTestId('setup-wizard-finish').click();
   await page.getByLabel('Template name').fill('dashboard-custom');
   await page.getByLabel('Template description').fill('Dashboard custom template');
   await page.getByLabel('Template provider').fill('openrouter');
@@ -215,6 +253,17 @@ async function setupDashboardPanelRoutes(page) {
       return;
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dashboardStateFixture().plugins) });
+  });
+  await page.route('**/dashboard/federation', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dashboardStateFixture().federation) });
+  });
+  await page.route('**/dashboard/settings', async (route) => {
+    if (route.request().method() === 'PATCH') {
+      const patch = JSON.parse(route.request().postData() || '{}');
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ...dashboardStateFixture().settings, ...patch, tmux: { ...dashboardStateFixture().settings.tmux, ...(patch.tmux || {}) }, terminal: { ...dashboardStateFixture().settings.terminal, ...(patch.terminal || {}) } }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dashboardStateFixture().settings) });
   });
 }
 
@@ -427,6 +476,28 @@ function dashboardStateFixture() {
         { name: 'codex-pro', description: 'Codex with ChatGPT Pro subscription', cliType: 'codex', provider: 'openai', tags: ['codex'], builtIn: true },
         { name: 'local-fast', description: 'Local fast model', cliType: 'codex', provider: 'ollama', model: 'llama3', baseUrl: 'http://127.0.0.1:11434', tags: ['local'], builtIn: false },
       ],
+    },
+    federation: {
+      generatedAt: new Date(now).toISOString(),
+      enabled: true,
+      peers: [{
+        hostname: 'studio-mini',
+        url: 'http://studio-mini.local:7043',
+        lastSeen: '2026-05-21T11:58:00.000Z',
+        capabilities: ['dashboard', 'dashboard-v1'],
+        status: 'online',
+        sessionCount: 3,
+      }],
+    },
+    settings: {
+      generatedAt: new Date(now).toISOString(),
+      general: { machine: 'studio-main' },
+      tmux: { enabled: true, namingScheme: 'workspace-cwd', suffix: 'sweech' },
+      terminal: { preferred: 'auto' },
+      summaries: { enabled: true, providerOrder: ['anthropic', 'openai'], budgetPerSummaryUsd: 0.15, budgetPerDayUsd: 5, model: 'auto' },
+      federation: { enabled: true, discoveryMethod: 'peers-file' },
+      retention: { autoWipe: false, wipeOlderThanDays: 30 },
+      refresh: { sessionsMs: 2000, peersMs: 30000, doctorNetworkMs: 60000 },
     },
   };
 }

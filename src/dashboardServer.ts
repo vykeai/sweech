@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { atomicWriteFileSync } from './atomicWrite';
 import { readBillingFile, nextBillingDate, daysUntilNextBill, type BillingEntry } from './billing';
 import { ConfigManager } from './config';
 import { buildCostTable, type CostTable } from './costCommand';
@@ -58,6 +59,8 @@ export interface DashboardState {
   logs: DashboardLogsState;
   plugins: DashboardPluginsState;
   templates: DashboardTemplatesState;
+  federation: DashboardFederationState;
+  settings: DashboardSettingsState;
 }
 
 export interface DashboardRequestHandlerOptions {
@@ -67,6 +70,8 @@ export interface DashboardRequestHandlerOptions {
   maxSseClients?: number;
   catchAllAssets?: boolean;
   sessionsDbPath?: string;
+  settingsPath?: string;
+  peerProvider?: () => DashboardPeerProviderEntry[];
   terminalLauncher?: typeof launchTerminal;
   stateProvider?: () => Promise<DashboardState>;
 }
@@ -239,6 +244,65 @@ export interface DashboardTemplate extends ProfileTemplate {
   builtIn: boolean;
 }
 
+export interface DashboardPeerProviderEntry {
+  hostname: string;
+  url: string;
+  lastSeen: number | string;
+  capabilities: string[];
+  status: 'online' | 'offline';
+  sessionCount?: number;
+}
+
+export interface DashboardFederationState {
+  generatedAt: string;
+  enabled: boolean;
+  peers: DashboardFederationPeer[];
+}
+
+export interface DashboardFederationPeer {
+  hostname: string;
+  url: string;
+  lastSeen: string;
+  capabilities: string[];
+  status: 'online' | 'offline';
+  sessionCount: number;
+}
+
+export interface DashboardSettingsState {
+  generatedAt: string;
+  general: {
+    machine: string;
+  };
+  tmux: {
+    enabled: boolean;
+    namingScheme: string;
+    suffix: string;
+  };
+  terminal: {
+    preferred: TerminalName | 'auto';
+  };
+  summaries: {
+    enabled: boolean;
+    providerOrder: string[];
+    budgetPerSummaryUsd: number | null;
+    budgetPerDayUsd: number | null;
+    model: string;
+  };
+  federation: {
+    enabled: boolean;
+    discoveryMethod: string;
+  };
+  retention: {
+    autoWipe: boolean;
+    wipeOlderThanDays: number | null;
+  };
+  refresh: {
+    sessionsMs: number;
+    peersMs: number;
+    doctorNetworkMs: number;
+  };
+}
+
 type DashboardEventListener = (event: DashboardEvent) => void;
 
 const DASHBOARD_EVENT_NAMES = new Set<DashboardEventName>([
@@ -372,6 +436,7 @@ export function createDashboardRequestHandler(options: DashboardRequestHandlerOp
           parseTerminalName(optionalString(payload.terminal)),
           options.terminalLauncher ?? launchTerminal,
           options.sessionsDbPath,
+          options.settingsPath,
         );
         sendDashboardJson(res, result.ok ? 200 : 422, result);
       } catch (error) {
@@ -575,6 +640,38 @@ export function createDashboardRequestHandler(options: DashboardRequestHandlerOp
       return true;
     }
 
+    if (url.pathname === '/dashboard/settings') {
+      if (req.method === 'GET') {
+        try {
+          sendDashboardJson(res, 200, collectDashboardSettingsState(options.settingsPath));
+        } catch (error) {
+          sendDashboardJson(res, 500, dashboardErrorBody(error));
+        }
+        return true;
+      }
+      if (req.method === 'PATCH') {
+        if (!isJsonRequest(req.headers['content-type'])) {
+          sendDashboardJson(res, 415, { error: 'Content-Type must be application/json' });
+          return true;
+        }
+        const body = await readDashboardBody(req, res);
+        if (body === null) return true;
+        try {
+          const payload = parseDashboardJsonObject(body);
+          sendDashboardJson(res, 200, patchDashboardSettings(payload, options.settingsPath));
+        } catch (error) {
+          if (error instanceof DashboardRequestError) {
+            sendDashboardJson(res, error.status, { error: error.message });
+            return true;
+          }
+          sendDashboardJson(res, 500, dashboardErrorBody(error));
+        }
+        return true;
+      }
+      sendDashboardJson(res, 405, { error: 'Method not allowed' });
+      return true;
+    }
+
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       sendDashboardJson(res, 405, { error: 'Method not allowed' });
       return true;
@@ -582,12 +679,21 @@ export function createDashboardRequestHandler(options: DashboardRequestHandlerOp
 
     if (url.pathname === '/dashboard/state') {
       try {
-        sendDashboardJson(res, 200, options.stateProvider ? await options.stateProvider() : await collectDashboardState(options.sessionsDbPath));
+        sendDashboardJson(res, 200, options.stateProvider ? await options.stateProvider() : await collectDashboardState(options.sessionsDbPath, options));
       } catch (error) {
         if (error instanceof DashboardRequestError) {
           sendDashboardJson(res, error.status, { error: error.message });
           return true;
         }
+        sendDashboardJson(res, 500, dashboardErrorBody(error));
+      }
+      return true;
+    }
+
+    if (url.pathname === '/dashboard/federation') {
+      try {
+        sendDashboardJson(res, 200, collectDashboardFederationState(options.peerProvider, options.settingsPath));
+      } catch (error) {
         sendDashboardJson(res, 500, dashboardErrorBody(error));
       }
       return true;
@@ -652,10 +758,10 @@ export function createDashboardRequestHandler(options: DashboardRequestHandlerOp
   };
 }
 
-export async function collectDashboardState(dbPath?: string): Promise<DashboardState> {
+export async function collectDashboardState(dbPath?: string, options: Pick<DashboardRequestHandlerOptions, 'settingsPath' | 'peerProvider'> = {}): Promise<DashboardState> {
   const [sessionsState, auxiliaryState] = await Promise.all([
     collectDashboardSessions(undefined, dbPath),
-    collectDashboardAuxiliaryState(),
+    collectDashboardAuxiliaryState(options),
   ]);
   return {
     ...sessionsState,
@@ -694,13 +800,15 @@ export async function collectDashboardSessions(url?: URL, dbPath?: string): Prom
       logs: emptyDashboardLogsState(),
       plugins: emptyDashboardPluginsState(),
       templates: emptyDashboardTemplatesState(),
+      federation: emptyDashboardFederationState(),
+      settings: collectDashboardSettingsState(),
     };
   } finally {
     db.close();
   }
 }
 
-async function collectDashboardAuxiliaryState(): Promise<Pick<DashboardState, 'workspaces' | 'accounts' | 'cost' | 'audit' | 'failover' | 'routing' | 'billing' | 'doctor' | 'logs' | 'plugins' | 'templates'>> {
+async function collectDashboardAuxiliaryState(options: Pick<DashboardRequestHandlerOptions, 'settingsPath' | 'peerProvider'> = {}): Promise<Pick<DashboardState, 'workspaces' | 'accounts' | 'cost' | 'audit' | 'failover' | 'routing' | 'billing' | 'doctor' | 'logs' | 'plugins' | 'templates' | 'federation' | 'settings'>> {
   const config = new ConfigManager();
   const profiles = config.getProfiles();
   const accountRefs = getKnownAccounts(profiles, { includeInactive: true });
@@ -745,6 +853,8 @@ async function collectDashboardAuxiliaryState(): Promise<Pick<DashboardState, 'w
     logs: collectDashboardLogs(config),
     plugins: collectDashboardPlugins(),
     templates: collectDashboardTemplates(),
+    federation: collectDashboardFederationState(options.peerProvider, options.settingsPath),
+    settings: collectDashboardSettingsState(options.settingsPath),
   };
 }
 
@@ -1210,6 +1320,335 @@ function emptyDashboardTemplatesState(): DashboardTemplatesState {
   return { generatedAt: new Date().toISOString(), total: 0, custom: 0, templates: [] };
 }
 
+function collectDashboardFederationState(peerProvider?: () => DashboardPeerProviderEntry[], settingsPath?: string): DashboardFederationState {
+  const settings = collectDashboardSettingsState(settingsPath);
+  const peers = (peerProvider?.() ?? [])
+    .map((peer) => ({
+      hostname: peer.hostname,
+      url: peer.url,
+      lastSeen: toIsoString(peer.lastSeen),
+      capabilities: Array.isArray(peer.capabilities) ? peer.capabilities.slice(0, 12) : [],
+      status: (peer.status === 'offline' ? 'offline' : 'online') as DashboardFederationPeer['status'],
+      sessionCount: Math.max(0, Math.round(peer.sessionCount ?? 0)),
+    }))
+    .sort((a, b) => Number(b.status === 'online') - Number(a.status === 'online') || b.lastSeen.localeCompare(a.lastSeen) || a.hostname.localeCompare(b.hostname));
+  return {
+    generatedAt: new Date().toISOString(),
+    enabled: settings.federation.enabled,
+    peers,
+  };
+}
+
+function emptyDashboardFederationState(): DashboardFederationState {
+  return { generatedAt: new Date().toISOString(), enabled: true, peers: [] };
+}
+
+function collectDashboardSettingsState(settingsPath?: string): DashboardSettingsState {
+  return normalizeDashboardSettings(readDashboardSettings(settingsPath));
+}
+
+function patchDashboardSettings(payload: Record<string, unknown>, settingsPath?: string): DashboardSettingsState {
+  const current = collectDashboardSettingsState(settingsPath);
+  const patch = sanitizeDashboardSettingsPatch(payload);
+  const next = normalizeDashboardSettings(deepMergeDashboardSettings(current, patch));
+  writeDashboardSettings(next, settingsPath);
+  return next;
+}
+
+function defaultDashboardSettings(): DashboardSettingsState {
+  return {
+    generatedAt: new Date().toISOString(),
+    general: {
+      machine: os.hostname(),
+    },
+    tmux: {
+      enabled: true,
+      namingScheme: 'workspace-cwd',
+      suffix: 'sweech',
+    },
+    terminal: {
+      preferred: 'auto',
+    },
+    summaries: {
+      enabled: true,
+      providerOrder: ['anthropic', 'openai', 'ollama'],
+      budgetPerSummaryUsd: 0.15,
+      budgetPerDayUsd: 5,
+      model: 'auto',
+    },
+    federation: {
+      enabled: true,
+      discoveryMethod: 'peers-file',
+    },
+    retention: {
+      autoWipe: false,
+      wipeOlderThanDays: 30,
+    },
+    refresh: {
+      sessionsMs: DEFAULT_SESSION_POLL_MS,
+      peersMs: 30_000,
+      doctorNetworkMs: 60_000,
+    },
+  };
+}
+
+function normalizeDashboardSettings(raw: unknown): DashboardSettingsState {
+  const defaults = defaultDashboardSettings();
+  const source = raw && typeof raw === 'object' ? raw as Partial<DashboardSettingsState> : {};
+  const terminalPreferred = oneOfString(
+    (source.terminal as { preferred?: unknown } | undefined)?.preferred,
+    ['auto', 'ghostty', 'iterm2', 'terminal', 'alacritty', 'kitty', 'wezterm'],
+    defaults.terminal.preferred,
+  ) as TerminalName | 'auto';
+  return {
+    generatedAt: new Date().toISOString(),
+    general: {
+      machine: stringSetting((source.general as { machine?: unknown } | undefined)?.machine, defaults.general.machine),
+    },
+    tmux: {
+      enabled: boolSetting((source.tmux as { enabled?: unknown } | undefined)?.enabled, defaults.tmux.enabled),
+      namingScheme: stringSetting((source.tmux as { namingScheme?: unknown } | undefined)?.namingScheme, defaults.tmux.namingScheme),
+      suffix: stringSetting((source.tmux as { suffix?: unknown } | undefined)?.suffix, defaults.tmux.suffix),
+    },
+    terminal: {
+      preferred: terminalPreferred,
+    },
+    summaries: {
+      enabled: boolSetting((source.summaries as { enabled?: unknown } | undefined)?.enabled, defaults.summaries.enabled),
+      providerOrder: stringArraySetting((source.summaries as { providerOrder?: unknown } | undefined)?.providerOrder, defaults.summaries.providerOrder),
+      budgetPerSummaryUsd: nullableNumberSetting((source.summaries as { budgetPerSummaryUsd?: unknown } | undefined)?.budgetPerSummaryUsd, defaults.summaries.budgetPerSummaryUsd),
+      budgetPerDayUsd: nullableNumberSetting((source.summaries as { budgetPerDayUsd?: unknown } | undefined)?.budgetPerDayUsd, defaults.summaries.budgetPerDayUsd),
+      model: stringSetting((source.summaries as { model?: unknown } | undefined)?.model, defaults.summaries.model),
+    },
+    federation: {
+      enabled: boolSetting((source.federation as { enabled?: unknown } | undefined)?.enabled, defaults.federation.enabled),
+      discoveryMethod: stringSetting((source.federation as { discoveryMethod?: unknown } | undefined)?.discoveryMethod, defaults.federation.discoveryMethod),
+    },
+    retention: {
+      autoWipe: boolSetting((source.retention as { autoWipe?: unknown } | undefined)?.autoWipe, defaults.retention.autoWipe),
+      wipeOlderThanDays: nullableIntegerSetting((source.retention as { wipeOlderThanDays?: unknown } | undefined)?.wipeOlderThanDays, defaults.retention.wipeOlderThanDays),
+    },
+    refresh: {
+      sessionsMs: integerRangeSetting((source.refresh as { sessionsMs?: unknown } | undefined)?.sessionsMs, defaults.refresh.sessionsMs, 500, 60_000),
+      peersMs: integerRangeSetting((source.refresh as { peersMs?: unknown } | undefined)?.peersMs, defaults.refresh.peersMs, 5_000, 300_000),
+      doctorNetworkMs: integerRangeSetting((source.refresh as { doctorNetworkMs?: unknown } | undefined)?.doctorNetworkMs, defaults.refresh.doctorNetworkMs, 10_000, 600_000),
+    },
+  };
+}
+
+type DashboardSettingsPatch = {
+  general?: Partial<DashboardSettingsState['general']>;
+  tmux?: Partial<DashboardSettingsState['tmux']>;
+  terminal?: Partial<DashboardSettingsState['terminal']>;
+  summaries?: Partial<DashboardSettingsState['summaries']>;
+  federation?: Partial<DashboardSettingsState['federation']>;
+  retention?: Partial<DashboardSettingsState['retention']>;
+  refresh?: Partial<DashboardSettingsState['refresh']>;
+};
+
+function sanitizeDashboardSettingsPatch(payload: Record<string, unknown>): DashboardSettingsPatch {
+  const patch: DashboardSettingsPatch = {};
+  for (const [section, value] of Object.entries(payload)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new DashboardRequestError(400, `dashboard.${section} must be an object`);
+    const nested = value as Record<string, unknown>;
+    if (section === 'general') patch.general = sanitizeDashboardGeneralPatch(nested);
+    else if (section === 'tmux') patch.tmux = sanitizeDashboardTmuxPatch(nested);
+    else if (section === 'terminal') patch.terminal = sanitizeDashboardTerminalPatch(nested);
+    else if (section === 'summaries') patch.summaries = sanitizeDashboardSummariesPatch(nested);
+    else if (section === 'federation') patch.federation = sanitizeDashboardFederationPatch(nested);
+    else if (section === 'retention') patch.retention = sanitizeDashboardRetentionPatch(nested);
+    else if (section === 'refresh') patch.refresh = sanitizeDashboardRefreshPatch(nested);
+    else throw new DashboardRequestError(400, `Unknown dashboard settings section: ${section}`);
+  }
+  return patch;
+}
+
+function deepMergeDashboardSettings(current: DashboardSettingsState, patch: DashboardSettingsPatch): DashboardSettingsState {
+  return {
+    ...current,
+    general: { ...current.general, ...patch.general },
+    tmux: { ...current.tmux, ...patch.tmux },
+    terminal: { ...current.terminal, ...patch.terminal },
+    summaries: { ...current.summaries, ...patch.summaries },
+    federation: { ...current.federation, ...patch.federation },
+    retention: { ...current.retention, ...patch.retention },
+    refresh: { ...current.refresh, ...patch.refresh },
+  };
+}
+
+function sanitizeDashboardGeneralPatch(value: Record<string, unknown>): Partial<DashboardSettingsState['general']> {
+  return mapDashboardSettingsKeys('general', value, {
+    machine: (input) => requireDashboardString(input, 'general.machine', 1, 200),
+  });
+}
+
+function sanitizeDashboardTmuxPatch(value: Record<string, unknown>): Partial<DashboardSettingsState['tmux']> {
+  return mapDashboardSettingsKeys('tmux', value, {
+    enabled: (input) => requireDashboardBoolean(input, 'tmux.enabled'),
+    namingScheme: (input) => requireDashboardString(input, 'tmux.namingScheme', 1, 80),
+    suffix: (input) => requireDashboardString(input, 'tmux.suffix', 1, 80),
+  });
+}
+
+function sanitizeDashboardTerminalPatch(value: Record<string, unknown>): Partial<DashboardSettingsState['terminal']> {
+  return mapDashboardSettingsKeys('terminal', value, {
+    preferred: (input) => {
+      const terminal = requireDashboardString(input, 'terminal.preferred', 1, 40);
+      if (!['auto', 'ghostty', 'iterm2', 'terminal', 'alacritty', 'kitty', 'wezterm'].includes(terminal)) {
+        throw new DashboardRequestError(400, 'terminal.preferred is invalid');
+      }
+      return terminal as TerminalName | 'auto';
+    },
+  });
+}
+
+function sanitizeDashboardSummariesPatch(value: Record<string, unknown>): Partial<DashboardSettingsState['summaries']> {
+  return mapDashboardSettingsKeys('summaries', value, {
+    enabled: (input) => requireDashboardBoolean(input, 'summaries.enabled'),
+    providerOrder: (input) => {
+      if (!Array.isArray(input)) throw new DashboardRequestError(400, 'summaries.providerOrder must be an array');
+      const providers = input.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean).slice(0, 12);
+      if (providers.length === 0) throw new DashboardRequestError(400, 'summaries.providerOrder must include at least one provider');
+      return providers;
+    },
+    budgetPerSummaryUsd: (input) => requireDashboardNullableNumber(input, 'summaries.budgetPerSummaryUsd', 0, 100),
+    budgetPerDayUsd: (input) => requireDashboardNullableNumber(input, 'summaries.budgetPerDayUsd', 0, 10_000),
+    model: (input) => requireDashboardString(input, 'summaries.model', 1, 128),
+  });
+}
+
+function sanitizeDashboardFederationPatch(value: Record<string, unknown>): Partial<DashboardSettingsState['federation']> {
+  return mapDashboardSettingsKeys('federation', value, {
+    enabled: (input) => requireDashboardBoolean(input, 'federation.enabled'),
+    discoveryMethod: (input) => requireDashboardString(input, 'federation.discoveryMethod', 1, 80),
+  });
+}
+
+function sanitizeDashboardRetentionPatch(value: Record<string, unknown>): Partial<DashboardSettingsState['retention']> {
+  return mapDashboardSettingsKeys('retention', value, {
+    autoWipe: (input) => requireDashboardBoolean(input, 'retention.autoWipe'),
+    wipeOlderThanDays: (input) => requireDashboardNullableInteger(input, 'retention.wipeOlderThanDays', 0, 3650),
+  });
+}
+
+function sanitizeDashboardRefreshPatch(value: Record<string, unknown>): Partial<DashboardSettingsState['refresh']> {
+  return mapDashboardSettingsKeys('refresh', value, {
+    sessionsMs: (input) => requireDashboardInteger(input, 'refresh.sessionsMs', 500, 60_000),
+    peersMs: (input) => requireDashboardInteger(input, 'refresh.peersMs', 5_000, 300_000),
+    doctorNetworkMs: (input) => requireDashboardInteger(input, 'refresh.doctorNetworkMs', 10_000, 600_000),
+  });
+}
+
+function mapDashboardSettingsKeys<T extends Record<string, unknown>>(
+  section: string,
+  value: Record<string, unknown>,
+  validators: Record<string, (input: unknown) => unknown>,
+): Partial<T> {
+  const output: Record<string, unknown> = {};
+  for (const [key, input] of Object.entries(value)) {
+    const validate = validators[key];
+    if (!validate) throw new DashboardRequestError(400, `Unknown dashboard setting: ${section}.${key}`);
+    output[key] = validate(input);
+  }
+  return output as Partial<T>;
+}
+
+function requireDashboardString(value: unknown, field: string, min: number, max: number): string {
+  if (typeof value !== 'string') throw new DashboardRequestError(400, `${field} must be a string`);
+  const trimmed = value.trim();
+  if (trimmed.length < min || trimmed.length > max) throw new DashboardRequestError(400, `${field} is invalid`);
+  return trimmed;
+}
+
+function requireDashboardBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') throw new DashboardRequestError(400, `${field} must be a boolean`);
+  return value;
+}
+
+function requireDashboardNullableNumber(value: unknown, field: string, min: number, max: number): number | null {
+  if (value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+    throw new DashboardRequestError(400, `${field} must be a number from ${min} to ${max}`);
+  }
+  return Math.round(value * 1000) / 1000;
+}
+
+function requireDashboardNullableInteger(value: unknown, field: string, min: number, max: number): number | null {
+  if (value === null) return null;
+  return requireDashboardInteger(value, field, min, max);
+}
+
+function requireDashboardInteger(value: unknown, field: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new DashboardRequestError(400, `${field} must be an integer from ${min} to ${max}`);
+  }
+  return value;
+}
+
+function dashboardSettingsPath(settingsPath?: string): string {
+  if (settingsPath) return settingsPath;
+  const config = new ConfigManager();
+  const maybeConfig = config as ConfigManager & { getConfigDir?: () => string };
+  const configDir = typeof maybeConfig.getConfigDir === 'function' ? maybeConfig.getConfigDir() : path.join(os.homedir(), '.sweech');
+  return path.join(configDir, 'dashboard-settings.json');
+}
+
+function readDashboardSettings(settingsPath?: string): unknown {
+  const file = dashboardSettingsPath(settingsPath);
+  try {
+    if (!fs.existsSync(file)) return {};
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDashboardSettings(settings: DashboardSettingsState, settingsPath?: string): void {
+  const file = dashboardSettingsPath(settingsPath);
+  const { generatedAt: _generatedAt, ...persisted } = settings;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  atomicWriteFileSync(file, JSON.stringify(persisted, null, 2) + '\n', { mode: 0o600 });
+}
+
+function stringSetting(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 200) : fallback;
+}
+
+function boolSetting(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function stringArraySetting(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) return fallback;
+  const strings = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean).slice(0, 12);
+  return strings.length > 0 ? strings : fallback;
+}
+
+function nullableNumberSetting(value: unknown, fallback: number | null): number | null {
+  if (value === null) return null;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value * 1000) / 1000 : fallback;
+}
+
+function nullableIntegerSetting(value: unknown, fallback: number | null): number | null {
+  if (value === null) return null;
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.round(value) : fallback;
+}
+
+function integerRangeSetting(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function oneOfString(value: unknown, choices: readonly string[], fallback: string): string {
+  return typeof value === 'string' && choices.includes(value) ? value : fallback;
+}
+
+function toIsoString(value: number | string): string {
+  const millis = typeof value === 'number' ? value : Date.parse(value);
+  return Number.isFinite(millis) ? new Date(millis).toISOString() : new Date(0).toISOString();
+}
+
 function dashboardTemplateFromTemplate(template: ProfileTemplate, builtIn: boolean): DashboardTemplate {
   return {
     name: template.name,
@@ -1439,6 +1878,7 @@ async function restoreLocalDashboardSession(
   requestedTerminal: TerminalName | undefined,
   terminalLauncher: typeof launchTerminal,
   dbPath?: string,
+  settingsPath?: string,
 ): Promise<{ ok: boolean; session: DashboardSession; launch?: unknown; reason?: string }> {
   const db = new SessionsDb(dbPath);
   try {
@@ -1446,7 +1886,8 @@ async function restoreLocalDashboardSession(
     if (!session) throw new DashboardRequestError(404, 'Dashboard session not found');
     if (session.machine !== os.hostname()) throw new DashboardRequestError(409, 'Remote dashboard sessions must be restored through federation');
     if (session.status === 'closed') throw new DashboardRequestError(409, 'Closed dashboard sessions cannot be restored');
-    const terminal = requestedTerminal ?? terminalFromSession(session) ?? 'ghostty';
+    const configuredTerminal = collectDashboardSettingsState(settingsPath).terminal.preferred;
+    const terminal = requestedTerminal ?? terminalFromSession(session) ?? (configuredTerminal === 'auto' ? 'ghostty' : configuredTerminal);
     const command: [string, ...string[]] = session.tmuxName
       ? ['tmux', 'attach', '-t', session.tmuxName]
       : [session.workspace, '--continue'];
@@ -1767,6 +2208,8 @@ function isAllowedDashboardOrigin(host: string | undefined, origin: string | und
     if (site === 'same-origin' || site === 'none') return true;
     return pathname !== '/dashboard/state'
       && pathname !== '/dashboard/sessions'
+      && pathname !== '/dashboard/federation'
+      && pathname !== '/dashboard/settings'
       && !isUnsafeDashboardPath(pathname)
       && !/^\/dashboard\/sessions\/[^/]+\/summary$/.test(pathname)
       && !/^\/dashboard\/sessions\/[^/]+\/restore$/.test(pathname)
@@ -1789,6 +2232,7 @@ function isUnsafeDashboardPath(pathname: string): boolean {
     || /^\/dashboard\/plugins\/.+$/.test(pathname)
     || pathname === '/dashboard/templates'
     || /^\/dashboard\/templates\/[^/]+$/.test(pathname)
+    || pathname === '/dashboard/settings'
     || pathname === '/dashboard/routing/pin'
     || /^\/dashboard\/failover\/cooldowns\/[^/]+$/.test(pathname)
     || /^\/dashboard\/workspaces\/[^/]+$/.test(pathname);

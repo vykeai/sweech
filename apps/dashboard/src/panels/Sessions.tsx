@@ -17,6 +17,7 @@ type SessionsPanelProps = {
   sessions: DashboardSession[];
   connected: boolean;
   localMachine: string;
+  onOpenSetupWizard?: () => void;
 };
 
 type RestoreState = {
@@ -39,7 +40,7 @@ const SORT_OPTIONS: Array<{ value: SessionSort; label: string }> = [
   { value: 'workspace', label: 'Workspace' },
 ];
 
-export function SessionsPanel({ sessions, connected, localMachine }: SessionsPanelProps) {
+export function SessionsPanel({ sessions, connected, localMachine, onOpenSetupWizard }: SessionsPanelProps) {
   const normalized = React.useMemo(() => sessions.map(normalizeSession), [sessions]);
   const options = React.useMemo(() => sessionFilterOptions(normalized), [normalized]);
   const [filters, setFilters] = React.useState<SessionFilters>({ machine: '', status: 'all', workspace: '', search: '' });
@@ -97,7 +98,7 @@ export function SessionsPanel({ sessions, connected, localMachine }: SessionsPan
         <div className="empty-state" data-testid="sessions-empty-state">
           <strong>No sessions yet</strong>
           <p>Launch a workspace to create the first durable session tile.</p>
-          <button type="button">Setup wizard</button>
+          <button data-testid="setup-wizard-open" onClick={onOpenSetupWizard} type="button">Setup wizard</button>
         </div>
       ) : (
         <>

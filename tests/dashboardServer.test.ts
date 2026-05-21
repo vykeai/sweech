@@ -413,6 +413,8 @@ describe('dashboard server', () => {
     expect(body.cost).toMatchObject({ spent7dUsd: 1.75, estCostPerCallUsd: 0.009 });
     expect(body.cost.providers[0]).toMatchObject({ provider: 'anthropic', profiles: 1 });
     expect(body.cost.rows).toBeUndefined();
+    expect(body.federation).toMatchObject({ enabled: true, peers: [] });
+    expect(body.settings).toMatchObject({ terminal: { preferred: 'auto' }, tmux: { enabled: true } });
     expect(body.audit).toMatchObject({ scanned: 2, totalIssues: 2, fixable: 2 });
     expect(body.audit.findings[0]).toMatchObject({ profile: 'codex-wrong', fixAction: 'fix_provider', expectedProvider: 'ollama' });
     expect(body.audit.findings[0].detail).toContain('[REDACTED]');
@@ -435,6 +437,74 @@ describe('dashboard server', () => {
     expect(mockRecommendRoute).toHaveBeenCalledWith({}, expect.any(Array), expect.objectContaining({
       source: '/repo/sweech/.sweech.json',
     }), { logPinAudit: false });
+  });
+
+  test('serves federation peers from the dashboard peer provider', async () => {
+    const handler = createDashboardRequestHandler({
+      assetsDir: tmp,
+      catchAllAssets: true,
+      peerProvider: () => [{
+        hostname: 'studio-mini',
+        url: 'http://studio-mini.local:7043',
+        lastSeen: Date.UTC(2026, 4, 21, 9, 30),
+        capabilities: ['dashboard', 'dashboard-v1'],
+        status: 'online',
+        sessionCount: 3,
+      }],
+    });
+    const peerServer = http.createServer((req, res) => void handler(req, res));
+    await new Promise<void>((resolve, reject) => peerServer.listen(0, '127.0.0.1', () => resolve()).on('error', reject));
+    const address = peerServer.address();
+    if (!address || typeof address === 'string') throw new Error('peer server did not expose a port');
+    const peerPort = address.port;
+    const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      http.get({ hostname: '127.0.0.1', port: peerPort, path: '/dashboard/federation', headers: { Origin: `http://127.0.0.1:${peerPort}` } }, (response) => {
+        let body = '';
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, body }));
+      }).on('error', reject);
+    });
+    await new Promise<void>((resolve) => peerServer.close(() => resolve()));
+
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).peers[0]).toMatchObject({ hostname: 'studio-mini', status: 'online', sessionCount: 3, capabilities: ['dashboard', 'dashboard-v1'] });
+  });
+
+  test('settings route returns defaults and persists partial patches in the sidecar file', async () => {
+    const settingsFile = path.join(tmp, 'dashboard-settings.json');
+    const handler = createDashboardRequestHandler({ assetsDir: tmp, catchAllAssets: true, settingsPath: settingsFile });
+    const settingsServer = http.createServer((req, res) => void handler(req, res));
+    await new Promise<void>((resolve, reject) => settingsServer.listen(0, '127.0.0.1', () => resolve()).on('error', reject));
+    const address = settingsServer.address();
+    if (!address || typeof address === 'string') throw new Error('settings server did not expose a port');
+    const settingsPort = address.port;
+    const send = (method: string, body?: string) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = http.request({
+        hostname: '127.0.0.1',
+        port: settingsPort,
+        path: '/dashboard/settings',
+        method,
+        headers: { Origin: `http://127.0.0.1:${settingsPort}`, 'Content-Type': 'application/json' },
+      }, (response) => {
+        let responseBody = '';
+        response.on('data', (chunk) => { responseBody += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, body: responseBody }));
+      });
+      req.on('error', reject);
+      req.end(body ?? '');
+    });
+
+    const initial = await send('GET');
+    const patched = await send('PATCH', JSON.stringify({ terminal: { preferred: 'kitty' }, tmux: { enabled: false }, refresh: { sessionsMs: 1500 } }));
+    const invalid = await send('PATCH', JSON.stringify({ terminal: { preferred: 'bad-terminal' } }));
+    await new Promise<void>((resolve) => settingsServer.close(() => resolve()));
+
+    expect(initial.status).toBe(200);
+    expect(JSON.parse(initial.body)).toMatchObject({ terminal: { preferred: 'auto' } });
+    expect(patched.status).toBe(200);
+    expect(JSON.parse(patched.body)).toMatchObject({ terminal: { preferred: 'kitty' }, tmux: { enabled: false }, refresh: { sessionsMs: 1500 } });
+    expect(JSON.parse(fs.readFileSync(settingsFile, 'utf-8'))).toMatchObject({ terminal: { preferred: 'kitty' } });
+    expect(invalid.status).toBe(400);
   });
 
   test('dashboard account utilization prefers the All models bucket', async () => {
@@ -809,6 +879,7 @@ describe('dashboard server', () => {
       { path: '/dashboard/routing/pin', method: 'DELETE', body: '' },
       { path: '/dashboard/templates', method: 'POST', body: JSON.stringify({ name: 'local-new', cliType: 'codex', provider: 'ollama' }) },
       { path: '/dashboard/templates/local-fast', method: 'DELETE', body: '' },
+      { path: '/dashboard/settings', method: 'PATCH', body: JSON.stringify({ terminal: { preferred: 'kitty' } }) },
     ];
     for (const route of routes) {
       const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {

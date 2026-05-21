@@ -3,13 +3,13 @@
   "title": "Federation panel + Settings drawer + Setup wizard",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "active",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "Federation: peer cards, last-seen, capabilities. Settings drawer (Q1): sections General/tmux/Terminal/Summaries/Federation/Retention/Refresh. Setup wizard: multi-step modal for first-launch (Q4).",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-21T06:56:29.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-21T06:56:29.000Z"
+    }
+  ],
   "dependsOn": [
     "T-DASH-001",
     "T-DASH-005",

@@ -4,6 +4,8 @@ import { ThemeProvider, themes } from '@vykeai/vysual-react';
 import { create } from 'zustand';
 import { HeroStrip } from './components/HeroStrip';
 import { type DoctorCheck, deriveHeroStats } from './components/heroStats';
+import { SettingsDrawer } from './components/SettingsDrawer';
+import { SetupWizard } from './components/SetupWizard';
 import { SessionsPanel } from './panels/Sessions';
 import { type DashboardSession } from './components/sessionViewModel';
 import { AccountsPanel } from './panels/Accounts';
@@ -12,12 +14,14 @@ import { BillingPanel } from './panels/Billing';
 import { CostPanel } from './panels/Cost';
 import { DoctorPanel } from './panels/Doctor';
 import { FailoverPanel } from './panels/Failover';
+import { FederationPanel } from './panels/Federation';
 import { LogsPanel } from './panels/Logs';
 import { PluginsPanel } from './panels/Plugins';
 import { RoutingPanel } from './panels/Routing';
+import { SettingsPanel } from './panels/Settings';
 import { TemplatesPanel } from './panels/Templates';
 import { WorkspacesPanel } from './panels/Workspaces';
-import { type DashboardAccount, type DashboardAuditFinding, type DashboardAuditState, type DashboardBillingState, type DashboardCostState, type DashboardDoctorState, type DashboardFailoverState, type DashboardLogLine, type DashboardLogsState, type DashboardPluginsState, type DashboardRouteCandidate, type DashboardRoutingState, type DashboardTemplatesState, type DashboardWorkspace } from './components/panelViewModel';
+import { type DashboardAccount, type DashboardAuditFinding, type DashboardAuditState, type DashboardBillingState, type DashboardCostState, type DashboardDoctorState, type DashboardFailoverState, type DashboardFederationState, type DashboardLogLine, type DashboardLogsState, type DashboardPluginsState, type DashboardRouteCandidate, type DashboardRoutingState, type DashboardSettingsState, type DashboardTemplatesState, type DashboardWorkspace } from './components/panelViewModel';
 import './styles.css';
 
 type DashboardState = {
@@ -33,12 +37,14 @@ type DashboardState = {
   logs: DashboardLogsState;
   plugins: DashboardPluginsState;
   templates: DashboardTemplatesState;
+  federation: DashboardFederationState;
+  settings: DashboardSettingsState;
   doctorChecks: DoctorCheck[];
   connected: boolean;
   localMachine: string;
   panels: Record<string, 'idle' | 'loading' | 'ready'>;
   setConnected: (connected: boolean) => void;
-  applyInitialState: (state: { sessions?: DashboardSession[]; machine?: string; workspaces?: DashboardWorkspace[]; accounts?: DashboardAccount[]; cost?: DashboardCostState; audit?: DashboardAuditState; failover?: DashboardFailoverState; routing?: DashboardRoutingState; billing?: DashboardBillingState; doctor?: DashboardDoctorState; logs?: DashboardLogsState; plugins?: DashboardPluginsState; templates?: DashboardTemplatesState }) => void;
+  applyInitialState: (state: { sessions?: DashboardSession[]; machine?: string; workspaces?: DashboardWorkspace[]; accounts?: DashboardAccount[]; cost?: DashboardCostState; audit?: DashboardAuditState; failover?: DashboardFailoverState; routing?: DashboardRoutingState; billing?: DashboardBillingState; doctor?: DashboardDoctorState; logs?: DashboardLogsState; plugins?: DashboardPluginsState; templates?: DashboardTemplatesState; federation?: DashboardFederationState; settings?: DashboardSettingsState }) => void;
   updateWorkspace: (workspace: DashboardWorkspace) => void;
   applyAuditFix: (profile: string, action: NonNullable<DashboardAuditFinding['fixAction']>) => void;
   clearCooldown: (commandName: string) => void;
@@ -48,6 +54,8 @@ type DashboardState = {
   appendLogs: (lines: DashboardLogLine[]) => void;
   setPlugins: (plugins: DashboardPluginsState) => void;
   setTemplates: (templates: DashboardTemplatesState) => void;
+  setFederation: (federation: DashboardFederationState) => void;
+  setSettings: (settings: DashboardSettingsState) => void;
 };
 
 type DashboardInitialPayload = {
@@ -64,6 +72,8 @@ type DashboardInitialPayload = {
   logs?: unknown;
   plugins?: unknown;
   templates?: unknown;
+  federation?: unknown;
+  settings?: unknown;
 };
 
 const emptyCost: DashboardCostState = {
@@ -80,6 +90,16 @@ const emptyDoctor: DashboardDoctorState = { status: 'ok', checks: [] };
 const emptyLogs: DashboardLogsState = { lines: [] };
 const emptyPlugins: DashboardPluginsState = { total: 0, enabled: 0, plugins: [] };
 const emptyTemplates: DashboardTemplatesState = { total: 0, custom: 0, templates: [] };
+const emptyFederation: DashboardFederationState = { enabled: true, peers: [] };
+const emptySettings: DashboardSettingsState = {
+  general: { machine: '' },
+  tmux: { enabled: true, namingScheme: 'workspace-cwd', suffix: 'sweech' },
+  terminal: { preferred: 'auto' },
+  summaries: { enabled: true, providerOrder: ['anthropic'], budgetPerSummaryUsd: 0.15, budgetPerDayUsd: 5, model: 'auto' },
+  federation: { enabled: true, discoveryMethod: 'peers-file' },
+  retention: { autoWipe: false, wipeOlderThanDays: 30 },
+  refresh: { sessionsMs: 2000, peersMs: 30000, doctorNetworkMs: 60000 },
+};
 
 const useDashboardStore = create<DashboardState>((set) => ({
   sessions: [],
@@ -94,6 +114,8 @@ const useDashboardStore = create<DashboardState>((set) => ({
   logs: emptyLogs,
   plugins: emptyPlugins,
   templates: emptyTemplates,
+  federation: emptyFederation,
+  settings: emptySettings,
   doctorChecks: [],
   connected: false,
   localMachine: '',
@@ -121,8 +143,10 @@ const useDashboardStore = create<DashboardState>((set) => ({
     logs: state.logs ?? current.logs,
     plugins: state.plugins ?? current.plugins,
     templates: state.templates ?? current.templates,
+    federation: state.federation ?? current.federation,
+    settings: state.settings ?? current.settings,
     localMachine: state.machine ?? current.localMachine,
-    panels: { ...current.panels, sessions: 'ready', workspaces: 'ready', accounts: 'ready', cost: 'ready', audit: 'ready', failover: 'ready', routing: 'ready', billing: 'ready', doctor: 'ready', logs: 'ready', plugins: 'ready', templates: 'ready' },
+    panels: { ...current.panels, sessions: 'ready', workspaces: 'ready', accounts: 'ready', cost: 'ready', audit: 'ready', failover: 'ready', routing: 'ready', billing: 'ready', doctor: 'ready', logs: 'ready', plugins: 'ready', templates: 'ready', federation: 'ready', settings: 'ready' },
   })),
   updateWorkspace: (workspace) => set((state) => ({
     workspaces: state.workspaces.map((item) => item.commandName === workspace.commandName ? { ...item, ...workspace } : item),
@@ -169,6 +193,14 @@ const useDashboardStore = create<DashboardState>((set) => ({
     templates,
     panels: { ...state.panels, templates: 'ready' },
   })),
+  setFederation: (federation) => set((state) => ({
+    federation,
+    panels: { ...state.panels, federation: 'ready' },
+  })),
+  setSettings: (settings) => set((state) => ({
+    settings,
+    panels: { ...state.panels, settings: 'ready' },
+  })),
 }));
 
 function useInitialState(url: string) {
@@ -195,6 +227,8 @@ function useInitialState(url: string) {
             logs: payload.logs && typeof payload.logs === 'object' ? payload.logs as DashboardLogsState : undefined,
             plugins: payload.plugins && typeof payload.plugins === 'object' ? payload.plugins as DashboardPluginsState : undefined,
             templates: payload.templates && typeof payload.templates === 'object' ? payload.templates as DashboardTemplatesState : undefined,
+            federation: payload.federation && typeof payload.federation === 'object' ? payload.federation as DashboardFederationState : undefined,
+            settings: payload.settings && typeof payload.settings === 'object' ? payload.settings as DashboardSettingsState : undefined,
           });
         }
       })
@@ -328,14 +362,18 @@ function App() {
   useInitialState('/dashboard/state');
   useSSE('/dashboard/events');
   useDoctorRefresh('/dashboard/doctor');
-  const { connected, sessions, doctorChecks, localMachine, workspaces, accounts, cost, audit, failover, routing, billing, doctor, logs, plugins, templates } = useDashboardStore();
+  const { connected, sessions, doctorChecks, localMachine, workspaces, accounts, cost, audit, failover, routing, billing, doctor, logs, plugins, templates, federation, settings } = useDashboardStore();
   const updateWorkspace = useDashboardStore((state) => state.updateWorkspace);
   const applyAuditFix = useDashboardStore((state) => state.applyAuditFix);
   const clearCooldown = useDashboardStore((state) => state.clearCooldown);
   const setDoctor = useDashboardStore((state) => state.setDoctor);
   const setPlugins = useDashboardStore((state) => state.setPlugins);
   const setTemplates = useDashboardStore((state) => state.setTemplates);
+  const setFederation = useDashboardStore((state) => state.setFederation);
+  const setSettings = useDashboardStore((state) => state.setSettings);
   const applyInitialState = useDashboardStore((state) => state.applyInitialState);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [setupOpen, setSetupOpen] = React.useState(false);
   const refreshDashboardState = React.useCallback(async () => {
     const res = await fetch('/dashboard/state');
     if (!res.ok) return;
@@ -354,8 +392,14 @@ function App() {
       logs: payload.logs && typeof payload.logs === 'object' ? payload.logs as DashboardLogsState : undefined,
       plugins: payload.plugins && typeof payload.plugins === 'object' ? payload.plugins as DashboardPluginsState : undefined,
       templates: payload.templates && typeof payload.templates === 'object' ? payload.templates as DashboardTemplatesState : undefined,
+      federation: payload.federation && typeof payload.federation === 'object' ? payload.federation as DashboardFederationState : undefined,
+      settings: payload.settings && typeof payload.settings === 'object' ? payload.settings as DashboardSettingsState : undefined,
     });
   }, [applyInitialState]);
+  const refreshFederation = React.useCallback(async () => {
+    const res = await fetch('/dashboard/federation');
+    if (res.ok) setFederation(await res.json() as DashboardFederationState);
+  }, [setFederation]);
   const refreshDoctor = React.useCallback(async () => {
     const res = await fetch('/dashboard/doctor');
     if (res.ok) setDoctor(await res.json() as DashboardDoctorState);
@@ -391,7 +435,7 @@ function App() {
       <main className="dashboard-shell">
         <HeroStrip connected={connected} stats={heroStats} />
 
-        <SessionsPanel sessions={sessions} connected={connected} localMachine={localMachine} />
+        <SessionsPanel sessions={sessions} connected={connected} localMachine={localMachine} onOpenSetupWizard={() => setSetupOpen(true)} />
 
         <section className="mid-grid" aria-label="Dashboard panels">
           <WorkspacesPanel workspaces={workspaces} onWorkspaceSaved={updateWorkspace} />
@@ -405,7 +449,11 @@ function App() {
           <LogsPanel logs={logs} />
           <PluginsPanel plugins={plugins} onPluginsChanged={setPlugins} />
           <TemplatesPanel templates={templates} onTemplatesChanged={setTemplates} />
+          <FederationPanel federation={federation} onRefresh={refreshFederation} />
+          <SettingsPanel settings={settings} onOpen={() => setSettingsOpen(true)} />
         </section>
+        <SettingsDrawer open={settingsOpen} settings={settings} onClose={() => setSettingsOpen(false)} onSave={setSettings} />
+        <SetupWizard open={setupOpen} settings={settings} workspaces={workspaces} onClose={() => setSetupOpen(false)} />
       </main>
     </ThemeProvider>
   );

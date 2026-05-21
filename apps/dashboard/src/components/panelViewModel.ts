@@ -186,6 +186,32 @@ export type DashboardTemplatesState = {
   templates: DashboardTemplate[];
 };
 
+export type DashboardFederationPeer = {
+  hostname: string;
+  url: string;
+  lastSeen: string;
+  capabilities: string[];
+  status: 'online' | 'offline';
+  sessionCount: number;
+};
+
+export type DashboardFederationState = {
+  generatedAt?: string;
+  enabled: boolean;
+  peers: DashboardFederationPeer[];
+};
+
+export type DashboardSettingsState = {
+  generatedAt?: string;
+  general: { machine: string };
+  tmux: { enabled: boolean; namingScheme: string; suffix: string };
+  terminal: { preferred: 'auto' | 'ghostty' | 'iterm2' | 'terminal' | 'alacritty' | 'kitty' | 'wezterm' };
+  summaries: { enabled: boolean; providerOrder: string[]; budgetPerSummaryUsd: number | null; budgetPerDayUsd: number | null; model: string };
+  federation: { enabled: boolean; discoveryMethod: string };
+  retention: { autoWipe: boolean; wipeOlderThanDays: number | null };
+  refresh: { sessionsMs: number; peersMs: number; doctorNetworkMs: number };
+};
+
 export function workspaceStatus(workspace: DashboardWorkspace): { label: string; tone: 'success' | 'warning' | 'muted' } {
   if (workspace.hidden) return { label: 'Hidden', tone: 'muted' };
   if (workspace.disabled) return { label: 'Disabled', tone: 'warning' };
@@ -276,6 +302,10 @@ export function logTone(severity: DashboardLogLine['severity']): 'success' | 'wa
   if (severity === 'warn') return 'warning';
   if (severity === 'info') return 'muted';
   return 'success';
+}
+
+export function federationTone(status: DashboardFederationPeer['status']): 'success' | 'warning' {
+  return status === 'online' ? 'success' : 'warning';
 }
 
 export function safeTestId(value: string): string {

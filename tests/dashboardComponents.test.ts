@@ -35,7 +35,9 @@ import { AuditPanel } from '../apps/dashboard/src/panels/Audit';
 import { BillingPanel } from '../apps/dashboard/src/panels/Billing';
 import { CostPanel } from '../apps/dashboard/src/panels/Cost';
 import { FailoverPanel } from '../apps/dashboard/src/panels/Failover';
+import { FederationPanel } from '../apps/dashboard/src/panels/Federation';
 import { RoutingPanel } from '../apps/dashboard/src/panels/Routing';
+import { SettingsPanel } from '../apps/dashboard/src/panels/Settings';
 import { SessionsPanel } from '../apps/dashboard/src/panels/Sessions';
 import { WorkspacesPanel } from '../apps/dashboard/src/panels/Workspaces';
 
@@ -222,6 +224,39 @@ describe('dashboard workspace account cost panels', () => {
   test('costSparklineBars pads and bounds dashboard bars', () => {
     expect(costSparklineBars({ spent7dUsd: 0, estCostPerCallUsd: 0, providers: [], sparkline: [1, 60] })).toHaveLength(7);
     expect(Math.max(...costSparklineBars({ spent7dUsd: 0, estCostPerCallUsd: 0, providers: [], sparkline: [1, 60] }))).toBe(36);
+  });
+
+  test('FederationPanel and SettingsPanel render T-DASH-014 state', () => {
+    const federationHtml = renderToStaticMarkup(React.createElement(FederationPanel, {
+      federation: {
+        enabled: true,
+        peers: [{
+          hostname: 'studio-mini',
+          url: 'http://studio-mini.local:7043',
+          lastSeen: '2026-05-21T09:30:00.000Z',
+          capabilities: ['dashboard', 'dashboard-v1'],
+          status: 'online',
+          sessionCount: 3,
+        }],
+      },
+    }));
+    const settingsHtml = renderToStaticMarkup(React.createElement(SettingsPanel, {
+      settings: {
+        general: { machine: 'studio' },
+        tmux: { enabled: true, namingScheme: 'workspace-cwd', suffix: 'sweech' },
+        terminal: { preferred: 'kitty' },
+        summaries: { enabled: true, providerOrder: ['anthropic'], budgetPerSummaryUsd: 0.15, budgetPerDayUsd: 5, model: 'auto' },
+        federation: { enabled: true, discoveryMethod: 'peers-file' },
+        retention: { autoWipe: false, wipeOlderThanDays: 30 },
+        refresh: { sessionsMs: 2000, peersMs: 30000, doctorNetworkMs: 60000 },
+      },
+      onOpen: () => undefined,
+    }));
+
+    expect(federationHtml).toContain('federation-peer-studio-mini');
+    expect(federationHtml).toContain('dashboard-v1');
+    expect(settingsHtml).toContain('settings-open');
+    expect(settingsHtml).toContain('kitty terminal');
   });
 });
 

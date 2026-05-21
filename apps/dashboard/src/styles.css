@@ -42,6 +42,11 @@ select {
   width: 100%;
 }
 
+input[type="checkbox"] {
+  min-height: auto;
+  width: auto;
+}
+
 .dashboard-shell {
   min-height: 100vh;
   overflow-x: hidden;
@@ -574,7 +579,8 @@ h2 {
 .cooldown-list,
 .routing-list,
 .billing-list,
-.ops-list {
+.ops-list,
+.capability-row {
   display: grid;
   gap: 10px;
 }
@@ -879,6 +885,13 @@ h2 {
   justify-content: flex-start;
 }
 
+.capability-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
 .log-row {
   align-items: flex-start;
   justify-content: flex-start;
@@ -978,6 +991,99 @@ h2 {
   font-size: 11px;
   font-weight: 800;
   gap: 5px;
+}
+
+.drawer-backdrop {
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0;
+}
+
+.settings-drawer {
+  background: var(--vysual-surface);
+  border: 0;
+  border-left: 1px solid var(--vysual-border);
+  box-shadow: -18px 0 70px rgb(15 23 42 / 0.22);
+  color: var(--vysual-text);
+  display: grid;
+  gap: 14px;
+  grid-auto-rows: max-content;
+  margin: 0;
+  max-height: 100vh;
+  overflow: auto;
+  padding: 18px;
+  width: min(480px, 100vw);
+}
+
+.settings-section,
+.wizard-body {
+  background: var(--vysual-surface-strong);
+  border: 1px solid var(--vysual-border);
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.settings-section h3,
+.wizard-body h3 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.settings-section label,
+.wizard-body label {
+  color: var(--vysual-muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.toggle-row {
+  align-items: center;
+  display: flex !important;
+  gap: 8px !important;
+}
+
+.drawer-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.setup-wizard {
+  max-width: 680px;
+}
+
+.wizard-steps {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.wizard-steps li {
+  background: var(--vysual-surface-strong);
+  border: 1px solid var(--vysual-border);
+  border-radius: 6px;
+  color: var(--vysual-muted);
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 34px;
+  padding: 8px;
+  text-align: center;
+}
+
+.wizard-steps li.active {
+  border-color: var(--vysual-accent);
+  color: var(--vysual-accent);
+}
+
+.wizard-steps li.done {
+  color: var(--vysual-success);
 }
 
 .workspace-edit-form input {
@@ -1086,5 +1192,14 @@ h2 {
   .inline-form,
   .template-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .wizard-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-drawer {
+    border-left: 0;
+    width: 100vw;
   }
 }
