@@ -3,13 +3,13 @@
   "title": "sessionSummarizer.ts — AI tile summaries (hybrid local→cloud)",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "active",
+  "status": "done",
   "priority": "high",
   "platform": null,
   "assignee": "codex",
   "description": "Reads last 20-30 jsonl events + aiTitle. Hybrid provider: ollama first via sweech auto --provider ollama, fallback to sweech auto --budget 0.005. Writes summary_one/bullets/provider/model/cost/at to sessions.db. Debounced queue; eager every 50 msgs + on session-end; lazy on viewport scroll. SSE summary.updated events.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-21T00:30:36.000Z",
+  "updatedAt": "2026-05-21T00:42:39.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -22,6 +22,10 @@
     {
       "status": "active",
       "ts": "2026-05-21T00:30:36.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-21T00:42:39.000Z"
     }
   ],
   "dependsOn": [
@@ -34,6 +38,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "ts": "2026-05-21T00:42:46.000Z",
+      "text": "Implemented dashboard session summarizer: bounded/contained JSONL digest, local Ollama summary path with explicit cloud opt-in fallback, DB summary writeback, summary.updated SSE, session-end hook, dashboard viewport trigger, and tile rendering for summary/bullets. Proof: focused Jest 8 suites/115 tests passed after merge, tsc passed, build passed, UI screenshot captured and inspected at /Users/luke/Desktop/screenshots/sweech/T-DASH-008-dashboard-summary.png.",
+      "by": "human"
     }
   ]
 }

@@ -3,13 +3,13 @@
   "title": "Federation /fed/dashboard/* routes",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "active",
+  "status": "done",
   "priority": "high",
   "platform": null,
   "assignee": "codex",
   "description": "GET /fed/dashboard/state (HMAC), POST /fed/dashboard/restore (HMAC), POST /fed/dashboard/summary (HMAC). mDNS TXT extended with caps=dashboard-v1. Discovery poll every 10s while dashboard open.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-21T00:30:36.000Z",
+  "updatedAt": "2026-05-21T00:42:39.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -22,6 +22,10 @@
     {
       "status": "active",
       "ts": "2026-05-21T00:30:36.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-21T00:42:39.000Z"
     }
   ],
   "dependsOn": [
@@ -34,6 +38,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "ts": "2026-05-21T00:42:46.000Z",
+      "text": "Implemented HMAC-protected /fed/dashboard/state, /fed/dashboard/restore, and /fed/dashboard/summary; /fed/info dashboard-v1 capability advertising; peer cache and dashboard-open polling; federated summary writes through SessionsDb.updateSummary; restore path uses terminal launcher injection. Proof: focused federation/dashboard Jest suites passed after merge and tsc/build passed.",
+      "by": "human"
     }
   ]
 }
