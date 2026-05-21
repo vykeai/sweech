@@ -19,6 +19,7 @@ test.afterAll(async () => {
 test('workspaces accounts and cost panels render real dashboard state', async ({ page }) => {
   const screenshotDir = process.env.PROJECT_SCREENSHOT_DIR;
   await page.setViewportSize({ width: 1440, height: 1100 });
+  await setupDashboardPanelRoutes(page);
   await page.route('**/dashboard/audit/fix', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, action: 'fix_provider', profile: 'codex-wrong', result: { changed: true } }) });
   });
@@ -55,6 +56,11 @@ test('workspaces accounts and cost panels render real dashboard state', async ({
   await expect(page.getByTestId('billing-calendar')).toBeVisible();
   await expect(page.getByTestId('billing-day-2026-05-21')).toBeVisible();
   await expect(page.getByTestId('billing-entry-anthropic-lu-example-com')).toContainText('today');
+  await expect(page.getByTestId('doctor-check-daemon-health')).toContainText('ready');
+  await expect(page.getByTestId('logs-tail')).toBeVisible();
+  await expect(page.getByTestId('plugin-row-sweech-plugin-export')).toContainText('enabled');
+  await expect(page.getByTestId('template-row-claude-pro')).toContainText('built-in');
+  await expect(page.getByTestId('template-row-local-fast')).toContainText('custom');
   await page.getByTestId('workspace-card-claude-main').click();
   await expect(page.getByRole('dialog', { name: 'Edit claude-main' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Model', exact: true })).toHaveValue('claude-sonnet-4-5');
@@ -77,15 +83,18 @@ test('workspaces accounts and cost panels render real dashboard state', async ({
       costBars: document.querySelectorAll('.cost-sparkline span').length,
       auditRows: document.querySelectorAll('.audit-row').length,
       cooldownRows: document.querySelectorAll('.cooldown-row').length,
+      opsRows: document.querySelectorAll('.ops-row').length,
+      logRows: document.querySelectorAll('.log-row').length,
       billingDays: document.querySelectorAll('.billing-day').length,
       overflowCount: overflow.length,
     };
   });
-  expect(layout).toEqual({ workspaceCards: 2, accountCards: 2, costBars: 7, auditRows: 1, cooldownRows: 1, billingDays: 30, overflowCount: 0 });
+  expect(layout).toMatchObject({ workspaceCards: 2, accountCards: 2, costBars: 7, auditRows: 1, cooldownRows: 1, opsRows: 7, billingDays: 30, overflowCount: 0 });
+  expect(layout.logRows).toBeGreaterThan(0);
 
   await page.getByTestId('workspace-card-claude-main').scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: path.join(screenshotDir, 'T-DASH-012-audit-failover-routing-billing-desktop.png'),
+    path: path.join(screenshotDir, 'T-DASH-013-doctor-logs-plugins-templates-desktop.png'),
     fullPage: true,
   });
   await page.getByTestId('audit-fix-codex-wrong-provider_misconfig').click();
@@ -99,11 +108,16 @@ test('workspaces accounts and cost panels render real dashboard state', async ({
   const pinUnsetRequestPromise = page.waitForRequest((request) => request.url().endsWith('/dashboard/routing/pin') && request.method() === 'DELETE');
   await page.getByTestId('routing-pin-unset').click();
   await pinUnsetRequestPromise;
+  const cloneRequestPromise = page.waitForRequest((request) => request.url().endsWith('/dashboard/templates') && request.method() === 'POST');
+  await page.getByTestId('template-clone-claude-pro').click();
+  const cloneRequest = await cloneRequestPromise;
+  expect(JSON.parse(cloneRequest.postData())).toMatchObject({ name: 'claude-pro-custom', cliType: 'claude', provider: 'anthropic' });
 });
 
 test('dashboard data panels remain usable on mobile width', async ({ page }) => {
   const screenshotDir = process.env.PROJECT_SCREENSHOT_DIR;
   await page.setViewportSize({ width: 390, height: 1000 });
+  await setupDashboardPanelRoutes(page);
   await page.goto(fixture.url, { waitUntil: 'domcontentloaded' });
   await page.getByTestId('workspace-card-claude-main').scrollIntoViewIfNeeded();
   await expect(page.getByTestId('workspace-card-claude-main')).toBeVisible();
@@ -111,6 +125,31 @@ test('dashboard data panels remain usable on mobile width', async ({ page }) => 
   await expect(page.getByTestId('cost-sparkline-provider-mix')).toBeVisible();
   await expect(page.getByTestId('audit-finding-codex-wrong-provider_misconfig')).toBeVisible();
   await expect(page.getByTestId('billing-calendar')).toBeVisible();
+  await expect(page.getByTestId('doctor-check-daemon-health')).toBeVisible();
+  await expect(page.getByTestId('logs-tail')).toBeVisible();
+  await page.getByTestId('logs-event-filter').selectOption('audit.orphan_env_cleared');
+  await expect(page.getByTestId('logs-tail')).toContainText('audit.orphan_env_cleared');
+  await expect(page.getByTestId('logs-tail')).not.toContainText('dashboard.started');
+  const pluginInstallRequestPromise = page.waitForRequest((request) => request.url().endsWith('/dashboard/plugins') && request.method() === 'POST');
+  await page.getByTestId('plugin-package-input').fill('@vykeai/sweech-plugin-test');
+  await page.getByTestId('plugin-install').click();
+  const pluginInstallRequest = await pluginInstallRequestPromise;
+  expect(JSON.parse(pluginInstallRequest.postData())).toMatchObject({ package: '@vykeai/sweech-plugin-test' });
+  await expect(page.getByTestId('plugin-row-sweech-plugin-export')).toBeVisible();
+  await expect(page.getByTestId('template-row-claude-pro')).toBeVisible();
+  await page.getByLabel('Template name').fill('dashboard-custom');
+  await page.getByLabel('Template description').fill('Dashboard custom template');
+  await page.getByLabel('Template provider').fill('openrouter');
+  const createTemplateRequestPromise = page.waitForRequest((request) => request.url().endsWith('/dashboard/templates') && request.method() === 'POST');
+  await page.getByTestId('template-save').click();
+  const createTemplateRequest = await createTemplateRequestPromise;
+  expect(JSON.parse(createTemplateRequest.postData())).toMatchObject({ name: 'dashboard-custom', provider: 'openrouter', overwrite: false });
+  await page.getByTestId('template-edit-local-fast').click();
+  await page.getByLabel('Template provider').fill('ollama-local');
+  const updateTemplateRequestPromise = page.waitForRequest((request) => request.url().endsWith('/dashboard/templates') && request.method() === 'POST');
+  await page.getByTestId('template-save').click();
+  const updateTemplateRequest = await updateTemplateRequestPromise;
+  expect(JSON.parse(updateTemplateRequest.postData())).toMatchObject({ name: 'local-fast', provider: 'ollama-local', overwrite: true });
 
   const overflowCount = await page.evaluate(() => {
     const viewportWidth = document.documentElement.clientWidth;
@@ -122,7 +161,7 @@ test('dashboard data panels remain usable on mobile width', async ({ page }) => 
   expect(overflowCount).toBe(0);
 
   await page.screenshot({
-    path: path.join(screenshotDir, 'T-DASH-012-audit-failover-routing-billing-mobile.png'),
+    path: path.join(screenshotDir, 'T-DASH-013-doctor-logs-plugins-templates-mobile.png'),
     fullPage: true,
   });
 });
@@ -157,6 +196,26 @@ async function startDashboardPanelsFixture() {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     },
   };
+}
+
+async function setupDashboardPanelRoutes(page) {
+  await page.route('**/dashboard/doctor', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dashboardStateFixture().doctor) });
+  });
+  await page.route('**/dashboard/templates', async (route) => {
+    if (route.request().method() === 'POST') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, template: dashboardStateFixture().templates.templates[2] }) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dashboardStateFixture().templates) });
+  });
+  await page.route('**/dashboard/plugins', async (route) => {
+    if (route.request().method() === 'POST') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dashboardStateFixture().plugins) });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(dashboardStateFixture().plugins) });
+  });
 }
 
 function dashboardStateFixture() {
@@ -332,6 +391,42 @@ function dashboardStateFixture() {
         nextBillingAt: '2026-05-21',
         daysUntilNextBill: 0,
       }],
+    },
+    doctor: {
+      generatedAt: new Date(now).toISOString(),
+      status: 'ok',
+      nextNetworkRefreshAt: new Date(now + 60_000).toISOString(),
+      checks: [
+        { name: 'Profiles', status: 'ok', detail: '2 configured', category: 'structural' },
+        { name: 'Daemon health', status: 'ok', detail: 'ready (v0.4.0, uptime 12s)', category: 'network' },
+      ],
+    },
+    logs: {
+      generatedAt: new Date(now).toISOString(),
+      file: '/Users/luke/.sweech/logs/lifecycle.jsonl',
+      lines: [
+        { index: 1, at: '2026-05-21T11:55:00.000Z', event: 'dashboard.started', profile: 'claude-main', message: 'dashboard.started: ready', severity: 'info' },
+        { index: 2, at: '2026-05-21T11:56:00.000Z', event: 'audit.orphan_env_cleared', profile: 'codex-wrong', message: 'audit.orphan_env_cleared: ANTHROPIC_AUTH_TOKEN removed', severity: 'warn' },
+      ],
+    },
+    plugins: {
+      generatedAt: new Date(now).toISOString(),
+      total: 2,
+      enabled: 1,
+      plugins: [
+        { name: 'sweech-plugin-export', version: '1.2.3', enabled: true },
+        { name: 'sweech-plugin-disabled', version: '0.1.0', enabled: false },
+      ],
+    },
+    templates: {
+      generatedAt: new Date(now).toISOString(),
+      total: 3,
+      custom: 1,
+      templates: [
+        { name: 'claude-pro', description: 'Claude with Pro subscription defaults', cliType: 'claude', provider: 'anthropic', tags: ['claude', 'pro'], builtIn: true },
+        { name: 'codex-pro', description: 'Codex with ChatGPT Pro subscription', cliType: 'codex', provider: 'openai', tags: ['codex'], builtIn: true },
+        { name: 'local-fast', description: 'Local fast model', cliType: 'codex', provider: 'ollama', model: 'llama3', baseUrl: 'http://127.0.0.1:11434', tags: ['local'], builtIn: false },
+      ],
     },
   };
 }

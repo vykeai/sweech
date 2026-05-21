@@ -11,9 +11,9 @@ export type HeroSession = {
 };
 
 export type DoctorCheck = {
-  status?: 'ok' | 'warning' | 'error' | 'unknown';
+  status?: 'ok' | 'warn' | 'warning' | 'error' | 'unknown';
   ok?: boolean;
-  severity?: 'ok' | 'warning' | 'error';
+  severity?: 'ok' | 'warn' | 'warning' | 'error';
 };
 
 export type HeroStats = {
@@ -78,7 +78,9 @@ export function formatUsd(value: number): string {
 function isDoctorIssue(check: DoctorCheck): boolean {
   if (check.ok === false) return true;
   return check.status === 'warning'
+    || check.status === 'warn'
     || check.status === 'error'
+    || check.severity === 'warn'
     || check.severity === 'warning'
     || check.severity === 'error';
 }

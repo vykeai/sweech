@@ -3,13 +3,13 @@
   "title": "Doctor / Logs / Plugins / Templates panels",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "done",
   "priority": "high",
   "platform": null,
-  "assignee": null,
-  "description": "Doctor: hybrid refresh (Q2) \u2014 structural live, network every 60s while focused. Logs: lifecycle.jsonl tail via SSE. Plugins/Templates: CRUD from existing CLI surfaces.",
+  "assignee": "codex",
+  "description": "Doctor: hybrid refresh (Q2) — structural live, network every 60s while focused. Logs: lifecycle.jsonl tail via SSE. Plugins/Templates: CRUD from existing CLI surfaces.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-21T06:49:58.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,16 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-21T06:05:53.000Z"
+    },
+    {
+      "status": "done",
+      "ts": "2026-05-21T06:49:58.000Z"
+    }
+  ],
   "dependsOn": [
     "T-DASH-001",
     "T-DASH-005"
@@ -30,6 +39,11 @@
       "at": "2026-05-18T11:00:00Z",
       "by": "luke",
       "text": "Filed via /vy-backlog 2026-05-18. Spec: docs/specs/dashboard-2026-05-18.md, backlog: docs/specs/dashboard-2026-05-18-backlog.md"
+    },
+    {
+      "ts": "2026-05-21T06:49:58.000Z",
+      "text": "Implemented dashboard Doctor, Logs, Plugins, and Templates panels with backend state/routes, SSE lifecycle log tailing, plugin/template mutations, tests, E2E screenshots, security review fixes, and Codex adversarial review. Screenshots: ~/Desktop/screenshots/sweech/T-DASH-013-doctor-logs-plugins-templates-desktop.png and ~/Desktop/screenshots/sweech/T-DASH-013-doctor-logs-plugins-templates-mobile.png. Gates: npm run build; npm test -- --runInBand; npx tsc --noEmit; npm run typecheck:dashboard; npm audit --audit-level=moderate; npm run test:e2e:dashboard; swift build.",
+      "by": "human"
     }
   ]
 }

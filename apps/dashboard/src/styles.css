@@ -573,7 +573,8 @@ h2 {
 .audit-list,
 .cooldown-list,
 .routing-list,
-.billing-list {
+.billing-list,
+.ops-list {
   display: grid;
   gap: 10px;
 }
@@ -685,7 +686,10 @@ h2 {
 .audit-row,
 .cooldown-row,
 .routing-row,
-.billing-row {
+.billing-row,
+.ops-row,
+.log-row,
+.status-summary {
   align-items: center;
   display: flex;
   gap: 10px;
@@ -777,6 +781,8 @@ h2 {
 .cooldown-row,
 .routing-row,
 .billing-row,
+.ops-row,
+.log-row,
 .routing-pin,
 .selected-route {
   background: var(--vysual-surface-strong);
@@ -790,6 +796,8 @@ h2 {
 .cooldown-row > div:first-child,
 .routing-row > div:first-child,
 .billing-row > div:first-child,
+.ops-row > div:first-child,
+.log-row > div:last-child,
 .routing-pin,
 .selected-route {
   display: grid;
@@ -801,6 +809,8 @@ h2 {
 .cooldown-row strong,
 .routing-row strong,
 .billing-row strong,
+.ops-row strong,
+.log-row strong,
 .routing-pin strong,
 .selected-route strong {
   overflow: hidden;
@@ -811,6 +821,10 @@ h2 {
 .audit-row span:not(.pill),
 .audit-row p,
 .cooldown-row span:not(.pill),
+.ops-row span:not(.pill),
+.ops-row p,
+.log-row p,
+.log-row small,
 .routing-row span:not(.pill),
 .billing-row span:not(.pill),
 .routing-pin span,
@@ -824,6 +838,54 @@ h2 {
   margin: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+
+.ops-row p,
+.log-row p {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.log-tail {
+  display: grid;
+  gap: 8px;
+}
+
+.compact-form label,
+.inline-form,
+.template-form {
+  display: grid;
+  gap: 8px;
+}
+
+.compact-form label {
+  color: var(--vysual-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inline-form {
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.template-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.template-form .row-actions {
+  grid-column: 1 / -1;
+  justify-content: flex-start;
+}
+
+.log-row {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.danger-button {
+  background: var(--vysual-danger);
 }
 
 .row-actions {
@@ -998,12 +1060,31 @@ h2 {
   .cooldown-row,
   .routing-row,
   .routing-pin,
-  .billing-row {
+  .billing-row,
+  .ops-row,
+  .log-row,
+  .status-summary {
     align-items: stretch;
     flex-direction: column;
   }
 
   .row-actions {
     justify-content: space-between;
+  }
+
+  .ops-row .pill,
+  .log-row .pill,
+  .status-summary .pill {
+    align-self: flex-start;
+    width: max-content;
+  }
+
+  .status-summary .jump-button {
+    width: 100%;
+  }
+
+  .inline-form,
+  .template-form {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

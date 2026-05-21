@@ -96,7 +96,7 @@ export async function installPlugin(npmPackage: string): Promise<void> {
   }
 
   try {
-    execFileSync('npm', ['install', '--prefix', PLUGINS_DIR, npmPackage], {
+    execFileSync('npm', ['install', '--ignore-scripts', '--prefix', PLUGINS_DIR, npmPackage], {
       stdio: 'pipe',
     });
   } catch (err: unknown) {

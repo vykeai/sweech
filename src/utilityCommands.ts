@@ -17,12 +17,14 @@ import { getProvider, ModelInfo } from './providers';
 import { detectInstalledCLIs } from './cliDetection';
 import { renameManagedProfile } from './profileManagement';
 import { getAccountInfo, getKnownAccounts } from './subscriptions';
-import { DEFAULT_DAEMON_PORT } from './constants';
 import { getAllRefreshEtas } from './tokenRefresh';
 import { isLaunchdInstalled, isLaunchdRunning, LAUNCHD_LABEL, LAUNCHD_PLIST_PATH } from './launchd';
 import { isMacOS } from './platform';
 import { findProjectPin, PIN_FILENAME } from './projectConfig';
 import { atomicWriteFileSync } from './atomicWrite';
+import { DOCTOR_CHECK_TIMEOUT_MS, probeDaemonHealthz, type DaemonHealthzProbe } from './daemonHealthz';
+
+export { DOCTOR_CHECK_TIMEOUT_MS, probeDaemonHealthz, type DaemonHealthzProbe };
 
 const execFileAsync = promisify(execFile);
 
@@ -83,23 +85,6 @@ interface HealthIssue {
 /** Per-check severity used by runDoctor to compute the exit code. */
 export type CheckSeverity = 'ok' | 'warn' | 'error';
 
-/** T-053: timeout budget for individual doctor network checks. */
-export const DOCTOR_CHECK_TIMEOUT_MS = 5000;
-
-/** T-053: shape of a daemon /healthz probe outcome. */
-export interface DaemonHealthzProbe {
-  /** ok = 2xx + body.ok===true; timeout = AbortSignal fired; unreachable = no socket; error = anything else. */
-  status: 'ok' | 'timeout' | 'unreachable' | 'error';
-  /** Human-readable detail used by the doctor row. */
-  message: string;
-  /** Daemon version when reachable. */
-  version?: string;
-  /** Daemon uptime (seconds) when reachable. */
-  uptime?: number;
-  /** Daemon lifecycle state (e.g. 'ready', 'starting') when reachable. */
-  state?: string;
-}
-
 /**
  * T-053: collapse a set of check severities to the worst exit code.
  * Exit semantics: 0 = all ok, 1 = at least one warning, 2 = at least one error.
@@ -134,85 +119,6 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label = 'operation'): 
   return Promise.race([p, timeoutPromise]).finally(() => {
     if (timer) clearTimeout(timer);
   });
-}
-
-/**
- * T-053: resolve the daemon HTTP port the same way other CLI commands do.
- * Order: SWEECH_PORT env var → ~/.fed/config.json (`tools.sweech-engine.dash`)
- * → DEFAULT_DAEMON_PORT.
- */
-function resolveDaemonPortForDoctor(): number {
-  const envPort = parseInt(process.env.SWEECH_PORT ?? '', 10);
-  if (Number.isFinite(envPort) && envPort > 0) return envPort;
-  try {
-    const raw = fs.readFileSync(path.join(os.homedir(), '.fed', 'config.json'), 'utf-8');
-    const cfg = JSON.parse(raw) as { tools?: Record<string, { dash?: number }> };
-    return cfg?.tools?.['sweech-engine']?.dash ?? DEFAULT_DAEMON_PORT;
-  } catch {
-    return DEFAULT_DAEMON_PORT;
-  }
-}
-
-/**
- * T-053: probe the daemon /healthz endpoint with a hard 5s deadline. The
- * /healthz route is intentionally public (see packages/engine/src/daemon/auth.ts)
- * so no HMAC signing is needed. Caller injects `fetchImpl` for tests.
- */
-export async function probeDaemonHealthz(opts: {
-  port?: number;
-  timeoutMs?: number;
-  fetchImpl?: typeof fetch;
-} = {}): Promise<DaemonHealthzProbe> {
-  const port = opts.port ?? resolveDaemonPortForDoctor();
-  const timeoutMs = opts.timeoutMs ?? DOCTOR_CHECK_TIMEOUT_MS;
-  const fetchFn = opts.fetchImpl ?? fetch;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  if (typeof timer.unref === 'function') timer.unref();
-  try {
-    const res = await fetchFn(`http://127.0.0.1:${port}/healthz`, { signal: controller.signal });
-    let body: { ok?: boolean; version?: string; uptime?: number; state?: string; reason?: string } = {};
-    try {
-      body = (await res.json()) as typeof body;
-    } catch {
-      // ignore — treat as error below if body is unusable
-    }
-    if (res.ok && body.ok) {
-      return {
-        status: 'ok',
-        message: `ready (v${body.version ?? '?'}, uptime ${Math.round(body.uptime ?? 0)}s)`,
-        version: body.version,
-        uptime: body.uptime,
-        state: body.state,
-      };
-    }
-    return {
-      status: 'error',
-      message: `unhealthy (HTTP ${res.status}${body.state ? `, state=${body.state}` : ''}${body.reason ? `, reason=${body.reason}` : ''})`,
-      version: body.version,
-      uptime: body.uptime,
-      state: body.state,
-    };
-  } catch (err: unknown) {
-    const e = err as { name?: string; code?: string; message?: string; cause?: { name?: string; code?: string } };
-    // Node's fetch wraps network errors in a TypeError whose `name` is
-    // 'TypeError' — the real AbortError / ECONNREFUSED lives on `.cause`.
-    // Check both layers so the probe classifies correctly regardless of
-    // which Node/undici version produced the error.
-    const names = new Set([e?.name, e?.cause?.name].filter(Boolean));
-    const codes = new Set([e?.code, e?.cause?.code].filter(Boolean));
-    // AbortController.abort() makes fetch throw a DOMException whose name is AbortError;
-    // surface that as "timeout" per acceptance criterion #1.
-    if (names.has('AbortError') || names.has('TimeoutError') || codes.has('TIMEOUT') || codes.has('ABORT_ERR')) {
-      return { status: 'timeout', message: `no response in ${timeoutMs}ms` };
-    }
-    if (codes.has('ECONNREFUSED') || codes.has('ENOTFOUND') || codes.has('EHOSTUNREACH') || codes.has('ECONNRESET')) {
-      return { status: 'unreachable', message: `daemon not running on port ${port}` };
-    }
-    return { status: 'error', message: e?.message ?? String(err) };
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 /**

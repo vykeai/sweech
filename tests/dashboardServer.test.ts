@@ -27,6 +27,14 @@ const mockWriteProjectPin = jest.fn();
 const mockRemoveProjectPin = jest.fn();
 const mockRecommendRoute = jest.fn();
 const mockReadBillingFile = jest.fn();
+const mockProbeDaemonHealthz = jest.fn();
+const mockListPlugins = jest.fn();
+const mockInstallPlugin = jest.fn();
+const mockUninstallPlugin = jest.fn();
+const mockGetAllTemplates = jest.fn();
+const mockLoadCustomTemplates = jest.fn();
+const mockSaveCustomTemplate = jest.fn();
+const mockDeleteCustomTemplate = jest.fn();
 
 jest.mock('../src/sessionsDb', () => ({
   SessionsDb: jest.fn().mockImplementation(() => ({
@@ -55,6 +63,7 @@ jest.mock('../src/config', () => ({
   ConfigManager: jest.fn().mockImplementation(() => ({
     getProfiles: mockGetProfiles,
     getProfileDir: (commandName: string) => `/profiles/${commandName}`,
+    getLogsDir: () => '/tmp/sweech-dashboard-test-logs',
   })),
 }));
 
@@ -100,6 +109,24 @@ jest.mock('../src/billing', () => {
     readBillingFile: (...args: unknown[]) => mockReadBillingFile(...args),
   };
 });
+
+jest.mock('../src/daemonHealthz', () => ({
+  probeDaemonHealthz: (...args: unknown[]) => mockProbeDaemonHealthz(...args),
+}));
+
+jest.mock('../src/plugins', () => ({
+  installPlugin: (...args: unknown[]) => mockInstallPlugin(...args),
+  listPlugins: (...args: unknown[]) => mockListPlugins(...args),
+  uninstallPlugin: (...args: unknown[]) => mockUninstallPlugin(...args),
+}));
+
+jest.mock('../src/templates', () => ({
+  BUILT_IN_TEMPLATES: [{ name: 'claude-pro' }],
+  getAllTemplates: (...args: unknown[]) => mockGetAllTemplates(...args),
+  loadCustomTemplates: (...args: unknown[]) => mockLoadCustomTemplates(...args),
+  saveCustomTemplate: (...args: unknown[]) => mockSaveCustomTemplate(...args),
+  deleteCustomTemplate: (...args: unknown[]) => mockDeleteCustomTemplate(...args),
+}));
 
 describe('dashboard server', () => {
   let server: http.Server;
@@ -285,6 +312,21 @@ describe('dashboard server', () => {
         },
       },
     });
+    mockProbeDaemonHealthz.mockResolvedValue({ status: 'ok', message: 'ready (v0.4.0, uptime 12s)', version: '0.4.0', uptime: 12, state: 'ready' });
+    mockListPlugins.mockReturnValue([
+      { name: 'sweech-plugin-export', version: '1.2.3', enabled: true },
+      { name: 'sweech-plugin-disabled', version: '0.1.0', enabled: false },
+    ]);
+    mockInstallPlugin.mockResolvedValue(undefined);
+    mockUninstallPlugin.mockResolvedValue(undefined);
+    mockGetAllTemplates.mockReturnValue([
+      { name: 'claude-pro', description: 'Claude Pro', cliType: 'claude', provider: 'anthropic', tags: ['claude'] },
+      { name: 'local-fast', description: 'Local Fast', cliType: 'codex', provider: 'ollama', model: 'llama3', baseUrl: 'http://127.0.0.1:11434', tags: ['local'] },
+    ]);
+    mockLoadCustomTemplates.mockReturnValue([
+      { name: 'local-fast', description: 'Local Fast', cliType: 'codex', provider: 'ollama', model: 'llama3', baseUrl: 'http://127.0.0.1:11434', tags: ['local'] },
+    ]);
+    mockDeleteCustomTemplate.mockReturnValue(true);
     mockSummarizeNow.mockResolvedValue({
       sessionId: 's1',
       summaryOne: 'Dashboard route summary.',
@@ -383,6 +425,11 @@ describe('dashboard server', () => {
     expect(body.routing.selected).toMatchObject({ commandName: 'sweech', launchStatus: 'available' });
     expect(body.billing.entries[0]).toMatchObject({ vendor: 'anthropic', email: 'lu***@example.com', billingDay: 21 });
     expect(body.billing.days).toHaveLength(30);
+    expect(body.doctor).toMatchObject({ status: 'ok', checks: expect.arrayContaining([expect.objectContaining({ name: 'Daemon health', status: 'ok' })]) });
+    expect(body.logs).toMatchObject({ lines: [] });
+    expect(body.plugins).toMatchObject({ total: 2, enabled: 1 });
+    expect(body.templates).toMatchObject({ total: 2, custom: 1 });
+    expect(body.templates.templates[0]).toMatchObject({ name: 'local-fast', builtIn: false });
     expect(mockClose).toHaveBeenCalledTimes(1);
     expect(mockGetAccountInfo).toHaveBeenCalledWith(expect.any(Array), { liveCacheOnly: true, timeoutMs: 500 });
     expect(mockRecommendRoute).toHaveBeenCalledWith({}, expect.any(Array), expect.objectContaining({
@@ -558,6 +605,94 @@ describe('dashboard server', () => {
     expect(mockRemoveProjectPin).toHaveBeenCalledWith('/repo/sweech');
   });
 
+  test('GET /dashboard/doctor returns hybrid structural and network checks', async () => {
+    mockListWorkspaces.mockReturnValueOnce([{
+      commandName: 'missing',
+      cliType: 'claude',
+      provider: 'anthropic',
+      disabled: true,
+      hidden: false,
+      profileDir: '/profiles/missing',
+      profileDirExists: false,
+    }]);
+    mockProbeDaemonHealthz.mockResolvedValueOnce({ status: 'unreachable', message: 'daemon not running on port 8765' });
+
+    const res = await request('/dashboard/doctor');
+    const body = JSON.parse(res.body);
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe('warn');
+    expect(body.checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Workspace directories', status: 'warn', category: 'structural' }),
+      expect.objectContaining({ name: 'Daemon health', status: 'warn', category: 'network' }),
+    ]));
+    expect(body.nextNetworkRefreshAt).toEqual(expect.any(String));
+  });
+
+  test('dashboard template routes save and delete custom templates', async () => {
+    const create = await requestWithBody('/dashboard/templates', 'POST', JSON.stringify({
+      name: 'local-new',
+      description: 'Local fast model',
+      cliType: 'codex',
+      provider: 'ollama',
+      model: 'llama3',
+      tags: ['local', 'fast'],
+    }));
+    const remove = await request('/dashboard/templates/local-fast', 'DELETE');
+
+    expect(create.status).toBe(200);
+    expect(JSON.parse(create.body)).toMatchObject({ ok: true, template: { name: 'local-new', builtIn: false } });
+    expect(mockSaveCustomTemplate).toHaveBeenCalledWith(expect.objectContaining({ name: 'local-new', cliType: 'codex', provider: 'ollama' }));
+    expect(remove.status).toBe(200);
+    expect(JSON.parse(remove.body)).toMatchObject({ ok: true, name: 'local-fast' });
+    expect(mockDeleteCustomTemplate).toHaveBeenCalledWith('local-fast');
+  });
+
+  test('dashboard plugin routes install and remove npm packages', async () => {
+    const install = await requestWithBody('/dashboard/plugins', 'POST', JSON.stringify({ package: '@vykeai/sweech-plugin-test' }));
+    const remove = await request('/dashboard/plugins/%40vykeai%2Fsweech-plugin-test', 'DELETE');
+
+    expect(install.status).toBe(200);
+    expect(JSON.parse(install.body)).toMatchObject({ total: 2, enabled: 1 });
+    expect(mockInstallPlugin).toHaveBeenCalledWith('@vykeai/sweech-plugin-test');
+    expect(remove.status).toBe(200);
+    expect(mockUninstallPlugin).toHaveBeenCalledWith('@vykeai/sweech-plugin-test');
+  });
+
+  test('dashboard plugin install validates package names', async () => {
+    const res = await requestWithBody('/dashboard/plugins', 'POST', JSON.stringify({ package: 'https://example.test/plugin.tgz' }));
+
+    expect(res.status).toBe(400);
+    expect(mockInstallPlugin).not.toHaveBeenCalled();
+  });
+
+  test('dashboard plugin install only accepts sweech plugin packages', async () => {
+    const res = await requestWithBody('/dashboard/plugins', 'POST', JSON.stringify({ package: 'left-pad' }));
+
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toContain('Only sweech plugin packages');
+    expect(mockInstallPlugin).not.toHaveBeenCalled();
+  });
+
+  test('dashboard template create rejects accidental overwrites', async () => {
+    const res = await requestWithBody('/dashboard/templates', 'POST', JSON.stringify({
+      name: 'local-fast',
+      cliType: 'codex',
+      provider: 'ollama',
+    }));
+
+    expect(res.status).toBe(409);
+    expect(JSON.parse(res.body)).toMatchObject({ error: 'Template already exists', name: 'local-fast' });
+    expect(mockSaveCustomTemplate).not.toHaveBeenCalled();
+  });
+
+  test('dashboard template create validates required fields', async () => {
+    const res = await requestWithBody('/dashboard/templates', 'POST', JSON.stringify({ name: '../bad' }));
+
+    expect(res.status).toBe(400);
+    expect(mockSaveCustomTemplate).not.toHaveBeenCalled();
+  });
+
   test('restore route rejects unsupported terminals', async () => {
     const res = await requestWithBody('/dashboard/sessions/s1/restore', 'POST', JSON.stringify({ terminal: 'not-a-terminal' }));
 
@@ -669,7 +804,11 @@ describe('dashboard server', () => {
     const routes = [
       { path: '/dashboard/audit/fix', method: 'POST', body: JSON.stringify({ profile: 'codex-wrong', action: 'fix_provider' }) },
       { path: '/dashboard/failover/cooldowns/claude-pro', method: 'DELETE', body: '' },
+      { path: '/dashboard/plugins', method: 'POST', body: JSON.stringify({ package: 'sweech-plugin-test' }) },
+      { path: '/dashboard/plugins/sweech-plugin-test', method: 'DELETE', body: '' },
       { path: '/dashboard/routing/pin', method: 'DELETE', body: '' },
+      { path: '/dashboard/templates', method: 'POST', body: JSON.stringify({ name: 'local-new', cliType: 'codex', provider: 'ollama' }) },
+      { path: '/dashboard/templates/local-fast', method: 'DELETE', body: '' },
     ];
     for (const route of routes) {
       const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {

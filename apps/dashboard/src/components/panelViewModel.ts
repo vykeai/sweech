@@ -126,6 +126,66 @@ export type DashboardBillingState = {
   entries: DashboardBillingEntry[];
 };
 
+export type DashboardDoctorCheck = {
+  name: string;
+  status: 'ok' | 'warn' | 'error';
+  detail: string;
+  category: 'structural' | 'network';
+};
+
+export type DashboardDoctorState = {
+  generatedAt?: string;
+  status: 'ok' | 'warn' | 'error';
+  checks: DashboardDoctorCheck[];
+  nextNetworkRefreshAt?: string;
+};
+
+export type DashboardLogLine = {
+  index: number;
+  at?: string;
+  event?: string;
+  profile?: string;
+  message: string;
+  severity: 'info' | 'warn' | 'error';
+};
+
+export type DashboardLogsState = {
+  generatedAt?: string;
+  file?: string;
+  lines: DashboardLogLine[];
+};
+
+export type DashboardPlugin = {
+  name: string;
+  version: string;
+  enabled: boolean;
+};
+
+export type DashboardPluginsState = {
+  generatedAt?: string;
+  total: number;
+  enabled: number;
+  plugins: DashboardPlugin[];
+};
+
+export type DashboardTemplate = {
+  name: string;
+  description: string;
+  cliType: string;
+  provider: string;
+  model?: string;
+  baseUrl?: string;
+  tags: string[];
+  builtIn: boolean;
+};
+
+export type DashboardTemplatesState = {
+  generatedAt?: string;
+  total: number;
+  custom: number;
+  templates: DashboardTemplate[];
+};
+
 export function workspaceStatus(workspace: DashboardWorkspace): { label: string; tone: 'success' | 'warning' | 'muted' } {
   if (workspace.hidden) return { label: 'Hidden', tone: 'muted' };
   if (workspace.disabled) return { label: 'Disabled', tone: 'warning' };
@@ -203,6 +263,19 @@ export function routeTone(candidate: DashboardRouteCandidate): 'success' | 'warn
 
 export function billingDayTone(day: { count: number }): 'active' | 'empty' {
   return day.count > 0 ? 'active' : 'empty';
+}
+
+export function doctorTone(status: DashboardDoctorCheck['status'] | DashboardDoctorState['status']): 'success' | 'warning' | 'danger' {
+  if (status === 'error') return 'danger';
+  if (status === 'warn') return 'warning';
+  return 'success';
+}
+
+export function logTone(severity: DashboardLogLine['severity']): 'success' | 'warning' | 'danger' | 'muted' {
+  if (severity === 'error') return 'danger';
+  if (severity === 'warn') return 'warning';
+  if (severity === 'info') return 'muted';
+  return 'success';
 }
 
 export function safeTestId(value: string): string {

@@ -67,11 +67,12 @@ describe('dashboard hero components', () => {
     const stats = deriveHeroStats([], [
       { status: 'ok' },
       { status: 'warning' },
+      { status: 'warn' },
       { severity: 'error' },
       { ok: false },
     ], now);
 
-    expect(stats.doctorIssueCount).toBe(3);
+    expect(stats.doctorIssueCount).toBe(4);
   });
 
   test('freshnessChipCopy exposes all R13 states', () => {

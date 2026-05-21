@@ -200,7 +200,7 @@ describe('installPlugin', () => {
     await installPlugin('sweech-plugin-test');
 
     expect(mockExecFileSync).toHaveBeenCalledWith(
-      'npm', ['install', '--prefix', expect.any(String), 'sweech-plugin-test'],
+      'npm', ['install', '--ignore-scripts', '--prefix', expect.any(String), 'sweech-plugin-test'],
       expect.any(Object)
     );
   });
@@ -535,7 +535,7 @@ describe('scoped package handling', () => {
     await installPlugin('@scope/my-plugin');
 
     expect(mockExecFileSync).toHaveBeenCalledWith(
-      'npm', ['install', '--prefix', expect.any(String), '@scope/my-plugin'],
+      'npm', ['install', '--ignore-scripts', '--prefix', expect.any(String), '@scope/my-plugin'],
       expect.any(Object)
     );
   });
