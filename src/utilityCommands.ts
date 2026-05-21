@@ -22,6 +22,7 @@ import { getAllRefreshEtas } from './tokenRefresh';
 import { isLaunchdInstalled, isLaunchdRunning, LAUNCHD_LABEL, LAUNCHD_PLIST_PATH } from './launchd';
 import { isMacOS } from './platform';
 import { findProjectPin, PIN_FILENAME } from './projectConfig';
+import { atomicWriteFileSync } from './atomicWrite';
 
 const execFileAsync = promisify(execFile);
 
@@ -429,7 +430,7 @@ function writePostinstallConfigMarker(configPath: string, sweechVersion: string 
       ? { ...(parsed as Record<string, unknown>), lastResyncedSweechVersion: sweechVersion }
       : null;
   if (!next) return;
-  fs.writeFileSync(
+  atomicWriteFileSync(
     configPath,
     JSON.stringify(next, null, 2) + '\n',
     { mode: 0o600 },
