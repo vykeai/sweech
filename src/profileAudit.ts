@@ -91,6 +91,33 @@ export interface AuditOptions {
   now?: () => number;
 }
 
+export interface CliTypeLineEvidence {
+  configFile: string;
+  line: number | null;
+}
+
+export interface DiskCliShapeEvidence {
+  profileDir: string;
+  detectedCliTypes: CLIType[];
+  markers: Array<{ cliType: CLIType; path: string; exists: boolean }>;
+}
+
+export interface CliTypeValidationFinding {
+  profile: string;
+  cliType: string;
+  provider: string;
+  severity: AuditSeverity;
+  detail: string;
+  evidence: {
+    observedCliType: string;
+    expectedCliType: CLIType;
+    configLine: CliTypeLineEvidence;
+    diskShape: DiskCliShapeEvidence;
+    providerCompatibility: CLIType[];
+  };
+  suggestion: 'fix_cli_type' | null;
+}
+
 // ── Activity probe ───────────────────────────────────────────────────────────
 
 /**
@@ -530,6 +557,148 @@ export function inferExpectedCliType(
   return null;
 }
 
+function inferCliTypeFromName(commandName: string): CLIType | null {
+  const lower = commandName.toLowerCase();
+  if (lower === 'claude' || lower.startsWith('claude-')) return 'claude';
+  if (lower === 'codex' || lower.startsWith('codex-')) return 'codex';
+  if (lower === 'kimi' || lower.startsWith('kimi-')) return 'kimi';
+  return null;
+}
+
+function isDirectory(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function detectDiskCliShape(profileDir: string): DiskCliShapeEvidence {
+  const markerDefs: Array<{ cliType: CLIType; rel: string; kind: 'dir' | 'file' }> = [
+    // T-079: `~/.<name>/projects` is the high-confidence Claude Code shape
+    // used to confirm suspicious `claude-*` profiles before auto-correction.
+    { cliType: 'claude', rel: 'projects', kind: 'dir' },
+    { cliType: 'codex', rel: 'config.toml', kind: 'file' },
+    { cliType: 'codex', rel: 'auth.json', kind: 'file' },
+    { cliType: 'kimi', rel: 'kimi.json', kind: 'file' },
+    { cliType: 'kimi', rel: 'user-history', kind: 'dir' },
+  ];
+  const markers = markerDefs.map(marker => {
+    const full = path.join(profileDir, marker.rel);
+    const exists = marker.kind === 'dir' ? isDirectory(full) : isFile(full);
+    return { cliType: marker.cliType, path: marker.rel, exists };
+  });
+  const detectedCliTypes = Array.from(new Set(
+    markers.filter(m => m.exists).map(m => m.cliType),
+  ));
+  return { profileDir, detectedCliTypes, markers };
+}
+
+export function findCliTypeLineForProfile(
+  config: ConfigManager,
+  commandName: string,
+): CliTypeLineEvidence {
+  const configFile = config.getConfigFile();
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configFile, 'utf-8');
+  } catch {
+    return { configFile, line: null };
+  }
+
+  const lines = raw.split(/\r?\n/);
+  const escaped = escapeRegex(JSON.stringify(commandName).slice(1, -1));
+  const commandNameRx = new RegExp(`"commandName"\\s*:\\s*"${escaped}"`);
+  const commandLine = lines.findIndex(line => commandNameRx.test(line));
+  if (commandLine === -1) return { configFile, line: null };
+
+  let start = commandLine;
+  while (start > 0 && !lines[start].includes('{')) start--;
+  let end = commandLine;
+  while (end < lines.length - 1 && !lines[end].includes('}')) end++;
+
+  for (let i = start; i <= end; i++) {
+    if (/"cliType"\s*:/.test(lines[i])) {
+      return { configFile, line: i + 1 };
+    }
+  }
+  return { configFile, line: null };
+}
+
+export function validateCliTypeConfig(config: ConfigManager = new ConfigManager()): CliTypeValidationFinding[] {
+  const findings: CliTypeValidationFinding[] = [];
+  for (const profile of config.getProfiles()) {
+    const cliType = (profile.cliType || 'claude').toLowerCase();
+    const expectedCliType = inferExpectedCliType(profile.commandName, profile.provider);
+    if (!expectedCliType || expectedCliType === cliType) continue;
+
+    const profileDir = config.getProfileDir(profile.commandName);
+    const diskShape = detectDiskCliShape(profileDir);
+    const configLine = findCliTypeLineForProfile(config, profile.commandName);
+    const providerCompatibility = getProvider(profile.provider)?.compatibility ?? [];
+    const nameCliType = inferCliTypeFromName(profile.commandName);
+    const diskDisagreesWithBoth = diskShape.detectedCliTypes.length > 0
+      && nameCliType !== null
+      && nameCliType !== cliType
+      && diskShape.detectedCliTypes.every(t => t !== nameCliType && t !== cliType);
+
+    if (diskDisagreesWithBoth) {
+      const detected = diskShape.detectedCliTypes.join(', ');
+      findings.push({
+        profile: profile.commandName,
+        cliType,
+        provider: profile.provider,
+        severity: 'critical',
+        detail: `LOUD WARNING: profile name implies cliType='${nameCliType}', config sets cliType='${cliType}', but on-disk markers look like '${detected}'. Refusing automatic cliType correction.`,
+        evidence: {
+          observedCliType: cliType,
+          expectedCliType,
+          configLine,
+          diskShape,
+          providerCompatibility,
+        },
+        suggestion: null,
+      });
+      continue;
+    }
+
+    const claudePrefixNeedsConfirmation = nameCliType === 'claude';
+    const hasClaudeProjects = diskShape.markers.some(m => m.cliType === 'claude' && m.path === 'projects' && m.exists);
+    const diskAgreesWithDifferentConfig = diskShape.detectedCliTypes.length === 1
+      && diskShape.detectedCliTypes[0] === cliType
+      && diskShape.detectedCliTypes[0] !== expectedCliType;
+    const canAutoFix = !diskAgreesWithDifferentConfig
+      && (!claudePrefixNeedsConfirmation || hasClaudeProjects);
+
+    findings.push({
+      profile: profile.commandName,
+      cliType,
+      provider: profile.provider,
+      severity: canAutoFix ? (providerCompatibility.includes(cliType as CLIType) ? 'warn' : 'critical') : 'critical',
+      detail: canAutoFix
+        ? `Profile commandName '${profile.commandName}' implies cliType='${expectedCliType}' but config sets cliType='${cliType}'.`
+        : `Profile commandName '${profile.commandName}' implies cliType='${expectedCliType}' but on-disk markers do not confirm that shape. Refusing automatic cliType correction.`,
+      evidence: {
+        observedCliType: cliType,
+        expectedCliType,
+        configLine,
+        diskShape,
+        providerCompatibility,
+      },
+      suggestion: canAutoFix ? 'fix_cli_type' : null,
+    });
+  }
+  return findings;
+}
+
 /**
  * Read a codex profile's actual model_provider + base_url out of its
  * config.toml. Codex routes via [model_providers.X] blocks, NOT via
@@ -659,7 +828,12 @@ export function fixCliTypeOnProfile(
   const profile = profiles.find(p => p.commandName === commandName);
   if (!profile) return { changed: false, reason: 'profile-not-found' };
 
-  const expected = inferExpectedCliType(profile.commandName, profile.provider);
+  const validation = validateCliTypeConfig(config).find(f => f.profile === commandName);
+  if (validation && validation.suggestion !== 'fix_cli_type') {
+    return { changed: false, reason: 'disk-conflict' };
+  }
+
+  const expected = validation?.evidence.expectedCliType ?? inferExpectedCliType(profile.commandName, profile.provider);
   if (!expected) return { changed: false, reason: 'no-inference' };
   if (profile.cliType === expected) return { changed: false, reason: 'already-correct' };
 
@@ -708,6 +882,9 @@ export async function auditProfiles(opts: AuditOptions = {}): Promise<AuditRepor
 
   const profiles = config.getProfiles();
   const findings: AuditFinding[] = [];
+  const cliTypeValidation = new Map(
+    validateCliTypeConfig(config).map(f => [f.profile, f]),
+  );
 
   for (const profile of profiles) {
     const cliType = (profile.cliType || 'claude').toLowerCase();
@@ -875,23 +1052,26 @@ export async function auditProfiles(opts: AuditOptions = {}): Promise<AuditRepor
     // and the profile uses a different one).
     const expectedCliType = inferExpectedCliType(profile.commandName, profile.provider);
     if (expectedCliType && expectedCliType !== cliType) {
+      const validation = cliTypeValidation.get(profile.commandName);
       const providerCompat = getProvider(profile.provider)?.compatibility ?? [];
       const compatOk = providerCompat.includes(cliType as CLIType);
       findings.push({
         profile: profile.commandName,
         cliType,
         provider,
-        severity: compatOk ? 'warn' : 'critical',
+        severity: validation?.severity ?? (compatOk ? 'warn' : 'critical'),
         kind: 'cli_type_mismatch',
-        detail: compatOk
+        detail: validation?.detail ?? (compatOk
           ? `Profile commandName '${profile.commandName}' implies cliType='${expectedCliType}' but is set to '${cliType}'. Wrapper will exec the wrong CLI binary.`
-          : `Profile cliType='${cliType}' is incompatible with provider '${provider}' (supports: ${providerCompat.join(', ') || 'unknown'}). Expected cliType='${expectedCliType}'.`,
+          : `Profile cliType='${cliType}' is incompatible with provider '${provider}' (supports: ${providerCompat.join(', ') || 'unknown'}). Expected cliType='${expectedCliType}'.`),
         evidence: {
           observedCliType: cliType,
           expectedCliType,
           providerCompatibility: providerCompat,
+          configLine: validation?.evidence.configLine,
+          diskShape: validation?.evidence.diskShape,
         },
-        suggestion: 'fix_cli_type',
+        suggestion: validation?.suggestion ?? 'fix_cli_type',
       });
     }
 
@@ -970,4 +1150,3 @@ export function prunableProfiles(report: AuditReport): Array<{
     reasons: g.reasons,
   }));
 }
-

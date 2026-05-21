@@ -27,6 +27,7 @@ import {
   inferExpectedCliType,
   fixCliTypeOnProfile,
   auditProfiles,
+  validateCliTypeConfig,
   probeCodexBackend,
   classifyCodexBackend,
   fixProviderOnProfile,
@@ -84,7 +85,7 @@ describe('auditProfiles cli_type_mismatch finding', () => {
   test('flags claude- prefixed profile with cliType=codex', async () => {
     isolateHome();
     const cfg = new ConfigManager();
-    fs.mkdirSync(path.join(cfg.getConfigDir(), '..', '.claude-or-pole'), { recursive: true });
+    fs.mkdirSync(path.join(cfg.getConfigDir(), '..', '.claude-or-pole', 'projects'), { recursive: true });
     fs.writeFileSync(
       path.join(cfg.getConfigDir(), '..', '.claude-or-pole', 'settings.json'),
       JSON.stringify({ env: {} }),
@@ -103,6 +104,8 @@ describe('auditProfiles cli_type_mismatch finding', () => {
     expect(mismatches[0].profile).toBe('claude-or-pole');
     expect((mismatches[0].evidence as any).expectedCliType).toBe('claude');
     expect((mismatches[0].evidence as any).observedCliType).toBe('codex');
+    expect((mismatches[0].evidence as any).configLine.line).toEqual(expect.any(Number));
+    expect((mismatches[0].evidence as any).diskShape.detectedCliTypes).toEqual(['claude']);
     expect(mismatches[0].suggestion).toBe('fix_cli_type');
     expect(report.summary.cli_type_mismatch).toBe(1);
   });
@@ -128,10 +131,62 @@ describe('auditProfiles cli_type_mismatch finding', () => {
   });
 });
 
+describe('validateCliTypeConfig', () => {
+  test('reports cliType mismatch with config line number and Claude disk evidence', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    fs.mkdirSync(path.join(cfg.getConfigDir(), '..', '.claude-or-pole', 'projects'), { recursive: true });
+    cfg.writeProfiles([{
+      name: 'claude-or-pole',
+      commandName: 'claude-or-pole',
+      cliType: 'codex',
+      provider: 'openrouter',
+      createdAt: '2026-05-17T00:00:00Z',
+    } as any]);
+
+    const findings = validateCliTypeConfig(cfg);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].profile).toBe('claude-or-pole');
+    expect(findings[0].suggestion).toBe('fix_cli_type');
+    expect(findings[0].evidence.configLine.configFile).toBe(cfg.getConfigFile());
+    expect(findings[0].evidence.configLine.line).toEqual(expect.any(Number));
+    expect(findings[0].evidence.diskShape.detectedCliTypes).toEqual(['claude']);
+
+    const rawLines = fs.readFileSync(cfg.getConfigFile(), 'utf-8').split(/\r?\n/);
+    expect(rawLines[(findings[0].evidence.configLine.line ?? 0) - 1]).toContain('"cliType"');
+  });
+
+  test('refuses auto-correction when disk shape disagrees with both prefix and config', () => {
+    isolateHome();
+    const cfg = new ConfigManager();
+    fs.mkdirSync(path.join(cfg.getConfigDir(), '..', '.claude-weird', 'user-history'), { recursive: true });
+    cfg.writeProfiles([{
+      name: 'claude-weird',
+      commandName: 'claude-weird',
+      cliType: 'codex',
+      provider: 'openrouter',
+      createdAt: '2026-05-17T00:00:00Z',
+    } as any]);
+
+    const findings = validateCliTypeConfig(cfg);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('critical');
+    expect(findings[0].suggestion).toBeNull();
+    expect(findings[0].detail).toContain('LOUD WARNING');
+    expect(findings[0].evidence.diskShape.detectedCliTypes).toEqual(['kimi']);
+
+    const result = fixCliTypeOnProfile(cfg, 'claude-weird');
+    expect(result.changed).toBe(false);
+    expect(result.reason).toBe('disk-conflict');
+    expect(cfg.getProfiles()[0].cliType).toBe('codex');
+  });
+});
+
 describe('fixCliTypeOnProfile', () => {
   test('rewrites cliType, leaves other fields alone, writes a backup', () => {
     isolateHome();
     const cfg = new ConfigManager();
+    fs.mkdirSync(path.join(cfg.getConfigDir(), '..', '.claude-or-pole', 'projects'), { recursive: true });
     cfg.writeProfiles([{
       name: 'claude-or-pole',
       commandName: 'claude-or-pole',
