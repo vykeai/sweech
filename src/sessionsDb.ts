@@ -90,15 +90,18 @@ export interface StartupReconcileResult {
   crashRecoverable: number;
 }
 
-export interface SessionSummaryUpdate {
-  summaryOne: string;
-  summaryBullets: string[] | string;
-  summaryProvider: string;
+export interface UpdateDashboardSessionSummaryInput {
+  summaryOne?: string | null;
+  summaryBullets?: string[] | string | null;
+  summaryProvider?: string | null;
   summaryModel?: string | null;
   summaryCostUsd?: number | null;
-  summaryAt?: number;
-  summaryMsgAt: number;
+  summaryAt?: number | null;
+  summaryMsgAt?: number | null;
+  messageCount?: number | null;
 }
+
+export type SessionSummaryUpdate = UpdateDashboardSessionSummaryInput;
 
 interface SessionRow {
   id: string;
@@ -303,18 +306,24 @@ export class SessionsDb {
     return this.byId(id);
   }
 
-  updateSummary(id: string, input: SessionSummaryUpdate): DashboardSession | null {
+  updateSummary(id: string, input: UpdateDashboardSessionSummaryInput): DashboardSession | null {
     const current = this.byId(id);
     if (!current) return null;
-    if (!input.summaryOne.trim()) throw new Error('summaryOne is required');
-    if (!input.summaryProvider.trim()) throw new Error('summaryProvider is required');
-    if (!Number.isFinite(input.summaryMsgAt) || input.summaryMsgAt < 0) {
+    const summaryOne = input.summaryOne ?? current.summaryOne;
+    const summaryProvider = input.summaryProvider ?? current.summaryProvider;
+    if (!summaryOne?.trim()) throw new Error('summaryOne is required');
+    if (!summaryProvider?.trim()) throw new Error('summaryProvider is required');
+    const summaryBullets = Array.isArray(input.summaryBullets)
+      ? JSON.stringify(input.summaryBullets)
+      : input.summaryBullets ?? current.summaryBullets;
+    const summaryMsgAt = input.summaryMsgAt ?? input.messageCount ?? current.messageCount;
+    const messageCount = input.messageCount ?? current.messageCount;
+    if (!Number.isFinite(summaryMsgAt) || summaryMsgAt < 0) {
       throw new Error('summaryMsgAt must be a non-negative number');
     }
-    const summaryAt = input.summaryAt ?? Date.now();
-    const bullets = Array.isArray(input.summaryBullets)
-      ? JSON.stringify(input.summaryBullets)
-      : input.summaryBullets;
+    if (!Number.isFinite(messageCount) || messageCount < 0) {
+      throw new Error('messageCount must be a non-negative number');
+    }
 
     this.db.prepare(`
       UPDATE sessions
@@ -325,17 +334,22 @@ export class SessionsDb {
           summary_cost_usd = ?,
           summary_at = ?,
           summary_msg_at = ?,
-          summary_stale = CASE WHEN message_count > ? THEN 1 ELSE 0 END
+          summary_stale = CASE WHEN ? > ? THEN 1 ELSE 0 END,
+          message_count = MAX(message_count, ?),
+          msg_count_last = MAX(msg_count_last, ?)
       WHERE id = ?
     `).run(
-      input.summaryOne,
-      bullets,
-      input.summaryProvider,
-      input.summaryModel ?? null,
-      input.summaryCostUsd ?? null,
-      summaryAt,
-      Math.floor(input.summaryMsgAt),
-      Math.floor(input.summaryMsgAt),
+      summaryOne,
+      summaryBullets,
+      summaryProvider,
+      input.summaryModel ?? current.summaryModel,
+      input.summaryCostUsd ?? current.summaryCostUsd,
+      input.summaryAt ?? Date.now(),
+      Math.floor(summaryMsgAt),
+      Math.floor(messageCount),
+      Math.floor(summaryMsgAt),
+      messageCount,
+      messageCount,
       id,
     );
 

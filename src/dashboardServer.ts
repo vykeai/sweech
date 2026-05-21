@@ -94,6 +94,10 @@ export function isLocalDashboardClient(remoteAddress: string | undefined): boole
     || remoteAddress === '::ffff:127.0.0.1';
 }
 
+export function hasActiveDashboardClients(): boolean {
+  return activeSseClients > 0;
+}
+
 export function createDashboardRequestHandler(options: DashboardRequestHandlerOptions = {}) {
   const assetsDir = options.assetsDir ?? defaultDashboardAssetsDir();
   const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;

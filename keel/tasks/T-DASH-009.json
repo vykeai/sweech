@@ -3,13 +3,13 @@
   "title": "Federation /fed/dashboard/* routes",
   "wave": "wave-7",
   "space": "space-cli",
-  "status": "todo",
+  "status": "active",
   "priority": "high",
   "platform": null,
-  "assignee": null,
+  "assignee": "codex",
   "description": "GET /fed/dashboard/state (HMAC), POST /fed/dashboard/restore (HMAC), POST /fed/dashboard/summary (HMAC). mDNS TXT extended with caps=dashboard-v1. Discovery poll every 10s while dashboard open.",
   "createdAt": "2026-05-18T11:00:00Z",
-  "updatedAt": "2026-05-18T11:00:00Z",
+  "updatedAt": "2026-05-21T00:30:36.000Z",
   "product": null,
   "lane": null,
   "stage": null,
@@ -18,7 +18,12 @@
   "attachments": [],
   "validationOverrides": null,
   "executionMode": null,
-  "statusHistory": [],
+  "statusHistory": [
+    {
+      "status": "active",
+      "ts": "2026-05-21T00:30:36.000Z"
+    }
+  ],
   "dependsOn": [
     "T-DASH-005"
   ],
