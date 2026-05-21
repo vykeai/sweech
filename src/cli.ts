@@ -163,6 +163,7 @@ Common workflows:
   sweech failover [--cli C]    rotate off rate-limited workspaces
   sweech cost [--budget N]     USD/M-token per profile + 7d spend
   sweech pin {show,set,unset}  project-aware routing via .sweech.json
+  sweech validate-config       validate profile config consistency
   sweech profile audit         flag dormant + identity cross-bleed profiles
   sweech accounts list         every account in the vault (OAuth + API key + Local)
   sweech assign <ws> [email]   mount a vault account into a workspace
@@ -2524,6 +2525,156 @@ profileCmd
       } else {
         console.error(chalk.red('Error:'), msg);
       }
+      process.exit(1);
+    }
+  });
+
+// ── sweech validate-config ─────────────────────────────────────────────────
+// T-079: focused config consistency surface. This intentionally does not run
+// dormancy / credential checks from `profile audit`; it validates only the
+// profile config contract and can safely serve scripts that want line-numbered
+// config findings.
+program
+  .command('validate-config')
+  .description('Validate profile config consistency')
+  .option('--json', 'Output machine-readable JSON')
+  .option('--fix-cli-type', 'Correct safe name/cliType mismatches after dry-run confirmation')
+  .option('--yes', 'When combined with --fix-cli-type, accept the dry-run plan without an interactive prompt')
+  .action(async (opts: { json?: boolean; fixCliType?: boolean; yes?: boolean }) => {
+    try {
+      const { validateCliTypeConfig, fixCliTypeOnProfile } = await import('./profileAudit');
+      const cfg = new ConfigManager();
+      const findings = validateCliTypeConfig(cfg);
+      const fixable = findings.filter(f => f.suggestion === 'fix_cli_type');
+      const blocked = findings.filter(f => f.suggestion !== 'fix_cli_type');
+
+      const formatLine = (f: typeof findings[number]): string => {
+        const line = f.evidence.configLine.line === null ? '?' : String(f.evidence.configLine.line);
+        return `${f.evidence.configLine.configFile}:${line}`;
+      };
+
+      const renderFindings = (out: NodeJS.WriteStream): void => {
+        out.write(chalk.bold(`\n  sweech validate-config · ${cfg.getProfiles().length} profile(s) scanned\n\n`));
+        if (findings.length === 0) {
+          out.write(chalk.green('  ✓ No config issues found.\n\n'));
+          return;
+        }
+        for (const f of findings) {
+          const icon = f.severity === 'critical' ? chalk.red('●') : chalk.yellow('●');
+          const suggestion = f.suggestion ? chalk.dim(` [suggest: ${f.suggestion}]`) : chalk.red(' [manual review required]');
+          out.write(`  ${icon} ${chalk.bold(f.profile)} ${chalk.dim(`(${f.cliType}/${f.provider})`)}  ${chalk.cyan('cli_type_mismatch')}${suggestion}\n`);
+          out.write(chalk.dim(`      ${formatLine(f)}\n`));
+          out.write(chalk.dim(`      ${f.detail}\n`));
+          const markers = f.evidence.diskShape.markers
+            .filter(m => m.exists)
+            .map(m => `${m.cliType}:${m.path}`)
+            .join(', ');
+          out.write(chalk.dim(`      disk evidence: ${markers || 'none'}\n`));
+        }
+        out.write('\n');
+      };
+
+      if (!opts.fixCliType) {
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({
+            ok: findings.length === 0,
+            scanned: cfg.getProfiles().length,
+            findings,
+          }, null, 2) + '\n');
+        } else {
+          renderFindings(process.stdout);
+        }
+        process.exit(findings.length > 0 ? 1 : 0);
+      }
+
+      if (opts.json) {
+        process.stderr.write(chalk.bold('\n  Dry run: sweech validate-config --fix-cli-type\n\n'));
+        renderFindings(process.stderr);
+      } else {
+        console.log(chalk.bold('\n  Dry run: sweech validate-config --fix-cli-type'));
+        renderFindings(process.stdout);
+      }
+
+      if (blocked.length > 0) {
+        console.error(chalk.red('  LOUD WARNING: one or more profiles have on-disk evidence that cannot be reconciled with name/config. No changes made.\n'));
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({
+            ok: false,
+            error: 'manual review required',
+            fixed: [],
+            skipped: blocked.map(f => ({ profile: f.profile, reason: 'manual-review-required' })),
+            findings,
+          }, null, 2) + '\n');
+        }
+        process.exit(1);
+      }
+
+      if (fixable.length === 0) {
+        if (opts.json) {
+          process.stdout.write(JSON.stringify({ ok: true, fixed: [], skipped: [], findings }, null, 2) + '\n');
+        } else {
+          console.log(chalk.green('  ✓ No cliType mismatches to fix.\n'));
+        }
+        return;
+      }
+
+      const isTTY = process.stdout.isTTY && process.stdin.isTTY;
+      if (!opts.yes) {
+        if (!isTTY) {
+          console.error(chalk.red('  Refusing to mutate config in non-interactive shell without --yes. Dry run only; no changes made.\n'));
+          if (opts.json) {
+            process.stdout.write(JSON.stringify({
+              ok: false,
+              error: 'non-tty requires --yes',
+              fixed: [],
+              skipped: fixable.map(f => ({ profile: f.profile, reason: 'not-confirmed' })),
+              findings,
+            }, null, 2) + '\n');
+          }
+          process.exit(1);
+        }
+        const inquirer = (await import('inquirer')).default;
+        const { confirmFix } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'confirmFix',
+            message: `Apply ${fixable.length} cliType correction(s) listed in the dry run?`,
+            default: false,
+          },
+        ]);
+        if (!confirmFix) {
+          console.log(chalk.yellow('\n  Aborted. No changes made.\n'));
+          return;
+        }
+      }
+
+      const fixed: Array<{ profile: string; from?: string; to?: string }> = [];
+      const skipped: Array<{ profile: string; reason: string }> = [];
+      for (const f of fixable) {
+        const result = fixCliTypeOnProfile(cfg, f.profile);
+        if (result.changed) fixed.push({ profile: f.profile, from: result.from, to: result.to });
+        else skipped.push({ profile: f.profile, reason: result.reason ?? 'unknown' });
+      }
+
+      if (opts.json) {
+        process.stdout.write(JSON.stringify({ ok: skipped.length === 0, fixed, skipped, findings }, null, 2) + '\n');
+      } else {
+        for (const f of fixed) {
+          console.log(chalk.green(`  ✓ ${f.profile}: cliType '${f.from}' → '${f.to}'`));
+        }
+        for (const s of skipped) {
+          console.log(chalk.gray(`  · ${s.profile}: ${s.reason}`));
+        }
+        if (fixed.length > 0) {
+          console.log(chalk.dim(`\n  Backup written to ${cfg.getBackupsDir()}/config.json.cli_type_fix.*.bak`));
+          console.log(chalk.dim(`  Run ${chalk.bold('sweech update-wrappers')} to regenerate wrapper scripts.`));
+        }
+        console.log();
+      }
+      process.exit(skipped.length > 0 ? 1 : 0);
+    } catch (error: unknown) {
+      const msg = scrubSecrets(error instanceof Error ? error.message : String(error));
+      console.error(chalk.red('Error:'), msg);
       process.exit(1);
     }
   });
